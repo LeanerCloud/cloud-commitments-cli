@@ -23,6 +23,8 @@ var (
 	actualPurchase bool
 	csvOutput      string
 	allServices    bool
+	paymentOption  string
+	termYears      int
 )
 
 func main() {
@@ -47,6 +49,8 @@ func init() {
 	rootCmd.Flags().Float64VarP(&coverage, "coverage", "c", 80.0, "Percentage of recommendations to purchase (0-100)")
 	rootCmd.Flags().BoolVar(&actualPurchase, "purchase", false, "Actually purchase RIs instead of just printing the data")
 	rootCmd.Flags().StringVarP(&csvOutput, "output", "o", "", "Output CSV file path (if not specified, auto-generates filename)")
+	rootCmd.Flags().StringVarP(&paymentOption, "payment", "p", "no-upfront", "Payment option (all-upfront, partial-upfront, no-upfront)")
+	rootCmd.Flags().IntVarP(&termYears, "term", "t", 3, "Term in years (1 or 3)")
 }
 
 // parseServices converts service names to ServiceType
@@ -90,13 +94,23 @@ func createPurchaseClient(service common.ServiceType, cfg aws.Config) common.Pur
 	switch service {
 	case common.ServiceRDS:
 		// Use the existing RDS purchase client with adapter
+		// TODO: Switch to the new RDS client when ready
 		rdsClient := purchase.NewClient(cfg)
 		return &rdsPurchaseClientAdapter{client: rdsClient}
 	case common.ServiceElastiCache:
 		return elasticache.NewPurchaseClient(cfg)
 	case common.ServiceEC2:
 		return ec2.NewPurchaseClient(cfg)
-	// TODO: Add other service clients when implemented
+	case common.ServiceOpenSearch, common.ServiceElasticsearch:
+		// OpenSearch client handles both service names
+		// Note: Requires adding opensearch SDK dependency
+		return nil // TODO: return opensearch.NewPurchaseClient(cfg)
+	case common.ServiceRedshift:
+		// Note: Requires adding redshift SDK dependency
+		return nil // TODO: return redshift.NewPurchaseClient(cfg)
+	case common.ServiceMemoryDB:
+		// Note: Requires adding memorydb SDK dependency
+		return nil // TODO: return memorydb.NewPurchaseClient(cfg)
 	default:
 		return nil
 	}

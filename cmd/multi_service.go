@@ -14,6 +14,7 @@ import (
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
 // ServiceProcessingStats holds statistics for each service
@@ -32,6 +33,21 @@ func runToolMultiService(ctx context.Context) {
 	// Validate coverage percentage
 	if coverage < 0 || coverage > 100 {
 		log.Fatalf("Coverage percentage must be between 0 and 100, got: %.2f", coverage)
+	}
+
+	// Validate payment option
+	validPaymentOptions := map[string]bool{
+		"all-upfront":     true,
+		"partial-upfront": true,
+		"no-upfront":      true,
+	}
+	if !validPaymentOptions[paymentOption] {
+		log.Fatalf("Invalid payment option: %s. Must be one of: all-upfront, partial-upfront, no-upfront", paymentOption)
+	}
+
+	// Validate term
+	if termYears != 1 && termYears != 3 {
+		log.Fatalf("Invalid term: %d years. Must be 1 or 3", termYears)
 	}
 
 	// Determine services to process
@@ -58,6 +74,7 @@ func runToolMultiService(ctx context.Context) {
 	}
 
 	fmt.Printf("📊 Processing services: %s\n", formatServices(servicesToProcess))
+	fmt.Printf("💳 Payment option: %s, Term: %d year(s)\n", paymentOption, termYears)
 
 	// Load AWS configuration
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
@@ -113,24 +130,26 @@ func runToolMultiService(ctx context.Context) {
 
 
 func processService(ctx context.Context, cfg aws.Config, recClient *common.RecommendationsClient, service common.ServiceType, isDryRun bool) ([]common.Recommendation, []common.PurchaseResult) {
-	// Auto-discover regions if none specified
+	// Determine regions to process
 	regionsToProcess := regions
 	if len(regionsToProcess) == 0 {
-		fmt.Printf("🔍 Auto-discovering regions for %s...\n", getServiceDisplayName(service))
-		discoveredRegions, err := discoverRegionsForService(ctx, recClient, service)
+		// Default to all AWS regions
+		fmt.Printf("🌍 Processing all AWS regions for %s...\n", getServiceDisplayName(service))
+		allRegions, err := getAllAWSRegions(ctx, cfg)
 		if err != nil {
-			log.Printf("❌ Failed to discover regions: %v", err)
-			return nil, nil
+			log.Printf("❌ Failed to get AWS regions: %v", err)
+			// Fall back to auto-discovery
+			fmt.Printf("🔍 Falling back to auto-discovery...\n")
+			discoveredRegions, err := discoverRegionsForService(ctx, recClient, service)
+			if err != nil {
+				log.Printf("❌ Failed to discover regions: %v", err)
+				return nil, nil
+			}
+			regionsToProcess = discoveredRegions
+		} else {
+			regionsToProcess = allRegions
 		}
-
-		if len(discoveredRegions) == 0 {
-			fmt.Printf("ℹ️  No regions with %s RI recommendations found\n", getServiceDisplayName(service))
-			return nil, nil
-		}
-
-		regionsToProcess = discoveredRegions
-		fmt.Printf("✅ Found %d region(s) with recommendations: %s\n",
-			len(regionsToProcess), strings.Join(regionsToProcess, ", "))
+		fmt.Printf("📍 Processing %d region(s)\n", len(regionsToProcess))
 	}
 
 	serviceRecs := make([]common.Recommendation, 0)
@@ -143,8 +162,8 @@ func processService(ctx context.Context, cfg aws.Config, recClient *common.Recom
 		params := common.RecommendationParams{
 			Service:            service,
 			Region:             region,
-			PaymentOption:      "partial-upfront",
-			TermInYears:        3,
+			PaymentOption:      paymentOption,
+			TermInYears:        termYears,
 			LookbackPeriodDays: 7,
 		}
 
@@ -174,6 +193,7 @@ func processService(ctx context.Context, cfg aws.Config, recClient *common.Recom
 
 		if purchaseClient == nil {
 			fmt.Printf("  ⚠️  Purchase client not yet implemented for %s\n", getServiceDisplayName(service))
+			fmt.Printf("     (Skipping purchase phase for this service)\n")
 			continue
 		}
 
@@ -240,6 +260,30 @@ func getServiceDisplayName(service common.ServiceType) string {
 	default:
 		return string(service)
 	}
+}
+
+// getAllAWSRegions retrieves all available AWS regions
+func getAllAWSRegions(ctx context.Context, cfg aws.Config) ([]string, error) {
+	// Create EC2 client to get regions
+	ec2Client := ec2.NewFromConfig(cfg)
+
+	// Describe all regions
+	result, err := ec2Client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{
+		AllRegions: aws.Bool(false), // Only get opted-in regions
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe regions: %w", err)
+	}
+
+	regions := make([]string, 0, len(result.Regions))
+	for _, region := range result.Regions {
+		if region.RegionName != nil {
+			regions = append(regions, *region.RegionName)
+		}
+	}
+
+	sort.Strings(regions)
+	return regions, nil
 }
 
 func discoverRegionsForService(ctx context.Context, client *common.RecommendationsClient, service common.ServiceType) ([]string, error) {
@@ -339,14 +383,25 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			Description:    r.Config.Description,
 		}
 
-		// Add service-specific details if RDS
-		if r.Config.Service == common.ServiceRDS {
+		// Add service-specific details
+		switch r.Config.Service {
+		case common.ServiceRDS:
 			if rdsDetails, ok := r.Config.ServiceDetails.(*common.RDSDetails); ok {
 				oldRec.Engine = rdsDetails.Engine
 				oldRec.AZConfig = rdsDetails.AZConfig
 			}
-		} else {
-			// For non-RDS services, use generic description
+		case common.ServiceElastiCache:
+			if ecDetails, ok := r.Config.ServiceDetails.(*common.ElastiCacheDetails); ok {
+				oldRec.Engine = ecDetails.Engine
+				oldRec.AZConfig = "N/A"
+			}
+		case common.ServiceEC2:
+			if ec2Details, ok := r.Config.ServiceDetails.(*common.EC2Details); ok {
+				oldRec.Engine = ec2Details.Platform
+				oldRec.AZConfig = ec2Details.Tenancy
+			}
+		default:
+			// For other services, use generic description
 			oldRec.Engine = string(r.Config.Service)
 			oldRec.AZConfig = "N/A"
 		}
