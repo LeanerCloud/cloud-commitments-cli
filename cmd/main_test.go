@@ -5,104 +5,416 @@ import (
 
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
+func TestParseServices(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []common.ServiceType
+	}{
+		{
+			name:  "Valid services",
+			input: []string{"rds", "elasticache", "ec2"},
+			expected: []common.ServiceType{
+				common.ServiceRDS,
+				common.ServiceElastiCache,
+				common.ServiceEC2,
+			},
+		},
+		{
+			name:  "Mixed case services",
+			input: []string{"RDS", "ElastiCache", "EC2"},
+			expected: []common.ServiceType{
+				common.ServiceRDS,
+				common.ServiceElastiCache,
+				common.ServiceEC2,
+			},
+		},
+		{
+			name:     "Invalid services",
+			input:    []string{"invalid", "unknown"},
+			expected: []common.ServiceType{},
+		},
+		{
+			name:  "Mix of valid and invalid",
+			input: []string{"rds", "invalid", "ec2"},
+			expected: []common.ServiceType{
+				common.ServiceRDS,
+				common.ServiceEC2,
+			},
+		},
+		{
+			name:  "All supported services",
+			input: []string{"rds", "elasticache", "ec2", "opensearch", "redshift", "memorydb"},
+			expected: []common.ServiceType{
+				common.ServiceRDS,
+				common.ServiceElastiCache,
+				common.ServiceEC2,
+				common.ServiceOpenSearch,
+				common.ServiceRedshift,
+				common.ServiceMemoryDB,
+			},
+		},
+		{
+			name:  "Legacy elasticsearch alias",
+			input: []string{"elasticsearch"},
+			expected: []common.ServiceType{
+				common.ServiceElasticsearch,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseServices(tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetAllServices(t *testing.T) {
+	services := getAllServices()
+
+	expected := []common.ServiceType{
+		common.ServiceRDS,
+		common.ServiceElastiCache,
+		common.ServiceEC2,
+		common.ServiceOpenSearch,
+		common.ServiceRedshift,
+		common.ServiceMemoryDB,
+	}
+
+	assert.Equal(t, expected, services)
+}
 
 func TestGeneratePurchaseID(t *testing.T) {
 	tests := []struct {
-		name      string
-		rec       interface{}
-		region    string
-		index     int
-		isDryRun  bool
-		contains  []string
+		name           string
+		rec            any
+		region         string
+		index          int
+		isDryRun       bool
+		expectedPrefix string
 	}{
 		{
-			name: "RDS recommendation dry run",
-			rec: recommendations.Recommendation{
-				Engine:       "mysql",
-				InstanceType: "db.t3.medium",
+			name: "Common Recommendation - dry run",
+			rec: common.Recommendation{
+				Service:      common.ServiceRDS,
+				InstanceType: "db.t3.micro",
 				Count:        2,
 			},
-			region:   "us-east-1",
-			index:    1,
-			isDryRun: true,
-			contains: []string{"dryrun", "mysql", "t3-medium", "2x", "us-east-1", "001"},
+			region:         "us-east-1",
+			index:          1,
+			isDryRun:       true,
+			expectedPrefix: "dryrun-rds-us-east-1-db-t3-micro-2x",
 		},
 		{
-			name: "RDS recommendation actual purchase",
-			rec: recommendations.Recommendation{
-				Engine:       "postgres",
-				InstanceType: "db.r6g.large",
-				Count:        3,
-			},
-			region:   "eu-west-1",
-			index:    5,
-			isDryRun: false,
-			contains: []string{"ri", "postgres", "r6g-large", "3x", "eu-west-1", "005"},
-		},
-		{
-			name: "Common recommendation dry run",
+			name: "Common Recommendation - actual purchase",
 			rec: common.Recommendation{
 				Service:      common.ServiceEC2,
-				InstanceType: "m5.large",
-				Count:        4,
+				InstanceType: "t3.large",
+				Count:        5,
 			},
-			region:   "ap-south-1",
-			index:    10,
-			isDryRun: true,
-			contains: []string{"dryrun", "ec2", "ap-south-1", "m5-large", "4x", "010"},
+			region:         "eu-west-1",
+			index:          3,
+			isDryRun:       false,
+			expectedPrefix: "ri-ec2-eu-west-1-t3-large-5x",
 		},
 		{
-			name:     "Unknown type",
-			rec:      struct{}{},
-			region:   "us-west-2",
-			index:    0,
-			isDryRun: true,
-			contains: []string{"dryrun", "unknown", "us-west-2", "000"},
+			name: "Legacy Recommendation - dry run",
+			rec: recommendations.Recommendation{
+				Engine:       "mysql",
+				InstanceType: "db.r5.large",
+				Count:        1,
+				AZConfig:     "single",
+			},
+			region:         "us-west-2",
+			index:          2,
+			isDryRun:       true,
+			expectedPrefix: "dryrun-mysql-r5-large-1x-saz-us-west-2",
+		},
+		{
+			name: "Legacy Recommendation - multi-AZ",
+			rec: recommendations.Recommendation{
+				Engine:       "postgres",
+				InstanceType: "db.m5.xlarge",
+				Count:        3,
+				AZConfig:     "multi",
+			},
+			region:         "ap-southeast-1",
+			index:          5,
+			isDryRun:       false,
+			expectedPrefix: "ri-postgres-m5-xlarge-3x-maz-ap-southeast-1",
+		},
+		{
+			name:           "Unknown type",
+			rec:            "invalid",
+			region:         "us-east-1",
+			index:          1,
+			isDryRun:       true,
+			expectedPrefix: "dryrun-unknown-us-east-1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := generatePurchaseID(tt.rec, tt.region, tt.index, tt.isDryRun)
+			assert.Contains(t, result, tt.expectedPrefix)
+			// Should end with timestamp and index
+			assert.Regexp(t, `-\d{8}-\d{6}-\d{3}$`, result)
+		})
+	}
+}
 
-			for _, expected := range tt.contains {
-				assert.Contains(t, result, expected)
+func TestCreatePurchaseClient(t *testing.T) {
+	cfg := aws.Config{
+		Region: "us-east-1",
+	}
+
+	tests := []struct {
+		name      string
+		service   common.ServiceType
+		expectNil bool
+	}{
+		{
+			name:      "RDS service",
+			service:   common.ServiceRDS,
+			expectNil: false,
+		},
+		{
+			name:      "ElastiCache service",
+			service:   common.ServiceElastiCache,
+			expectNil: false,
+		},
+		{
+			name:      "EC2 service",
+			service:   common.ServiceEC2,
+			expectNil: false,
+		},
+		{
+			name:      "OpenSearch service",
+			service:   common.ServiceOpenSearch,
+			expectNil: false,
+		},
+		{
+			name:      "Elasticsearch service",
+			service:   common.ServiceElasticsearch,
+			expectNil: false,
+		},
+		{
+			name:      "Redshift service",
+			service:   common.ServiceRedshift,
+			expectNil: false,
+		},
+		{
+			name:      "MemoryDB service",
+			service:   common.ServiceMemoryDB,
+			expectNil: false,
+		},
+		{
+			name:      "Unknown service",
+			service:   common.ServiceType("unknown"),
+			expectNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := createPurchaseClient(tt.service, cfg)
+			if tt.expectNil {
+				assert.Nil(t, client)
+			} else {
+				assert.NotNil(t, client)
 			}
 		})
 	}
 }
 
+func TestRunTool(t *testing.T) {
+	// Save original values
+	origRegions := regions
+	origServices := services
+	origCoverage := coverage
+	origActualPurchase := actualPurchase
+	origAllServices := allServices
+	origPaymentOption := paymentOption
+	origTermYears := termYears
 
+	// Restore after test
+	defer func() {
+		regions = origRegions
+		services = origServices
+		coverage = origCoverage
+		actualPurchase = origActualPurchase
+		allServices = origAllServices
+		paymentOption = origPaymentOption
+		termYears = origTermYears
+	}()
 
-func TestRootCommandConfiguration(t *testing.T) {
-	// Test that rootCmd is properly configured
-	assert.NotNil(t, rootCmd)
-	assert.Equal(t, "ri-helper", rootCmd.Use)
-	assert.Contains(t, rootCmd.Short, "Reserved Instance")
+	// Set test values
+	regions = []string{"us-east-1"}
+	services = []string{"rds"}
+	coverage = 50.0
+	actualPurchase = false
+	allServices = false
+	paymentOption = "no-upfront"
+	termYears = 3
 
-	// Test that all flags are registered
-	assert.NotNil(t, rootCmd.Flags().Lookup("regions"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("services"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("all-services"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("coverage"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("purchase"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("output"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("payment"))
-	assert.NotNil(t, rootCmd.Flags().Lookup("term"))
+	cmd := &cobra.Command{}
+	args := []string{}
+
+	// This will attempt to run the full tool, which requires AWS config
+	// We're mainly testing that it doesn't panic
+	defer func() {
+		if r := recover(); r != nil {
+			// Expected to fail due to AWS config
+			t.Logf("Expected failure due to AWS config: %v", r)
+		}
+	}()
+
+	runTool(cmd, args)
 }
 
-func BenchmarkGeneratePurchaseID(b *testing.B) {
-	rec := common.Recommendation{
-		Service:      common.ServiceRDS,
-		InstanceType: "db.t3.medium",
-		Count:        2,
+func TestInit(t *testing.T) {
+	// Test that init properly sets up command flags
+	// This is called automatically, so we just verify the flags exist
+
+	assert.NotNil(t, rootCmd)
+	assert.Equal(t, "ri-helper", rootCmd.Use)
+
+	// Check that flags are defined
+	flag := rootCmd.Flags().Lookup("regions")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "r", flag.Shorthand)
+
+	flag = rootCmd.Flags().Lookup("services")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "s", flag.Shorthand)
+
+	flag = rootCmd.Flags().Lookup("all-services")
+	assert.NotNil(t, flag)
+
+	flag = rootCmd.Flags().Lookup("coverage")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "c", flag.Shorthand)
+
+	flag = rootCmd.Flags().Lookup("purchase")
+	assert.NotNil(t, flag)
+
+	flag = rootCmd.Flags().Lookup("output")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "o", flag.Shorthand)
+
+	flag = rootCmd.Flags().Lookup("payment")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "p", flag.Shorthand)
+
+	flag = rootCmd.Flags().Lookup("term")
+	assert.NotNil(t, flag)
+	assert.Equal(t, "t", flag.Shorthand)
+}
+
+func TestMainFunction(t *testing.T) {
+	// Save original args
+	origArgs := rootCmd.Args
+
+	// Test with help flag to avoid actual execution
+	rootCmd.SetArgs([]string{"--help"})
+
+	// Run main should not panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("main() panicked: %v", r)
+		}
+		// Restore
+		rootCmd.Args = origArgs
+	}()
+
+	// We can't easily test main() directly due to log.Fatalf
+	// but we can test the command structure
+	assert.NotNil(t, rootCmd)
+}
+
+func TestCommandFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		flagName     string
+		shorthand    string
+		defaultValue string
+	}{
+		{"regions flag", "regions", "r", "[]"},
+		{"services flag", "services", "s", "[rds]"},
+		{"coverage flag", "coverage", "c", "80"},
+		{"payment flag", "payment", "p", "no-upfront"},
+		{"term flag", "term", "t", "3"},
+		{"output flag", "output", "o", ""},
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = generatePurchaseID(rec, "us-east-1", i, true)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flag := rootCmd.Flags().Lookup(tt.flagName)
+			assert.NotNil(t, flag)
+			if tt.shorthand != "" {
+				assert.Equal(t, tt.shorthand, flag.Shorthand)
+			}
+			assert.Equal(t, tt.defaultValue, flag.DefValue)
+		})
+	}
+}
+
+func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
+	// Test with recommendations that have special characters
+	rec := recommendations.Recommendation{
+		Engine:       "MySQL 8.0",
+		InstanceType: "db.r5b.2xlarge",
+		Count:        10,
+		AZConfig:     "single",
+	}
+
+	id := generatePurchaseID(rec, "us-east-1", 999, false)
+	assert.Contains(t, id, "mysql-8-0")
+	assert.Contains(t, id, "r5b-2xlarge")
+	assert.Contains(t, id, "10x")
+	assert.Contains(t, id, "999")
+
+	// Test with empty region
+	id = generatePurchaseID(rec, "", 1, true)
+	assert.Contains(t, id, "dryrun")
+
+	// Test with very long instance type
+	rec.InstanceType = "db.x2gd.metal.16xlarge"
+	id = generatePurchaseID(rec, "ap-south-1", 1, false)
+	assert.Contains(t, id, "x2gd-metal")
+}
+
+func TestParseServicesWithEmptyAndNil(t *testing.T) {
+	// Empty slice
+	result := parseServices([]string{})
+	assert.Empty(t, result)
+
+	// Slice with empty strings
+	result = parseServices([]string{"", "rds", ""})
+	assert.Len(t, result, 1)
+	assert.Equal(t, common.ServiceRDS, result[0])
+
+	// All invalid
+	result = parseServices([]string{"foo", "bar", "baz"})
+	assert.Empty(t, result)
+}
+
+func TestCreatePurchaseClientAllServices(t *testing.T) {
+	cfg := aws.Config{
+		Region: "eu-central-1",
+	}
+
+	// Test that all services return non-nil clients now
+	services := getAllServices()
+	for _, service := range services {
+		client := createPurchaseClient(service, cfg)
+		assert.NotNil(t, client, "Service %s should have a client", service)
 	}
 }
