@@ -10,8 +10,11 @@ import (
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/ec2"
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/elasticache"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/purchase"
+	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/memorydb"
+	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/opensearch"
+	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/rds"
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
+	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/redshift"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/spf13/cobra"
 )
@@ -93,129 +96,26 @@ func getAllServices() []common.ServiceType {
 func createPurchaseClient(service common.ServiceType, cfg aws.Config) common.PurchaseClient {
 	switch service {
 	case common.ServiceRDS:
-		// Use the existing RDS purchase client with adapter
-		// TODO: Switch to the new RDS client when ready
-		rdsClient := purchase.NewClient(cfg)
-		return &rdsPurchaseClientAdapter{client: rdsClient}
+		return rds.NewPurchaseClient(cfg)
 	case common.ServiceElastiCache:
 		return elasticache.NewPurchaseClient(cfg)
 	case common.ServiceEC2:
 		return ec2.NewPurchaseClient(cfg)
 	case common.ServiceOpenSearch, common.ServiceElasticsearch:
 		// OpenSearch client handles both service names
-		// Note: Requires adding opensearch SDK dependency
-		return nil // TODO: return opensearch.NewPurchaseClient(cfg)
+		return opensearch.NewPurchaseClient(cfg)
 	case common.ServiceRedshift:
-		// Note: Requires adding redshift SDK dependency
-		return nil // TODO: return redshift.NewPurchaseClient(cfg)
+		return redshift.NewPurchaseClient(cfg)
 	case common.ServiceMemoryDB:
-		// Note: Requires adding memorydb SDK dependency
-		return nil // TODO: return memorydb.NewPurchaseClient(cfg)
+		return memorydb.NewPurchaseClient(cfg)
 	default:
 		return nil
 	}
 }
 
-// rdsPurchaseClientAdapter adapts the existing RDS client to the new interface
-type rdsPurchaseClientAdapter struct {
-	client *purchase.Client
-}
-
-func (a *rdsPurchaseClientAdapter) PurchaseRI(ctx context.Context, rec common.Recommendation) common.PurchaseResult {
-	// Convert common.Recommendation to recommendations.Recommendation
-	oldRec := recommendations.Recommendation{
-		Region:         rec.Region,
-		InstanceType:   rec.InstanceType,
-		PaymentOption:  rec.PaymentOption,
-		Term:           int32(rec.Term),
-		Count:          rec.Count,
-		EstimatedCost:  rec.EstimatedCost,
-		SavingsPercent: rec.SavingsPercent,
-		Timestamp:      rec.Timestamp,
-		Description:    rec.Description,
-	}
-
-	// Extract RDS-specific details
-	if rdsDetails, ok := rec.ServiceDetails.(*common.RDSDetails); ok {
-		oldRec.Engine = rdsDetails.Engine
-		oldRec.AZConfig = rdsDetails.AZConfig
-	}
-
-	// Call the original method
-	oldResult := a.client.PurchaseRI(ctx, oldRec)
-
-	// Convert back to common.PurchaseResult
-	return common.PurchaseResult{
-		Config:        rec,
-		Success:       oldResult.Success,
-		PurchaseID:    oldResult.PurchaseID,
-		ReservationID: oldResult.ReservationID,
-		Message:       oldResult.Message,
-		ActualCost:    oldResult.ActualCost,
-		Timestamp:     oldResult.Timestamp,
-	}
-}
-
-func (a *rdsPurchaseClientAdapter) ValidateOffering(ctx context.Context, rec common.Recommendation) error {
-	oldRec := recommendations.Recommendation{
-		Region:         rec.Region,
-		InstanceType:   rec.InstanceType,
-		PaymentOption:  rec.PaymentOption,
-		Term:           int32(rec.Term),
-		Count:          rec.Count,
-	}
-	if rdsDetails, ok := rec.ServiceDetails.(*common.RDSDetails); ok {
-		oldRec.Engine = rdsDetails.Engine
-		oldRec.AZConfig = rdsDetails.AZConfig
-	}
-	return a.client.ValidateOffering(ctx, oldRec)
-}
-
-func (a *rdsPurchaseClientAdapter) GetOfferingDetails(ctx context.Context, rec common.Recommendation) (*common.OfferingDetails, error) {
-	oldRec := recommendations.Recommendation{
-		Region:         rec.Region,
-		InstanceType:   rec.InstanceType,
-		PaymentOption:  rec.PaymentOption,
-		Term:           int32(rec.Term),
-	}
-	if rdsDetails, ok := rec.ServiceDetails.(*common.RDSDetails); ok {
-		oldRec.Engine = rdsDetails.Engine
-		oldRec.AZConfig = rdsDetails.AZConfig
-	}
-
-	oldDetails, err := a.client.GetOfferingDetails(ctx, oldRec)
-	if err != nil {
-		return nil, err
-	}
-
-	return &common.OfferingDetails{
-		OfferingID:    oldDetails.OfferingID,
-		InstanceType:  oldDetails.InstanceType,
-		Engine:        oldDetails.Engine,
-		Duration:      oldDetails.Duration,
-		PaymentOption: oldDetails.PaymentOption,
-		MultiAZ:       oldDetails.MultiAZ,
-		FixedPrice:    oldDetails.FixedPrice,
-		UsagePrice:    oldDetails.UsagePrice,
-		CurrencyCode:  oldDetails.CurrencyCode,
-		OfferingType:  oldDetails.OfferingType,
-	}, nil
-}
-
-func (a *rdsPurchaseClientAdapter) BatchPurchase(ctx context.Context, recommendations []common.Recommendation, delayBetweenPurchases time.Duration) []common.PurchaseResult {
-	results := make([]common.PurchaseResult, 0, len(recommendations))
-	for i, rec := range recommendations {
-		result := a.PurchaseRI(ctx, rec)
-		results = append(results, result)
-		if i < len(recommendations)-1 && delayBetweenPurchases > 0 {
-			time.Sleep(delayBetweenPurchases)
-		}
-	}
-	return results
-}
 
 // generatePurchaseID creates a descriptive purchase ID
-func generatePurchaseID(rec interface{}, region string, index int, isDryRun bool) string {
+func generatePurchaseID(rec any, region string, index int, isDryRun bool) string {
 	timestamp := time.Now().Format("20060102-150405")
 	prefix := "ri"
 	if isDryRun {

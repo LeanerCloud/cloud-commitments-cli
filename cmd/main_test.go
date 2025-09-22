@@ -1,14 +1,10 @@
 package main
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/purchase"
 	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -80,94 +76,6 @@ func TestGeneratePurchaseID(t *testing.T) {
 }
 
 
-func TestRDSPurchaseClientAdapter_ValidateOffering(t *testing.T) {
-	cfg := aws.Config{Region: "us-east-1"}
-	client := purchase.NewClient(cfg)
-	adapter := &rdsPurchaseClientAdapter{client: client}
-
-	ctx := context.Background()
-	rec := common.Recommendation{
-		Region:        "us-east-1",
-		InstanceType:  "db.t3.micro",
-		PaymentOption: "no-upfront",
-		Term:          12,
-		ServiceDetails: &common.RDSDetails{
-			Engine:   "mysql",
-			AZConfig: "single-az",
-		},
-	}
-
-	// This will error because we're not connected to AWS, but it validates the adapter
-	err := adapter.ValidateOffering(ctx, rec)
-	assert.Error(t, err) // Expected to fail without AWS connection
-}
-
-func TestRDSPurchaseClientAdapter_GetOfferingDetails(t *testing.T) {
-	cfg := aws.Config{Region: "us-east-1"}
-	client := purchase.NewClient(cfg)
-	adapter := &rdsPurchaseClientAdapter{client: client}
-
-	ctx := context.Background()
-	rec := common.Recommendation{
-		Region:        "us-east-1",
-		InstanceType:  "db.t3.micro",
-		PaymentOption: "partial-upfront",
-		Term:          36,
-		ServiceDetails: &common.RDSDetails{
-			Engine:   "postgres",
-			AZConfig: "multi-az",
-		},
-	}
-
-	// This will error because we're not connected to AWS, but it validates the adapter
-	_, err := adapter.GetOfferingDetails(ctx, rec)
-	assert.Error(t, err) // Expected to fail without AWS connection
-}
-
-func TestRDSPurchaseClientAdapter_BatchPurchase(t *testing.T) {
-	cfg := aws.Config{Region: "us-east-1"}
-	client := purchase.NewClient(cfg)
-	adapter := &rdsPurchaseClientAdapter{client: client}
-
-	ctx := context.Background()
-	recommendations := []common.Recommendation{
-		{
-			Region:        "us-east-1",
-			InstanceType:  "db.t3.small",
-			PaymentOption: "no-upfront",
-			Term:          12,
-			Count:         1,
-			ServiceDetails: &common.RDSDetails{
-				Engine:   "mysql",
-				AZConfig: "single-az",
-			},
-		},
-		{
-			Region:        "us-east-1",
-			InstanceType:  "db.r6g.large",
-			PaymentOption: "all-upfront",
-			Term:          36,
-			Count:         2,
-			ServiceDetails: &common.RDSDetails{
-				Engine:   "postgres",
-				AZConfig: "multi-az",
-			},
-		},
-	}
-
-	// Test with no delay
-	results := adapter.BatchPurchase(ctx, recommendations, 0)
-	assert.Len(t, results, 2)
-
-	// Test with delay
-	start := time.Now()
-	results = adapter.BatchPurchase(ctx, recommendations, 100*time.Millisecond)
-	duration := time.Since(start)
-
-	assert.Len(t, results, 2)
-	// Should have at least one delay between purchases
-	assert.GreaterOrEqual(t, duration, 100*time.Millisecond)
-}
 
 func TestRootCommandConfiguration(t *testing.T) {
 	// Test that rootCmd is properly configured
