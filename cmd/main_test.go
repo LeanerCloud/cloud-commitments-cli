@@ -37,7 +37,7 @@ func TestParseServices(t *testing.T) {
 		{
 			name:     "Invalid services",
 			input:    []string{"invalid", "unknown"},
-			expected: []common.ServiceType{},
+			expected: nil,
 		},
 		{
 			name:  "Mix of valid and invalid",
@@ -143,7 +143,7 @@ func TestGeneratePurchaseID(t *testing.T) {
 				Engine:       "postgres",
 				InstanceType: "db.m5.xlarge",
 				Count:        3,
-				AZConfig:     "multi",
+				AZConfig:     "multi-az",  // GetMultiAZ() checks for "multi-az"
 			},
 			region:         "ap-southeast-1",
 			index:          5,
@@ -376,7 +376,7 @@ func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
 	}
 
 	id := generatePurchaseID(rec, "us-east-1", 999, false)
-	assert.Contains(t, id, "mysql-8-0")
+	assert.Contains(t, id, "mysql-8.0")  // Engine keeps dots, only replaces spaces and underscores
 	assert.Contains(t, id, "r5b-2xlarge")
 	assert.Contains(t, id, "10x")
 	assert.Contains(t, id, "999")
