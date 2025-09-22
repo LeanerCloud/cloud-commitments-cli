@@ -310,20 +310,7 @@ func discoverRegionsForService(ctx context.Context, client *common.Recommendatio
 
 
 func applyCommonCoverage(recs []common.Recommendation, coverage float64) []common.Recommendation {
-	if coverage >= 100.0 {
-		return recs
-	}
-
-	filtered := make([]common.Recommendation, 0, len(recs))
-	for _, rec := range recs {
-		adjustedCount := int32(float64(rec.Count) * (coverage / 100.0))
-		if adjustedCount > 0 {
-			rec.Count = adjustedCount
-			filtered = append(filtered, rec)
-		}
-	}
-
-	return filtered
+	return common.ApplyCoverage(recs, coverage)
 }
 
 
