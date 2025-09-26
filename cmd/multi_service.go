@@ -419,15 +419,18 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 	for _, r := range results {
 		// Create a generic old-style recommendation
 		oldRec := recommendations.Recommendation{
-			Region:         r.Config.Region,
-			InstanceType:   r.Config.InstanceType,
-			PaymentOption:  r.Config.PaymentOption,
-			Term:           int32(r.Config.Term), // Fix type conversion
-			Count:          r.Config.Count,
-			EstimatedCost:  r.Config.EstimatedCost,
-			SavingsPercent: r.Config.SavingsPercent,
-			Timestamp:      r.Config.Timestamp,
-			Description:    r.Config.Description,
+			Region:                   r.Config.Region,
+			InstanceType:             r.Config.InstanceType,
+			PaymentOption:            r.Config.PaymentOption,
+			Term:                     int32(r.Config.Term), // Fix type conversion
+			Count:                    r.Config.Count,
+			EstimatedCost:            r.Config.EstimatedCost,
+			SavingsPercent:           r.Config.SavingsPercent,
+			Timestamp:                r.Config.Timestamp,
+			Description:              r.Config.Description,
+			UpfrontCost:              r.Config.UpfrontCost,
+			RecurringMonthlyCost:     r.Config.RecurringMonthlyCost,
+			EstimatedMonthlyOnDemand: r.Config.EstimatedMonthlyOnDemand,
 		}
 
 		// Add service-specific details
