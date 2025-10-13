@@ -22,24 +22,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	regions              []string
-	services             []string
-	coverage             float64
-	actualPurchase       bool
-	csvOutput            string
-	allServices          bool
-	paymentOption        string
-	termYears            int
-	includeRegions       []string
-	excludeRegions       []string
-	includeInstanceTypes []string
-	excludeInstanceTypes []string
-	includeEngines       []string
-	excludeEngines       []string
-	skipConfirmation     bool
-	maxInstances         int32
-)
+// Config holds all configuration for the RI helper tool
+type Config struct {
+	Regions              []string
+	Services             []string
+	Coverage             float64
+	ActualPurchase       bool
+	CSVOutput            string
+	CSVInput             string
+	AllServices          bool
+	PaymentOption        string
+	TermYears            int
+	IncludeRegions       []string
+	ExcludeRegions       []string
+	IncludeInstanceTypes []string
+	ExcludeInstanceTypes []string
+	IncludeEngines       []string
+	ExcludeEngines       []string
+	IncludeAccounts      []string
+	ExcludeAccounts      []string
+	SkipConfirmation     bool
+	MaxInstances         int32
+	OverrideCount        int32
+}
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
@@ -57,39 +62,53 @@ purchases them based on specified coverage percentage. Supports multiple regions
 }
 
 func init() {
-	rootCmd.Flags().StringSliceVarP(&regions, "regions", "r", []string{}, "AWS regions (comma-separated or multiple flags). If empty, auto-discovers regions from recommendations")
-	rootCmd.Flags().StringSliceVarP(&services, "services", "s", []string{"rds"}, "Services to process (rds, elasticache, ec2, opensearch, redshift, memorydb)")
-	rootCmd.Flags().BoolVar(&allServices, "all-services", false, "Process all supported services")
-	rootCmd.Flags().Float64VarP(&coverage, "coverage", "c", 80.0, "Percentage of recommendations to purchase (0-100)")
-	rootCmd.Flags().BoolVar(&actualPurchase, "purchase", false, "Actually purchase RIs instead of just printing the data")
-	rootCmd.Flags().StringVarP(&csvOutput, "output", "o", "", "Output CSV file path (if not specified, auto-generates filename)")
-	rootCmd.Flags().StringVarP(&paymentOption, "payment", "p", "no-upfront", "Payment option (all-upfront, partial-upfront, no-upfront)")
-	rootCmd.Flags().IntVarP(&termYears, "term", "t", 3, "Term in years (1 or 3)")
+	// Note: We still bind to package-level variables here for cobra's flag system
+	// These will be copied into a ToolConfig in runTool
+	rootCmd.Flags().StringSliceVarP(&toolCfg.Regions, "regions", "r", []string{}, "AWS regions (comma-separated or multiple flags). If empty, auto-discovers regions from recommendations")
+	rootCmd.Flags().StringSliceVarP(&toolCfg.Services, "services", "s", []string{"rds"}, "Services to process (rds, elasticache, ec2, opensearch, redshift, memorydb)")
+	rootCmd.Flags().BoolVar(&toolCfg.AllServices, "all-services", false, "Process all supported services")
+	rootCmd.Flags().Float64VarP(&toolCfg.Coverage, "coverage", "c", 80.0, "Percentage of recommendations to purchase (0-100)")
+	rootCmd.Flags().BoolVar(&toolCfg.ActualPurchase, "purchase", false, "Actually purchase RIs instead of just printing the data")
+	rootCmd.Flags().StringVarP(&toolCfg.CSVOutput, "output", "o", "", "Output CSV file path (if not specified, auto-generates filename)")
+	rootCmd.Flags().StringVarP(&toolCfg.CSVInput, "input-csv", "i", "", "Input CSV file with recommendations to purchase")
+	rootCmd.Flags().StringVarP(&toolCfg.PaymentOption, "payment", "p", "no-upfront", "Payment option (all-upfront, partial-upfront, no-upfront)")
+	rootCmd.Flags().IntVarP(&toolCfg.TermYears, "term", "t", 3, "Term in years (1 or 3)")
 
 	// Filter flags
-	rootCmd.Flags().StringSliceVar(&includeRegions, "include-regions", []string{}, "Only include recommendations for these regions (comma-separated)")
-	rootCmd.Flags().StringSliceVar(&excludeRegions, "exclude-regions", []string{}, "Exclude recommendations for these regions (comma-separated)")
-	rootCmd.Flags().StringSliceVar(&includeInstanceTypes, "include-instance-types", []string{}, "Only include these instance types (comma-separated, e.g., 'db.t3.micro,cache.t3.small')")
-	rootCmd.Flags().StringSliceVar(&excludeInstanceTypes, "exclude-instance-types", []string{}, "Exclude these instance types (comma-separated)")
-	rootCmd.Flags().StringSliceVar(&includeEngines, "include-engines", []string{}, "Only include these engines (comma-separated, e.g., 'redis,mysql,postgresql')")
-	rootCmd.Flags().StringSliceVar(&excludeEngines, "exclude-engines", []string{}, "Exclude these engines (comma-separated)")
-	rootCmd.Flags().BoolVar(&skipConfirmation, "yes", false, "Skip confirmation prompt for purchases (use with caution)")
-	rootCmd.Flags().Int32Var(&maxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeRegions, "include-regions", []string{}, "Only include recommendations for these regions (comma-separated)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeRegions, "exclude-regions", []string{}, "Exclude recommendations for these regions (comma-separated)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeInstanceTypes, "include-instance-types", []string{}, "Only include these instance types (comma-separated, e.g., 'db.t3.micro,cache.t3.small')")
+	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeInstanceTypes, "exclude-instance-types", []string{}, "Exclude these instance types (comma-separated)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeEngines, "include-engines", []string{}, "Only include these engines (comma-separated, e.g., 'redis,mysql,postgresql')")
+	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeEngines, "exclude-engines", []string{}, "Exclude these engines (comma-separated)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeAccounts, "include-accounts", []string{}, "Only include recommendations for these account names (comma-separated)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeAccounts, "exclude-accounts", []string{}, "Exclude recommendations for these account names (comma-separated)")
+	rootCmd.Flags().BoolVar(&toolCfg.SkipConfirmation, "yes", false, "Skip confirmation prompt for purchases (use with caution)")
+	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
+	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
 
 	// Add validation for flags
 	rootCmd.PreRunE = validateFlags
 }
 
+// Package-level Config that cobra flags bind to
+var toolCfg = Config{}
+
 // validateFlags performs validation on command line flags before execution
 func validateFlags(cmd *cobra.Command, args []string) error {
 	// Validate coverage percentage
-	if coverage < 0 || coverage > 100 {
-		return fmt.Errorf("coverage percentage must be between 0 and 100, got: %.2f", coverage)
+	if toolCfg.Coverage < 0 || toolCfg.Coverage > 100 {
+		return fmt.Errorf("coverage percentage must be between 0 and 100, got: %.2f", toolCfg.Coverage)
 	}
 
 	// Validate max instances
-	if maxInstances < 0 {
-		return fmt.Errorf("max-instances must be 0 (no limit) or a positive number, got: %d", maxInstances)
+	if toolCfg.MaxInstances < 0 {
+		return fmt.Errorf("max-instances must be 0 (no limit) or a positive number, got: %d", toolCfg.MaxInstances)
+	}
+
+	// Validate override count
+	if toolCfg.OverrideCount < 0 {
+		return fmt.Errorf("override-count must be 0 (disabled) or a positive number, got: %d", toolCfg.OverrideCount)
 	}
 
 	// Validate payment option
@@ -98,19 +117,19 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		"partial-upfront": true,
 		"no-upfront":      true,
 	}
-	if !validPaymentOptions[paymentOption] {
-		return fmt.Errorf("invalid payment option: %s. Must be one of: all-upfront, partial-upfront, no-upfront", paymentOption)
+	if !validPaymentOptions[toolCfg.PaymentOption] {
+		return fmt.Errorf("invalid payment option: %s. Must be one of: all-upfront, partial-upfront, no-upfront", toolCfg.PaymentOption)
 	}
 
 	// Validate term years
-	if termYears != 1 && termYears != 3 {
-		return fmt.Errorf("invalid term: %d years. Must be 1 or 3", termYears)
+	if toolCfg.TermYears != 1 && toolCfg.TermYears != 3 {
+		return fmt.Errorf("invalid term: %d years. Must be 1 or 3", toolCfg.TermYears)
 	}
 
 	// Validate CSV output path if provided
-	if csvOutput != "" {
+	if toolCfg.CSVOutput != "" {
 		// Check if the directory exists
-		dir := filepath.Dir(csvOutput)
+		dir := filepath.Dir(toolCfg.CSVOutput)
 		if dir != "." && dir != "" {
 			if _, err := os.Stat(dir); os.IsNotExist(err) {
 				return fmt.Errorf("output directory does not exist: %s", dir)
@@ -118,11 +137,21 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Validate CSV input path if provided
+	if toolCfg.CSVInput != "" {
+		if _, err := os.Stat(toolCfg.CSVInput); os.IsNotExist(err) {
+			return fmt.Errorf("input CSV file does not exist: %s", toolCfg.CSVInput)
+		}
+		if !strings.HasSuffix(strings.ToLower(toolCfg.CSVInput), ".csv") {
+			return fmt.Errorf("input file must have .csv extension: %s", toolCfg.CSVInput)
+		}
+	}
+
 	// Validate filter flags
-	if len(includeRegions) > 0 && len(excludeRegions) > 0 {
+	if len(toolCfg.IncludeRegions) > 0 && len(toolCfg.ExcludeRegions) > 0 {
 		// Check for conflicts
-		for _, inc := range includeRegions {
-			for _, exc := range excludeRegions {
+		for _, inc := range toolCfg.IncludeRegions {
+			for _, exc := range toolCfg.ExcludeRegions {
 				if inc == exc {
 					return fmt.Errorf("region '%s' cannot be both included and excluded", inc)
 				}
@@ -130,10 +159,10 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(includeInstanceTypes) > 0 && len(excludeInstanceTypes) > 0 {
+	if len(toolCfg.IncludeInstanceTypes) > 0 && len(toolCfg.ExcludeInstanceTypes) > 0 {
 		// Check for conflicts
-		for _, inc := range includeInstanceTypes {
-			for _, exc := range excludeInstanceTypes {
+		for _, inc := range toolCfg.IncludeInstanceTypes {
+			for _, exc := range toolCfg.ExcludeInstanceTypes {
 				if inc == exc {
 					return fmt.Errorf("instance type '%s' cannot be both included and excluded", inc)
 				}
@@ -141,15 +170,23 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(includeEngines) > 0 && len(excludeEngines) > 0 {
+	if len(toolCfg.IncludeEngines) > 0 && len(toolCfg.ExcludeEngines) > 0 {
 		// Check for conflicts
-		for _, inc := range includeEngines {
-			for _, exc := range excludeEngines {
+		for _, inc := range toolCfg.IncludeEngines {
+			for _, exc := range toolCfg.ExcludeEngines {
 				if inc == exc {
 					return fmt.Errorf("engine '%s' cannot be both included and excluded", inc)
 				}
 			}
 		}
+	}
+
+	// Validate instance types
+	if err := common.ValidateInstanceTypes(toolCfg.IncludeInstanceTypes); err != nil {
+		return fmt.Errorf("invalid include-instance-types: %w", err)
+	}
+	if err := common.ValidateInstanceTypes(toolCfg.ExcludeInstanceTypes); err != nil {
+		return fmt.Errorf("invalid exclude-instance-types: %w", err)
 	}
 
 	return nil
@@ -214,7 +251,7 @@ func createPurchaseClient(service common.ServiceType, cfg aws.Config) common.Pur
 
 
 // generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness
-func generatePurchaseID(rec any, region string, _ int, isDryRun bool) string {
+func generatePurchaseID(rec any, region string, _ int, isDryRun bool, coverage float64) string {
 	// Generate a short UUID suffix (first 8 characters) for uniqueness
 	uuidSuffix := uuid.New().String()[:8]
 	timestamp := time.Now().Format("20060102-150405")
@@ -240,8 +277,16 @@ func generatePurchaseID(rec any, region string, _ int, isDryRun bool) string {
 			deployment = "maz"
 		}
 
-		return fmt.Sprintf("%s-%s-%s-%dx-%s-%s-%s-%s",
-			prefix, cleanEngine, instanceSize, r.Count, deployment, region, timestamp, uuidSuffix)
+		// Add account name if available
+		accountName := sanitizeAccountName(r.AccountName)
+		coveragePct := fmt.Sprintf("%.0fpct", coverage)
+		if accountName != "" {
+			return fmt.Sprintf("%s-%s-%s-%s-%dx-%s-%s-%s-%s-%s",
+				prefix, accountName, cleanEngine, instanceSize, r.Count, coveragePct, deployment, region, timestamp, uuidSuffix)
+		}
+
+		return fmt.Sprintf("%s-%s-%s-%dx-%s-%s-%s-%s-%s",
+			prefix, cleanEngine, instanceSize, r.Count, coveragePct, deployment, region, timestamp, uuidSuffix)
 
 	case common.Recommendation:
 		service := strings.ToLower(r.GetServiceName())
@@ -264,22 +309,66 @@ func generatePurchaseID(rec any, region string, _ int, isDryRun bool) string {
 			engine = strings.ReplaceAll(engine, "/", "-")
 		}
 
-		if engine != "" {
-			return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s",
-				prefix, service, engine, region, instanceType, r.Count, timestamp, uuidSuffix)
+		// Add account name if available
+		accountName := sanitizeAccountName(r.AccountName)
+		coveragePct := fmt.Sprintf("%.0fpct", coverage)
+		if accountName != "" {
+			if engine != "" {
+				return fmt.Sprintf("%s-%s-%s-%s-%s-%s-%dx-%s-%s-%s",
+					prefix, accountName, service, engine, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
+			}
+			return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s-%s",
+				prefix, accountName, service, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
 		}
-		return fmt.Sprintf("%s-%s-%s-%s-%dx-%s-%s",
-			prefix, service, region, instanceType, r.Count, timestamp, uuidSuffix)
+
+		// Fallback without account name
+		if engine != "" {
+			return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s-%s",
+				prefix, service, engine, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
+		}
+		return fmt.Sprintf("%s-%s-%s-%s-%dx-%s-%s-%s",
+			prefix, service, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
 
 	default:
 		return fmt.Sprintf("%s-unknown-%s-%s-%s", prefix, region, timestamp, uuidSuffix)
 	}
 }
 
+// sanitizeAccountName converts account name to a filesystem/ID-safe format
+func sanitizeAccountName(accountName string) string {
+	if accountName == "" {
+		return ""
+	}
+
+	// Convert to lowercase
+	clean := strings.ToLower(accountName)
+
+	// Replace spaces and special chars with hyphens
+	clean = strings.ReplaceAll(clean, " ", "-")
+	clean = strings.ReplaceAll(clean, "_", "-")
+	clean = strings.ReplaceAll(clean, ".", "-")
+
+	// Remove any characters that aren't alphanumeric or hyphens
+	result := ""
+	for _, r := range clean {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			result += string(r)
+		}
+	}
+
+	// Remove leading/trailing hyphens and collapse multiple hyphens
+	result = strings.Trim(result, "-")
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+
+	return result
+}
+
 func runTool(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
 
 	// Always use the multi-service implementation
-	runToolMultiService(ctx)
+	runToolMultiService(ctx, toolCfg)
 }
 
