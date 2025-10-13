@@ -91,23 +91,42 @@ func (m *MockPurchaseClient) GetExistingReservedInstances(ctx context.Context) (
 	return args.Get(0).([]common.ExistingRI), args.Error(1)
 }
 
+func (m *MockPurchaseClient) GetValidInstanceTypes(ctx context.Context) ([]string, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
+}
+
+// ==================== Test Helpers ====================
+
+// globalVarsSnapshot captures the toolCfg for tests
+type globalVarsSnapshot struct {
+	cfg Config
+}
+
+// saveGlobalVars captures current toolCfg state
+func saveGlobalVars() *globalVarsSnapshot {
+	return &globalVarsSnapshot{
+		cfg: toolCfg,
+	}
+}
+
+// restoreGlobalVars restores toolCfg state from snapshot
+func (s *globalVarsSnapshot) restore() {
+	toolCfg = s.cfg
+}
+
 // ==================== Core Function Tests ====================
 
 func TestRunToolMultiService_Validation(t *testing.T) {
 	// Save original values
-	originalCoverage := coverage
-	originalPaymentOption := paymentOption
-	originalTermYears := termYears
-	originalAllServices := allServices
-	originalServices := services
+	origCfg := toolCfg
 
 	// Restore after test
 	defer func() {
-		coverage = originalCoverage
-		paymentOption = originalPaymentOption
-		termYears = originalTermYears
-		allServices = originalAllServices
-		services = originalServices
+		toolCfg = origCfg
 	}()
 
 	tests := []struct {
@@ -118,69 +137,69 @@ func TestRunToolMultiService_Validation(t *testing.T) {
 		{
 			name: "Valid input - all services",
 			setupVars: func() {
-				coverage = 75.0
-				paymentOption = "partial-upfront"
-				termYears = 3
-				allServices = true
-				services = nil
+				toolCfg.Coverage = 75.0
+				toolCfg.PaymentOption = "partial-upfront"
+				toolCfg.TermYears = 3
+				toolCfg.AllServices = true
+				toolCfg.Services = nil
 			},
 			expectPanic: false,
 		},
 		{
 			name: "Valid input - specific services",
 			setupVars: func() {
-				coverage = 50.0
-				paymentOption = "no-upfront"
-				termYears = 1
-				allServices = false
-				services = []string{"rds", "ec2"}
+				toolCfg.Coverage = 50.0
+				toolCfg.PaymentOption = "no-upfront"
+				toolCfg.TermYears = 1
+				toolCfg.AllServices = false
+				toolCfg.Services = []string{"rds", "ec2"}
 			},
 			expectPanic: false,
 		},
 		{
 			name: "Invalid coverage - too high",
 			setupVars: func() {
-				coverage = 150.0
-				paymentOption = "partial-upfront"
-				termYears = 3
+				toolCfg.Coverage = 150.0
+				toolCfg.PaymentOption = "partial-upfront"
+				toolCfg.TermYears = 3
 			},
 			expectPanic: true,
 		},
 		{
 			name: "Invalid coverage - negative",
 			setupVars: func() {
-				coverage = -10.0
-				paymentOption = "all-upfront"
-				termYears = 1
+				toolCfg.Coverage = -10.0
+				toolCfg.PaymentOption = "all-upfront"
+				toolCfg.TermYears = 1
 			},
 			expectPanic: true,
 		},
 		{
 			name: "Invalid payment option",
 			setupVars: func() {
-				coverage = 80.0
-				paymentOption = "invalid-payment"
-				termYears = 3
+				toolCfg.Coverage = 80.0
+				toolCfg.PaymentOption = "invalid-payment"
+				toolCfg.TermYears = 3
 			},
 			expectPanic: true,
 		},
 		{
 			name: "Invalid term years",
 			setupVars: func() {
-				coverage = 80.0
-				paymentOption = "partial-upfront"
-				termYears = 2 // Only 1 or 3 allowed
+				toolCfg.Coverage = 80.0
+				toolCfg.PaymentOption = "partial-upfront"
+				toolCfg.TermYears = 2 // Only 1 or 3 allowed
 			},
 			expectPanic: true,
 		},
 		{
 			name: "Default to RDS when no services",
 			setupVars: func() {
-				coverage = 80.0
-				paymentOption = "all-upfront"
-				termYears = 3
-				allServices = false
-				services = nil
+				toolCfg.Coverage = 80.0
+				toolCfg.PaymentOption = "all-upfront"
+				toolCfg.TermYears = 3
+				toolCfg.AllServices = false
+				toolCfg.Services = nil
 			},
 			expectPanic: false,
 		},
@@ -197,10 +216,10 @@ func TestRunToolMultiService_Validation(t *testing.T) {
 			}
 
 			// For non-panic tests, verify the setup is valid
-			assert.GreaterOrEqual(t, coverage, 0.0)
-			assert.LessOrEqual(t, coverage, 100.0)
-			assert.Contains(t, []string{"all-upfront", "partial-upfront", "no-upfront"}, paymentOption)
-			assert.Contains(t, []int{1, 3}, termYears)
+			assert.GreaterOrEqual(t, toolCfg.Coverage, 0.0)
+			assert.LessOrEqual(t, toolCfg.Coverage, 100.0)
+			assert.Contains(t, []string{"all-upfront", "partial-upfront", "no-upfront"}, toolCfg.PaymentOption)
+			assert.Contains(t, []int{1, 3}, toolCfg.TermYears)
 		})
 	}
 }
@@ -844,21 +863,15 @@ func TestApplyCommonCoverage(t *testing.T) {
 
 func TestProcessService_EdgeCases(t *testing.T) {
 	// Save original values
-	originalRegions := regions
-	originalCoverage := coverage
-	originalPaymentOption := paymentOption
-	originalTermYears := termYears
+	origCfg := toolCfg
 
 	defer func() {
-		regions = originalRegions
-		coverage = originalCoverage
-		paymentOption = originalPaymentOption
-		termYears = originalTermYears
+		toolCfg = origCfg
 	}()
 
 	// Set test values
-	paymentOption = "partial-upfront"
-	termYears = 3
+	toolCfg.PaymentOption = "partial-upfront"
+	toolCfg.TermYears = 3
 
 	tests := []struct {
 		name       string
@@ -870,8 +883,8 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		{
 			name: "With explicit regions",
 			setupFunc: func() {
-				regions = []string{"us-east-1"}
-				coverage = 100.0
+				toolCfg.Regions = []string{"us-east-1"}
+				toolCfg.Coverage = 100.0
 			},
 			service:    common.ServiceRDS,
 			isDryRun:   true,
@@ -880,8 +893,8 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		{
 			name: "No regions triggers discovery",
 			setupFunc: func() {
-				regions = []string{}
-				coverage = 75.0
+				toolCfg.Regions = []string{}
+				toolCfg.Coverage = 75.0
 			},
 			service:    common.ServiceEC2,
 			isDryRun:   false,
@@ -890,8 +903,8 @@ func TestProcessService_EdgeCases(t *testing.T) {
 		{
 			name: "Zero coverage",
 			setupFunc: func() {
-				regions = []string{"us-west-2"}
-				coverage = 0.0
+				toolCfg.Regions = []string{"us-west-2"}
+				toolCfg.Coverage = 0.0
 			},
 			service:    common.ServiceElastiCache,
 			isDryRun:   true,
@@ -907,7 +920,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 			// For unit tests, we'd need to inject a mock client
 			// This test structure shows the approach
 
-			// Would call: processService(ctx, cfg, recClient, tt.service, tt.isDryRun)
+			// Would call: processService(ctx, awsCfg, recClient, accountCache, tt.service, tt.isDryRun, toolCfg)
 			// And verify results
 
 			assert.Equal(t, tt.service, tt.service) // Placeholder assertion
@@ -918,17 +931,13 @@ func TestProcessService_EdgeCases(t *testing.T) {
 // TestProcessServiceWithMocks tests the processService function using mocks
 func TestProcessServiceWithMocks(t *testing.T) {
 	ctx := context.Background()
-	cfg := aws.Config{Region: "us-east-1"}
+	awsCfg := aws.Config{Region: "us-east-1"}
 
 	// Save original values
-	originalCoverage := coverage
-	originalPaymentOption := paymentOption
-	originalTermYears := termYears
+	origCfg := toolCfg
 
 	defer func() {
-		coverage = originalCoverage
-		paymentOption = originalPaymentOption
-		termYears = originalTermYears
+		toolCfg = origCfg
 	}()
 
 	tests := []struct {
@@ -949,9 +958,9 @@ func TestProcessServiceWithMocks(t *testing.T) {
 				{InstanceType: "db.t3.small", Count: 1, Region: "us-east-1", EstimatedCost: 200},
 			},
 			setupFunc: func() {
-				coverage = 100.0
-				paymentOption = "partial-upfront"
-				termYears = 3
+				toolCfg.Coverage = 100.0
+				toolCfg.PaymentOption = "partial-upfront"
+				toolCfg.TermYears = 3
 			},
 		},
 		{
@@ -961,9 +970,9 @@ func TestProcessServiceWithMocks(t *testing.T) {
 			testRegions: []string{"us-west-2"},
 			mockRecs:    []common.Recommendation{},
 			setupFunc: func() {
-				coverage = 80.0
-				paymentOption = "no-upfront"
-				termYears = 1
+				toolCfg.Coverage = 80.0
+				toolCfg.PaymentOption = "no-upfront"
+				toolCfg.TermYears = 1
 			},
 		},
 		{
@@ -976,9 +985,9 @@ func TestProcessServiceWithMocks(t *testing.T) {
 				{InstanceType: "cache.t3.small", Count: 2, Region: "eu-west-1", EstimatedCost: 250},
 			},
 			setupFunc: func() {
-				coverage = 50.0
-				paymentOption = "all-upfront"
-				termYears = 3
+				toolCfg.Coverage = 50.0
+				toolCfg.PaymentOption = "all-upfront"
+				toolCfg.TermYears = 3
 			},
 		},
 	}
@@ -995,24 +1004,23 @@ func TestProcessServiceWithMocks(t *testing.T) {
 				params := common.RecommendationParams{
 					Service:            tt.service,
 					Region:             region,
-					PaymentOption:      paymentOption,
-					TermInYears:        termYears,
+					PaymentOption:      toolCfg.PaymentOption,
+					TermInYears:        toolCfg.TermYears,
 					LookbackPeriodDays: 7,
 				}
 				mockClient.On("GetRecommendations", ctx, params).Return(tt.mockRecs, nil)
 			}
 
-			// Save and restore global regions
-			originalRegions := regions
-			regions = tt.testRegions
-			defer func() { regions = originalRegions }()
+			// Set regions in toolCfg for this test
+			toolCfg.Regions = tt.testRegions
 
 			// Now we can use the actual function directly since it accepts an interface
-			recs, results := processService(ctx, cfg, mockClient, tt.service, tt.isDryRun)
+			accountCache := common.NewAccountAliasCache(awsCfg)
+			recs, results := processService(ctx, awsCfg, mockClient, accountCache, tt.service, tt.isDryRun, toolCfg)
 
 			if len(tt.mockRecs) > 0 {
 				// Should have recommendations based on coverage
-				expectedCount := int(float64(len(tt.mockRecs)) * coverage / 100.0)
+				expectedCount := int(float64(len(tt.mockRecs)) * toolCfg.Coverage / 100.0)
 				if expectedCount > 0 {
 					assert.NotEmpty(t, recs)
 					assert.LessOrEqual(t, len(recs), len(tt.mockRecs))
@@ -1094,7 +1102,8 @@ func TestGeneratePurchaseID_EdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id := generatePurchaseID(tt.rec, tt.region, tt.index, tt.isDryRun)
+			testCoverage := 80.0
+			id := generatePurchaseID(tt.rec, tt.region, tt.index, tt.isDryRun, testCoverage)
 
 			// Verify ID contains expected parts
 			if tt.isDryRun {
@@ -1238,7 +1247,7 @@ func TestServiceProcessingOrder(t *testing.T) {
 	}
 }
 
-func TestGenerateCSVFilename(t *testing.T) {
+func TestGenerateCSVFilenameHelper(t *testing.T) {
 	tests := []struct {
 		name        string
 		service     common.ServiceType
@@ -1267,7 +1276,7 @@ func TestGenerateCSVFilename(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filename := generateCSVFilename(tt.service, tt.payment, tt.term, tt.dryRun)
+			filename := generateCSVFilenameTestHelper(tt.service, tt.payment, tt.term, tt.dryRun)
 
 			for _, part := range tt.expectParts {
 				assert.Contains(t, filename, part)
@@ -1373,7 +1382,7 @@ func applyCoverageToRecommendations(recs []common.Recommendation, coverage float
 	return recs[:targetCount]
 }
 
-func generateCSVFilename(service common.ServiceType, payment string, term int, dryRun bool) string {
+func generateCSVFilenameTestHelper(service common.ServiceType, payment string, term int, dryRun bool) string {
 	mode := "purchase"
 	if dryRun {
 		mode = "dryrun"
@@ -1417,17 +1426,11 @@ type ServiceConfig struct {
 
 func TestApplyFilters(t *testing.T) {
 	// Save original values
-	origIncludeRegions := includeRegions
-	origExcludeRegions := excludeRegions
-	origIncludeTypes := includeInstanceTypes
-	origExcludeTypes := excludeInstanceTypes
+	origCfg := toolCfg
 
 	// Restore after test
 	defer func() {
-		includeRegions = origIncludeRegions
-		excludeRegions = origExcludeRegions
-		includeInstanceTypes = origIncludeTypes
-		excludeInstanceTypes = origExcludeTypes
+		toolCfg = origCfg
 	}()
 
 	tests := []struct {
@@ -1506,14 +1509,14 @@ func TestApplyFilters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set global variables
-			includeRegions = tt.includeRegions
-			excludeRegions = tt.excludeRegions
-			includeInstanceTypes = tt.includeInstanceTypes
-			excludeInstanceTypes = tt.excludeInstanceTypes
+			// Set toolCfg fields
+			toolCfg.IncludeRegions = tt.includeRegions
+			toolCfg.ExcludeRegions = tt.excludeRegions
+			toolCfg.IncludeInstanceTypes = tt.includeInstanceTypes
+			toolCfg.ExcludeInstanceTypes = tt.excludeInstanceTypes
 
-			// Apply filters
-			result := applyFilters(tt.recommendations)
+			// Apply filters with Config
+			result := applyFilters(tt.recommendations, toolCfg)
 
 			// Check count
 			assert.Equal(t, tt.expectedCount, len(result))
@@ -1523,12 +1526,10 @@ func TestApplyFilters(t *testing.T) {
 
 func TestShouldIncludeRegion(t *testing.T) {
 	// Save original values
-	origIncludeRegions := includeRegions
-	origExcludeRegions := excludeRegions
+	origCfg := toolCfg
 
 	defer func() {
-		includeRegions = origIncludeRegions
-		excludeRegions = origExcludeRegions
+		toolCfg = origCfg
 	}()
 
 	tests := []struct {
@@ -1570,10 +1571,10 @@ func TestShouldIncludeRegion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			includeRegions = tt.includeRegions
-			excludeRegions = tt.excludeRegions
+			toolCfg.IncludeRegions = tt.includeRegions
+			toolCfg.ExcludeRegions = tt.excludeRegions
 
-			result := shouldIncludeRegion(tt.region)
+			result := shouldIncludeRegion(tt.region, toolCfg)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -1581,12 +1582,10 @@ func TestShouldIncludeRegion(t *testing.T) {
 
 func TestShouldIncludeInstanceType(t *testing.T) {
 	// Save original values
-	origIncludeTypes := includeInstanceTypes
-	origExcludeTypes := excludeInstanceTypes
+	origCfg := toolCfg
 
 	defer func() {
-		includeInstanceTypes = origIncludeTypes
-		excludeInstanceTypes = origExcludeTypes
+		toolCfg = origCfg
 	}()
 
 	tests := []struct {
@@ -1621,10 +1620,10 @@ func TestShouldIncludeInstanceType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			includeInstanceTypes = tt.includeInstanceTypes
-			excludeInstanceTypes = tt.excludeInstanceTypes
+			toolCfg.IncludeInstanceTypes = tt.includeInstanceTypes
+			toolCfg.ExcludeInstanceTypes = tt.excludeInstanceTypes
 
-			result := shouldIncludeInstanceType(tt.instanceType)
+			result := shouldIncludeInstanceType(tt.instanceType, toolCfg)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -1632,12 +1631,10 @@ func TestShouldIncludeInstanceType(t *testing.T) {
 
 func TestShouldIncludeEngine(t *testing.T) {
 	// Save original values
-	origIncludeEngines := includeEngines
-	origExcludeEngines := excludeEngines
+	origCfg := toolCfg
 
 	defer func() {
-		includeEngines = origIncludeEngines
-		excludeEngines = origExcludeEngines
+		toolCfg = origCfg
 	}()
 
 	tests := []struct {
@@ -1713,11 +1710,640 @@ func TestShouldIncludeEngine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			includeEngines = tt.includeEngines
-			excludeEngines = tt.excludeEngines
+			toolCfg.IncludeEngines = tt.includeEngines
+			toolCfg.ExcludeEngines = tt.excludeEngines
 
-			result := shouldIncludeEngine(tt.recommendation)
+			result := shouldIncludeEngine(tt.recommendation, toolCfg)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestShouldIncludeAccount(t *testing.T) {
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	tests := []struct {
+		name            string
+		accountID       string
+		includeAccounts []string
+		excludeAccounts []string
+		expected        bool
+	}{
+		{
+			name:            "No filters - should include",
+			accountID:       "123456789012",
+			includeAccounts: []string{},
+			excludeAccounts: []string{},
+			expected:        true,
+		},
+		{
+			name:            "In include list",
+			accountID:       "123456789012",
+			includeAccounts: []string{"123456789012", "210987654321"},
+			excludeAccounts: []string{},
+			expected:        true,
+		},
+		{
+			name:            "Not in include list",
+			accountID:       "999888777666",
+			includeAccounts: []string{"123456789012"},
+			excludeAccounts: []string{},
+			expected:        false,
+		},
+		{
+			name:            "In exclude list",
+			accountID:       "123456789012",
+			includeAccounts: []string{},
+			excludeAccounts: []string{"123456789012"},
+			expected:        false,
+		},
+		{
+			name:            "Not in exclude list",
+			accountID:       "999888777666",
+			includeAccounts: []string{},
+			excludeAccounts: []string{"123456789012"},
+			expected:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			toolCfg.IncludeAccounts = tt.includeAccounts
+			toolCfg.ExcludeAccounts = tt.excludeAccounts
+
+			result := shouldIncludeAccount(tt.accountID, toolCfg)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// ==================== New Extracted Function Tests ====================
+
+func TestCreateDryRunResult(t *testing.T) {
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 75.0
+
+	rec := common.Recommendation{
+		Service:      common.ServiceRDS,
+		InstanceType: "db.t3.small",
+		Count:        5,
+		Region:       "us-east-1",
+	}
+
+	result := createDryRunResult(rec, "us-east-1", 1, toolCfg)
+
+	assert.True(t, result.Success)
+	assert.Equal(t, rec, result.Config)
+	assert.Contains(t, result.Message, "Dry run")
+	assert.Contains(t, result.PurchaseID, "dryrun")
+	assert.NotEmpty(t, result.Timestamp)
+}
+
+func TestCreateCancelledResults(t *testing.T) {
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 80.0
+
+	recs := []common.Recommendation{
+		{Service: common.ServiceRDS, InstanceType: "db.t3.small", Count: 2},
+		{Service: common.ServiceRDS, InstanceType: "db.t3.medium", Count: 3},
+		{Service: common.ServiceRDS, InstanceType: "db.t3.large", Count: 1},
+	}
+
+	results := createCancelledResults(recs, "us-west-2", toolCfg)
+
+	assert.Len(t, results, 3)
+	for i, result := range results {
+		assert.False(t, result.Success)
+		assert.Equal(t, recs[i], result.Config)
+		assert.Contains(t, result.Message, "cancelled")
+		assert.Contains(t, result.PurchaseID, "us-west-2")
+	}
+}
+
+func TestExecutePurchase(t *testing.T) {
+	ctx := context.Background()
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 90.0
+
+	rec := common.Recommendation{
+		Service:      common.ServiceEC2,
+		InstanceType: "t3.medium",
+		Count:        10,
+	}
+
+	mockClient := &MockPurchaseClient{}
+	expectedResult := common.PurchaseResult{
+		Config:     rec,
+		Success:    true,
+		PurchaseID: "test-purchase-id-123",
+		Message:    "Purchase successful",
+		Timestamp:  time.Now(),
+	}
+	mockClient.On("PurchaseRI", ctx, rec).Return(expectedResult)
+
+	// Suppress logger output (no return value from SetEnabled)
+	common.AppLogger.SetEnabled(false)
+	defer common.AppLogger.SetEnabled(true)
+
+	result := executePurchase(ctx, rec, "eu-west-1", 5, mockClient, toolCfg)
+
+	assert.True(t, result.Success)
+	assert.Equal(t, "test-purchase-id-123", result.PurchaseID)
+	assert.Contains(t, result.Message, "successful")
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestExecutePurchaseWithEmptyPurchaseID(t *testing.T) {
+	ctx := context.Background()
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 85.0
+
+	rec := common.Recommendation{
+		Service:      common.ServiceElastiCache,
+		InstanceType: "cache.r5.large",
+		Count:        3,
+	}
+
+	mockClient := &MockPurchaseClient{}
+	// Return result without PurchaseID
+	expectedResult := common.PurchaseResult{
+		Config:     rec,
+		Success:    true,
+		PurchaseID: "", // Empty ID - should be generated
+		Message:    "Purchase successful",
+		Timestamp:  time.Now(),
+	}
+	mockClient.On("PurchaseRI", ctx, rec).Return(expectedResult)
+
+	// Suppress logger output (no return value from SetEnabled)
+	common.AppLogger.SetEnabled(false)
+	defer common.AppLogger.SetEnabled(true)
+
+	result := executePurchase(ctx, rec, "ap-southeast-1", 2, mockClient, toolCfg)
+
+	assert.True(t, result.Success)
+	assert.NotEmpty(t, result.PurchaseID) // Should have generated ID
+	assert.Contains(t, result.PurchaseID, "ap-southeast-1")
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestProcessPurchaseLoopDryRun(t *testing.T) {
+	ctx := context.Background()
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 75.0
+
+	recs := []common.Recommendation{
+		{Service: common.ServiceRDS, InstanceType: "db.t3.small", Count: 2, Description: "Test 1"},
+		{Service: common.ServiceRDS, InstanceType: "db.t3.medium", Count: 3, Description: "Test 2"},
+	}
+
+	mockClient := &MockPurchaseClient{}
+
+	// Suppress logger output (no return value from SetEnabled)
+	common.AppLogger.SetEnabled(false)
+	defer common.AppLogger.SetEnabled(true)
+
+	results := processPurchaseLoop(ctx, recs, "us-east-1", true, mockClient, toolCfg)
+
+	assert.Len(t, results, 2)
+	for _, result := range results {
+		assert.True(t, result.Success)
+		assert.Contains(t, result.Message, "Dry run")
+		assert.Contains(t, result.PurchaseID, "dryrun")
+	}
+
+	// Mock should not be called in dry run mode
+	mockClient.AssertNotCalled(t, "PurchaseRI")
+}
+
+func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
+	ctx := context.Background()
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 80.0
+	toolCfg.SkipConfirmation = true // Skip confirmation for testing
+
+	recs := []common.Recommendation{
+		{Service: common.ServiceEC2, InstanceType: "t3.small", Count: 1, Description: "EC2 Test 1", EstimatedCost: 100},
+		{Service: common.ServiceEC2, InstanceType: "t3.medium", Count: 2, Description: "EC2 Test 2", EstimatedCost: 200},
+	}
+
+	mockClient := &MockPurchaseClient{}
+	for i, rec := range recs {
+		result := common.PurchaseResult{
+			Config:     rec,
+			Success:    true,
+			PurchaseID: fmt.Sprintf("purchase-id-%d", i),
+			Message:    "Success",
+			Timestamp:  time.Now(),
+		}
+		mockClient.On("PurchaseRI", ctx, rec).Return(result)
+	}
+
+	// Suppress logger output (no return value from SetEnabled)
+	common.AppLogger.SetEnabled(false)
+	defer common.AppLogger.SetEnabled(true)
+
+	// Disable purchase delay for testing
+	os.Setenv("DISABLE_PURCHASE_DELAY", "true")
+	defer os.Unsetenv("DISABLE_PURCHASE_DELAY")
+
+	results := processPurchaseLoop(ctx, recs, "eu-west-1", false, mockClient, toolCfg)
+
+	assert.Len(t, results, 2)
+	for i, result := range results {
+		assert.True(t, result.Success)
+		assert.Equal(t, fmt.Sprintf("purchase-id-%d", i), result.PurchaseID)
+	}
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestProcessPurchaseLoopWithConfirmation(t *testing.T) {
+	ctx := context.Background()
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	toolCfg.Coverage = 80.0
+	toolCfg.SkipConfirmation = true // Skip confirmation to proceed with purchase
+
+	recs := []common.Recommendation{
+		{Service: common.ServiceRDS, InstanceType: "db.r5.large", Count: 5, Description: "Expensive", EstimatedCost: 1000},
+	}
+
+	mockClient := &MockPurchaseClient{}
+	// Mock the purchase since skipConfirmation=true will proceed
+	result := common.PurchaseResult{
+		Config:     recs[0],
+		Success:    true,
+		PurchaseID: "confirmed-purchase-123",
+		Message:    "Purchase confirmed and successful",
+		Timestamp:  time.Now(),
+	}
+	mockClient.On("PurchaseRI", ctx, recs[0]).Return(result)
+
+	// Suppress logger output (no return value from SetEnabled)
+	common.AppLogger.SetEnabled(false)
+	defer common.AppLogger.SetEnabled(true)
+
+	// Disable purchase delay for testing
+	os.Setenv("DISABLE_PURCHASE_DELAY", "true")
+	defer os.Unsetenv("DISABLE_PURCHASE_DELAY")
+
+	results := processPurchaseLoop(ctx, recs, "us-west-2", false, mockClient, toolCfg)
+
+	assert.Len(t, results, 1)
+	assert.True(t, results[0].Success)
+	assert.Equal(t, "confirmed-purchase-123", results[0].PurchaseID)
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestAdjustRecsForDuplicates(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name               string
+		inputRecs          []common.Recommendation
+		existingRIs        []common.ExistingRI
+		expectedCount      int
+		expectedError      bool
+	}{
+		{
+			name: "No duplicates",
+			inputRecs: []common.Recommendation{
+				{InstanceType: "db.t3.small", Count: 5},
+				{InstanceType: "db.t3.medium", Count: 3},
+			},
+			existingRIs:   []common.ExistingRI{},
+			expectedCount: 2,
+			expectedError: false,
+		},
+		{
+			name: "With duplicates - adjusts count",
+			inputRecs: []common.Recommendation{
+				{InstanceType: "db.t3.small", Count: 10},
+			},
+			existingRIs: []common.ExistingRI{
+				{InstanceType: "db.t3.small", Count: 3},
+			},
+			expectedCount: 1, // Should still have 1 recommendation but with adjusted count
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &MockPurchaseClient{}
+			mockClient.On("GetExistingReservedInstances", ctx).Return(tt.existingRIs, nil)
+
+			// Suppress logger output (no return value from SetEnabled)
+			common.AppLogger.SetEnabled(false)
+			defer common.AppLogger.SetEnabled(true)
+
+			results, err := adjustRecsForDuplicates(ctx, tt.inputRecs, mockClient)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.LessOrEqual(t, len(results), len(tt.inputRecs))
+			}
+
+			mockClient.AssertExpectations(t)
+		})
+	}
+}
+
+func TestAdjustRecsForDuplicatesError(t *testing.T) {
+	ctx := context.Background()
+
+	recs := []common.Recommendation{
+		{InstanceType: "db.t3.small", Count: 5},
+	}
+
+	mockClient := &MockPurchaseClient{}
+	mockClient.On("GetExistingReservedInstances", ctx).Return([]common.ExistingRI(nil), errors.New("API error"))
+
+	// Suppress logger output (no return value from SetEnabled)
+	common.AppLogger.SetEnabled(false)
+	defer common.AppLogger.SetEnabled(true)
+
+	results, err := adjustRecsForDuplicates(ctx, recs, mockClient)
+
+	// Should return original recommendations without error (error is logged but not propagated)
+	assert.NoError(t, err)
+	assert.Equal(t, recs, results)
+
+	mockClient.AssertExpectations(t)
+}
+
+func TestGroupRecommendationsByServiceRegion(t *testing.T) {
+	tests := []struct {
+		name           string
+		recommendations []common.Recommendation
+		expectedGroups  map[common.ServiceType]map[string]int // service -> region -> count
+	}{
+		{
+			name: "Single service single region",
+			recommendations: []common.Recommendation{
+				{Service: common.ServiceRDS, Region: "us-east-1", InstanceType: "db.t3.small", Count: 5},
+				{Service: common.ServiceRDS, Region: "us-east-1", InstanceType: "db.t3.medium", Count: 3},
+			},
+			expectedGroups: map[common.ServiceType]map[string]int{
+				common.ServiceRDS: {"us-east-1": 2},
+			},
+		},
+		{
+			name: "Single service multiple regions",
+			recommendations: []common.Recommendation{
+				{Service: common.ServiceRDS, Region: "us-east-1", InstanceType: "db.t3.small", Count: 5},
+				{Service: common.ServiceRDS, Region: "us-west-2", InstanceType: "db.t3.medium", Count: 3},
+				{Service: common.ServiceRDS, Region: "eu-west-1", InstanceType: "db.t3.large", Count: 2},
+			},
+			expectedGroups: map[common.ServiceType]map[string]int{
+				common.ServiceRDS: {"us-east-1": 1, "us-west-2": 1, "eu-west-1": 1},
+			},
+		},
+		{
+			name: "Multiple services multiple regions",
+			recommendations: []common.Recommendation{
+				{Service: common.ServiceRDS, Region: "us-east-1", InstanceType: "db.t3.small", Count: 5},
+				{Service: common.ServiceRDS, Region: "us-west-2", InstanceType: "db.t3.medium", Count: 3},
+				{Service: common.ServiceElastiCache, Region: "us-east-1", InstanceType: "cache.t3.small", Count: 2},
+				{Service: common.ServiceElastiCache, Region: "eu-west-1", InstanceType: "cache.t3.medium", Count: 4},
+				{Service: common.ServiceEC2, Region: "us-east-1", InstanceType: "m5.large", Count: 10},
+			},
+			expectedGroups: map[common.ServiceType]map[string]int{
+				common.ServiceRDS:         {"us-east-1": 1, "us-west-2": 1},
+				common.ServiceElastiCache: {"us-east-1": 1, "eu-west-1": 1},
+				common.ServiceEC2:         {"us-east-1": 1},
+			},
+		},
+		{
+			name:            "Empty recommendations",
+			recommendations: []common.Recommendation{},
+			expectedGroups:  map[common.ServiceType]map[string]int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := groupRecommendationsByServiceRegion(tt.recommendations)
+
+			// Verify the structure matches expected
+			assert.Equal(t, len(tt.expectedGroups), len(result))
+
+			for service, regions := range tt.expectedGroups {
+				assert.Contains(t, result, service)
+				assert.Equal(t, len(regions), len(result[service]))
+
+				for region, expectedCount := range regions {
+					assert.Contains(t, result[service], region)
+					assert.Equal(t, expectedCount, len(result[service][region]))
+				}
+			}
+		})
+	}
+}
+
+func TestFilterAndAdjustRecommendations(t *testing.T) {
+	// Save and restore ALL global variables
+	saved := saveGlobalVars()
+	defer saved.restore()
+
+	tests := []struct {
+		name            string
+		recommendations []common.Recommendation
+		coverage        float64
+		setupFilters    func()
+		expectedMin     int // minimum expected recommendations
+		expectedMax     int // maximum expected recommendations
+	}{
+		{
+			name: "100% coverage no filters",
+			recommendations: []common.Recommendation{
+				{Service: common.ServiceRDS, InstanceType: "db.t3.small", Count: 5},
+				{Service: common.ServiceRDS, InstanceType: "db.t3.medium", Count: 3},
+			},
+			coverage:    100.0,
+			setupFilters: func() {
+				toolCfg.MaxInstances = 0
+				toolCfg.OverrideCount = 0
+			},
+			expectedMin: 2,
+			expectedMax: 2,
+		},
+		{
+			name: "50% coverage",
+			recommendations: []common.Recommendation{
+				{Service: common.ServiceRDS, InstanceType: "db.t3.small", Count: 10},
+				{Service: common.ServiceRDS, InstanceType: "db.t3.medium", Count: 6},
+			},
+			coverage: 50.0,
+			setupFilters: func() {
+				toolCfg.MaxInstances = 0
+				toolCfg.OverrideCount = 0
+			},
+			expectedMin: 1,
+			expectedMax: 2,
+		},
+		{
+			name: "Instance limit applied",
+			recommendations: []common.Recommendation{
+				{Service: common.ServiceRDS, InstanceType: "db.t3.small", Count: 10},
+				{Service: common.ServiceRDS, InstanceType: "db.t3.medium", Count: 10},
+				{Service: common.ServiceRDS, InstanceType: "db.t3.large", Count: 10},
+			},
+			coverage: 100.0,
+			setupFilters: func() {
+				toolCfg.MaxInstances = 15
+				toolCfg.OverrideCount = 0
+			},
+			expectedMin: 1,
+			expectedMax: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup filters
+			tt.setupFilters()
+
+			// Suppress logger
+			common.AppLogger.SetEnabled(false)
+			defer common.AppLogger.SetEnabled(true)
+
+			result := filterAndAdjustRecommendations(tt.recommendations, tt.coverage, toolCfg)
+
+			// Verify result is within expected range
+			assert.GreaterOrEqual(t, len(result), tt.expectedMin)
+			assert.LessOrEqual(t, len(result), tt.expectedMax)
+
+			// Verify all results have count > 0
+			for _, rec := range result {
+				assert.Positive(t, rec.Count)
+			}
+		})
+	}
+}
+
+func TestRunToolFromCSV(t *testing.T) {
+	// Save original values
+	origCfg := toolCfg
+
+	defer func() {
+		toolCfg = origCfg
+	}()
+
+	// Create a temporary CSV file for testing
+	tmpFile, err := os.CreateTemp("", "test_recommendations_*.csv")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	// Write test CSV data
+	csvData := `Service,Region,Engine,Instance Type,Payment Option,Term (months),Instance Count,Account ID
+rds,us-east-1,postgres,db.t3.small,All Upfront,12,2,123456789012
+elasticache,us-west-2,redis,cache.t3.micro,All Upfront,12,1,123456789012
+`
+	_, err = tmpFile.WriteString(csvData)
+	assert.NoError(t, err)
+	tmpFile.Close()
+
+	tests := []struct {
+		name         string
+		setupConfig  func()
+		expectPanic  bool
+		validateFunc func(t *testing.T)
+	}{
+		{
+			name: "Dry run mode",
+			setupConfig: func() {
+				toolCfg.CSVInput = tmpFile.Name()
+				toolCfg.ActualPurchase = false
+				toolCfg.Coverage = 100.0
+				toolCfg.MaxInstances = 0
+			},
+			expectPanic: false,
+		},
+		{
+			name: "With coverage adjustment",
+			setupConfig: func() {
+				toolCfg.CSVInput = tmpFile.Name()
+				toolCfg.ActualPurchase = false
+				toolCfg.Coverage = 50.0
+				toolCfg.MaxInstances = 0
+			},
+			expectPanic: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setupConfig()
+
+			// Suppress logger
+			common.AppLogger.SetEnabled(false)
+			defer common.AppLogger.SetEnabled(true)
+
+			ctx := context.Background()
+
+			if tt.expectPanic {
+				assert.Panics(t, func() {
+					runToolFromCSV(ctx, toolCfg)
+				})
+			} else {
+				// Just verify it doesn't panic - actual purchase testing requires AWS mocks
+				assert.NotPanics(t, func() {
+					runToolFromCSV(ctx, toolCfg)
+				})
+			}
 		})
 	}
 }
