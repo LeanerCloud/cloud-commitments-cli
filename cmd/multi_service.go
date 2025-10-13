@@ -35,43 +35,79 @@ type ServiceProcessingStats struct {
 	TotalEstimatedSavings   float64
 }
 
-func runToolMultiService(ctx context.Context) {
+// determineServicesToProcess returns the list of services to process based on flags
+func determineServicesToProcess(cfg Config) []common.ServiceType {
+	if cfg.AllServices {
+		return getAllServices()
+	}
+	if len(cfg.Services) > 0 {
+		return parseServices(cfg.Services)
+	}
+	// Default to RDS only for backward compatibility
+	return []common.ServiceType{common.ServiceRDS}
+}
+
+// printRunMode prints the current run mode (dry run or purchase)
+func printRunMode(isDryRun bool) {
+	if isDryRun {
+		common.AppLogger.Println("🔍 DRY RUN MODE - No actual purchases will be made")
+	} else {
+		common.AppLogger.Println("💰 PURCHASE MODE - Reserved Instances will be purchased")
+	}
+}
+
+// printPaymentAndTerm prints the payment option and term information
+func printPaymentAndTerm(cfg Config) {
+	common.AppLogger.Printf("💳 Payment option: %s, Term: %d year(s)\n", cfg.PaymentOption, cfg.TermYears)
+}
+
+// generateCSVFilename generates a CSV filename based on the mode and timestamp
+func generateCSVFilename(isDryRun bool, cfg Config) string {
+	if cfg.CSVOutput != "" {
+		return cfg.CSVOutput
+	}
+	timestamp := time.Now().Format("20060102-150405")
+	mode := "dryrun"
+	if !isDryRun {
+		mode = "purchase"
+	}
+	return fmt.Sprintf("ri-helper-%s-%s.csv", mode, timestamp)
+}
+
+func runToolMultiService(ctx context.Context, cfg Config) {
 	// Validation is now handled in PreRunE
 
-	// Determine services to process
-	var servicesToProcess []common.ServiceType
-	if allServices {
-		servicesToProcess = getAllServices()
-	} else if len(services) > 0 {
-		servicesToProcess = parseServices(services)
-	} else {
-		// Default to RDS only for backward compatibility
-		servicesToProcess = []common.ServiceType{common.ServiceRDS}
+	// Check if we're using CSV input mode
+	if cfg.CSVInput != "" {
+		runToolFromCSV(ctx, cfg)
+		return
 	}
+
+	// Determine services to process
+	servicesToProcess := determineServicesToProcess(cfg)
 
 	if len(servicesToProcess) == 0 {
 		log.Fatalf("No valid services specified")
 	}
 
 	// Determine if this is a dry run
-	isDryRun := !actualPurchase
-	if isDryRun {
-		common.AppLogger.Println("🔍 DRY RUN MODE - No actual purchases will be made")
-	} else {
-		common.AppLogger.Println("💰 PURCHASE MODE - Reserved Instances will be purchased")
-	}
+	isDryRun := !cfg.ActualPurchase
+	printRunMode(isDryRun)
 
 	common.AppLogger.Printf("📊 Processing services: %s\n", formatServices(servicesToProcess))
-	common.AppLogger.Printf("💳 Payment option: %s, Term: %d year(s)\n", paymentOption, termYears)
+	printPaymentAndTerm(cfg)
 
 	// Load AWS configuration
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
 	if err != nil {
 		log.Fatalf("Failed to load AWS config: %v", err)
 	}
 
+	// Create account alias cache for lookup
+	accountCache := common.NewAccountAliasCache(awsCfg)
+
 	// Create recommendations client
-	recClient := common.NewRecommendationsClient(cfg)
+	recClient := common.NewRecommendationsClient(awsCfg)
 
 	// Process each service
 	allRecommendations := make([]common.Recommendation, 0)
@@ -84,7 +120,7 @@ func runToolMultiService(ctx context.Context) {
 		common.AppLogger.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
 		// Process all services with common interface
-		serviceRecs, serviceResults := processService(ctx, cfg, recClient, service, isDryRun)
+		serviceRecs, serviceResults := processService(ctx, awsCfg, recClient, accountCache, service, isDryRun, cfg)
 		allRecommendations = append(allRecommendations, serviceRecs...)
 		allResults = append(allResults, serviceResults...)
 
@@ -95,15 +131,7 @@ func runToolMultiService(ctx context.Context) {
 	}
 
 	// Generate CSV filename
-	finalCSVOutput := csvOutput
-	if finalCSVOutput == "" {
-		timestamp := time.Now().Format("20060102-150405")
-		mode := "dryrun"
-		if !isDryRun {
-			mode = "purchase"
-		}
-		finalCSVOutput = fmt.Sprintf("ri-helper-%s-%s.csv", mode, timestamp)
-	}
+	finalCSVOutput := generateCSVFilename(isDryRun, cfg)
 
 	// Write CSV report
 	if err := writeMultiServiceCSVReport(allResults, finalCSVOutput); err != nil {
@@ -116,14 +144,285 @@ func runToolMultiService(ctx context.Context) {
 	printMultiServiceSummary(allRecommendations, allResults, serviceStats, isDryRun)
 }
 
+// determineCSVCoverage determines the coverage percentage to use for CSV mode
+func determineCSVCoverage(cfg Config) float64 {
+	// When using CSV input, default to 100% coverage (use exact numbers from CSV)
+	// unless user explicitly provided a different coverage value
+	if cfg.Coverage == 80.0 {
+		// User didn't override the default, so use 100% for CSV mode
+		return 100.0
+	}
+	return cfg.Coverage
+}
 
-func processService(ctx context.Context, cfg aws.Config, recClient common.RecommendationsClientInterface, service common.ServiceType, isDryRun bool) ([]common.Recommendation, []common.PurchaseResult) {
+// loadRecommendationsFromCSV reads and returns recommendations from a CSV file
+func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error) {
+	reader := csv.NewReader()
+	return reader.ReadRecommendations(csvPath)
+}
+
+// filterAndAdjustRecommendations applies filters, coverage, count override, and instance limits to recommendations
+func filterAndAdjustRecommendations(recommendations []common.Recommendation, csvModeCoverage float64, cfg Config) []common.Recommendation {
+	// Apply filters
+	originalCount := len(recommendations)
+	recommendations = applyFilters(recommendations, cfg)
+	if len(recommendations) < originalCount {
+		common.AppLogger.Printf("🔍 After filters: %d recommendations (filtered out %d)\n", len(recommendations), originalCount-len(recommendations))
+	}
+
+	// Apply coverage if not 100%
+	if csvModeCoverage < 100 {
+		beforeCoverage := len(recommendations)
+		recommendations = applyCommonCoverage(recommendations, csvModeCoverage)
+		common.AppLogger.Printf("📈 Applying %.1f%% coverage: %d recommendations selected (from %d)\n", csvModeCoverage, len(recommendations), beforeCoverage)
+	}
+
+	// Apply count override if specified
+	if cfg.OverrideCount > 0 {
+		recommendations = common.ApplyCountOverride(recommendations, cfg.OverrideCount)
+	}
+
+	// Apply instance limit if specified
+	if cfg.MaxInstances > 0 {
+		beforeLimit := len(recommendations)
+		recommendations = common.ApplyInstanceLimit(recommendations, cfg.MaxInstances)
+		if len(recommendations) < beforeLimit {
+			common.AppLogger.Printf("🔒 Applied instance limit: %d recommendations after limiting to %d instances\n", len(recommendations), cfg.MaxInstances)
+		}
+	}
+
+	return recommendations
+}
+
+// groupRecommendationsByServiceRegion groups recommendations by service and region
+func groupRecommendationsByServiceRegion(recommendations []common.Recommendation) map[common.ServiceType]map[string][]common.Recommendation {
+	recsByServiceRegion := make(map[common.ServiceType]map[string][]common.Recommendation)
+	for _, rec := range recommendations {
+		if _, ok := recsByServiceRegion[rec.Service]; !ok {
+			recsByServiceRegion[rec.Service] = make(map[string][]common.Recommendation)
+		}
+		recsByServiceRegion[rec.Service][rec.Region] = append(recsByServiceRegion[rec.Service][rec.Region], rec)
+	}
+	return recsByServiceRegion
+}
+
+// populateAccountNames populates account names from account IDs using the cache
+func populateAccountNames(ctx context.Context, recommendations []common.Recommendation, accountCache *common.AccountAliasCache) {
+	for i := range recommendations {
+		if recommendations[i].AccountID != "" {
+			recommendations[i].AccountName = accountCache.GetAccountAlias(ctx, recommendations[i].AccountID)
+		}
+	}
+}
+
+// adjustRecsForDuplicates checks for existing RIs and adjusts recommendations to avoid duplicates
+func adjustRecsForDuplicates(ctx context.Context, recs []common.Recommendation, purchaseClient common.PurchaseClient) ([]common.Recommendation, error) {
+	duplicateChecker := common.NewDuplicateChecker()
+	adjustedRecs, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, recs, purchaseClient)
+	if err != nil {
+		return recs, err // Return original recommendations with error
+	}
+
+	originalInstances := common.CalculateTotalInstances(recs)
+	adjustedInstances := common.CalculateTotalInstances(adjustedRecs)
+	if originalInstances != adjustedInstances {
+		common.AppLogger.Printf("  🔍 Adjusted recommendations: %d instances → %d instances to avoid duplicate purchases\n", originalInstances, adjustedInstances)
+	}
+
+	return adjustedRecs, nil
+}
+
+// createDryRunResult creates a purchase result for dry run mode
+func createDryRunResult(rec common.Recommendation, region string, index int, cfg Config) common.PurchaseResult {
+	return common.PurchaseResult{
+		Config:     rec,
+		Success:    true,
+		PurchaseID: generatePurchaseID(rec, region, index, true, cfg.Coverage),
+		Message:    "Dry run - no actual purchase",
+		Timestamp:  time.Now(),
+	}
+}
+
+// createCancelledResults creates purchase results for cancelled purchases
+func createCancelledResults(recs []common.Recommendation, region string, cfg Config) []common.PurchaseResult {
+	results := make([]common.PurchaseResult, len(recs))
+	for k := range recs {
+		results[k] = common.PurchaseResult{
+			Config:     recs[k],
+			Success:    false,
+			PurchaseID: generatePurchaseID(recs[k], region, k+1, false, cfg.Coverage),
+			Message:    "Purchase cancelled by user",
+			Timestamp:  time.Now(),
+		}
+	}
+	return results
+}
+
+// executePurchase executes an actual RI purchase
+func executePurchase(ctx context.Context, rec common.Recommendation, region string, index int, purchaseClient common.PurchaseClient, cfg Config) common.PurchaseResult {
+	common.AppLogger.Printf("    ⚠️  ACTUAL PURCHASE: About to buy %d instances of %s\n", rec.Count, rec.InstanceType)
+	result := purchaseClient.PurchaseRI(ctx, rec)
+	if result.PurchaseID == "" {
+		result.PurchaseID = generatePurchaseID(rec, region, index, false, cfg.Coverage)
+	}
+	return result
+}
+
+// processPurchaseLoop processes purchases for a single region
+func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, region string, isDryRun bool, purchaseClient common.PurchaseClient, cfg Config) []common.PurchaseResult {
+	results := make([]common.PurchaseResult, 0, len(recs))
+
+	for j, rec := range recs {
+		common.AppLogger.Printf("    [%d/%d] Processing: %s\n", j+1, len(recs), rec.Description)
+		common.AppLogger.Printf("    💳 Purchasing %d instances\n", rec.Count)
+
+		var result common.PurchaseResult
+		if isDryRun {
+			result = createDryRunResult(rec, region, j+1, cfg)
+		} else {
+			// Ask for confirmation before proceeding with purchases (only on first item)
+			if j == 0 {
+				totalInstances := common.CalculateTotalInstances(recs)
+				totalCost := 0.0
+				for _, r := range recs {
+					totalCost += r.EstimatedCost
+				}
+
+				if !common.ConfirmPurchase(totalInstances, totalCost, cfg.SkipConfirmation) {
+					// User cancelled - return cancelled results for all
+					return createCancelledResults(recs, region, cfg)
+				}
+			}
+
+			// Execute actual purchase
+			result = executePurchase(ctx, rec, region, j+1, purchaseClient, cfg)
+
+			// Add delay between purchases to avoid rate limiting
+			if j < len(recs)-1 && os.Getenv("DISABLE_PURCHASE_DELAY") != "true" {
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		results = append(results, result)
+
+		if result.Success {
+			common.AppLogger.Printf("    ✅ Success: %s\n", result.Message)
+		} else {
+			common.AppLogger.Printf("    ❌ Failed: %s\n", result.Message)
+		}
+	}
+
+	return results
+}
+
+// runToolFromCSV processes recommendations from a CSV input file
+func runToolFromCSV(ctx context.Context, cfg Config) {
+	// Determine if this is a dry run
+	isDryRun := !cfg.ActualPurchase
+	printRunMode(isDryRun)
+
+	csvModeCoverage := determineCSVCoverage(cfg)
+
+	common.AppLogger.Printf("📄 Reading recommendations from CSV: %s\n", cfg.CSVInput)
+
+	// Read recommendations from CSV
+	recommendations, err := loadRecommendationsFromCSV(cfg.CSVInput)
+	if err != nil {
+		log.Fatalf("Failed to read CSV file: %v", err)
+	}
+
+	common.AppLogger.Printf("✅ Loaded %d recommendations from CSV\n", len(recommendations))
+
+	// Filter and adjust recommendations
+	recommendations = filterAndAdjustRecommendations(recommendations, csvModeCoverage, cfg)
+
+	if len(recommendations) == 0 {
+		common.AppLogger.Println("⚠️  No recommendations to process after filtering")
+		return
+	}
+
+	// Load AWS configuration
+	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+	if err != nil {
+		log.Fatalf("Failed to load AWS config: %v", err)
+	}
+
+	// Create account alias cache for lookup
+	accountCache := common.NewAccountAliasCache(awsCfg)
+
+	// Populate account names from account IDs
+	populateAccountNames(ctx, recommendations, accountCache)
+
+	// Group recommendations by service and region
+	recsByServiceRegion := groupRecommendationsByServiceRegion(recommendations)
+
+	// Process purchases
+	allResults := make([]common.PurchaseResult, 0)
+	serviceStats := make(map[common.ServiceType]ServiceProcessingStats)
+
+	for service, regionRecs := range recsByServiceRegion {
+		common.AppLogger.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		common.AppLogger.Printf("🎯 Processing %s\n", getServiceDisplayName(service))
+		common.AppLogger.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+		serviceRecs := make([]common.Recommendation, 0)
+		for region, recs := range regionRecs {
+			common.AppLogger.Printf("\n  📍 Region: %s (%d recommendations)\n", region, len(recs))
+
+			// Get purchase client for this region
+			regionalCfg := awsCfg.Copy()
+			regionalCfg.Region = region
+			purchaseClient := createPurchaseClient(service, regionalCfg)
+
+			if purchaseClient == nil {
+				common.AppLogger.Printf("  ⚠️  Purchase client not yet implemented for %s\n", getServiceDisplayName(service))
+				common.AppLogger.Printf("     (Skipping purchase phase for this service)\n")
+				continue
+			}
+
+			// Check for duplicate RIs to avoid double purchasing
+			adjustedRecs, err := adjustRecsForDuplicates(ctx, recs, purchaseClient)
+			if err != nil {
+				common.AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v\n", err)
+				adjustedRecs = recs // Continue with original recommendations if check fails
+			}
+			recs = adjustedRecs
+
+			serviceRecs = append(serviceRecs, recs...)
+
+			// Process purchases for this region
+			regionResults := processPurchaseLoop(ctx, recs, region, isDryRun, purchaseClient, cfg)
+			allResults = append(allResults, regionResults...)
+		}
+
+		// Calculate service statistics
+		stats := calculateServiceStats(service, serviceRecs, allResults)
+		serviceStats[service] = stats
+		printServiceSummary(service, stats)
+	}
+
+	// Generate CSV filename and write report
+	finalCSVOutput := generateCSVFilename(isDryRun, cfg)
+
+	// Write CSV report
+	if err := writeMultiServiceCSVReport(allResults, finalCSVOutput); err != nil {
+		log.Printf("Warning: Failed to write CSV output: %v", err)
+	} else {
+		common.AppLogger.Printf("\n📋 CSV report written to: %s\n", finalCSVOutput)
+	}
+
+	// Print final summary
+	printMultiServiceSummary(recommendations, allResults, serviceStats, isDryRun)
+}
+
+
+func processService(ctx context.Context, awsCfg aws.Config, recClient common.RecommendationsClientInterface, accountCache *common.AccountAliasCache, service common.ServiceType, isDryRun bool, cfg Config) ([]common.Recommendation, []common.PurchaseResult) {
 	// Determine regions to process
-	regionsToProcess := regions
+	regionsToProcess := cfg.Regions
 	if len(regionsToProcess) == 0 {
 		// Default to all AWS regions
 		common.AppLogger.Printf("🌍 Processing all AWS regions for %s...\n", getServiceDisplayName(service))
-		allRegions, err := getAllAWSRegions(ctx, cfg)
+		allRegions, err := getAllAWSRegions(ctx, awsCfg)
 		if err != nil {
 			log.Printf("❌ Failed to get AWS regions: %v", err)
 			// Fall back to auto-discovery
@@ -150,8 +449,8 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 		params := common.RecommendationParams{
 			Service:            service,
 			Region:             region,
-			PaymentOption:      paymentOption,
-			TermInYears:        termYears,
+			PaymentOption:      cfg.PaymentOption,
+			TermInYears:        cfg.TermYears,
 			LookbackPeriodDays: 7,
 		}
 
@@ -168,9 +467,16 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 
 		common.AppLogger.Printf("  ✅ Found %d recommendations\n", len(recs))
 
+		// Populate account names from account IDs
+		for i := range recs {
+			if recs[i].AccountID != "" {
+				recs[i].AccountName = accountCache.GetAccountAlias(ctx, recs[i].AccountID)
+			}
+		}
+
 		// Apply region and instance type filters
 		originalCount := len(recs)
-		recs = applyFilters(recs)
+		recs = applyFilters(recs, cfg)
 		if len(recs) == 0 {
 			common.AppLogger.Printf("  ℹ️  No recommendations after applying filters\n")
 			continue
@@ -180,13 +486,18 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 		}
 
 		// Apply coverage
-		filteredRecs := applyCommonCoverage(recs, coverage)
-		common.AppLogger.Printf("  📈 Applying %.1f%% coverage: %d recommendations selected\n", coverage, len(filteredRecs))
+		filteredRecs := applyCommonCoverage(recs, cfg.Coverage)
+		common.AppLogger.Printf("  📈 Applying %.1f%% coverage: %d recommendations selected\n", cfg.Coverage, len(filteredRecs))
+
+		// Apply count override if specified
+		if cfg.OverrideCount > 0 {
+			filteredRecs = common.ApplyCountOverride(filteredRecs, cfg.OverrideCount)
+		}
 
 		serviceRecs = append(serviceRecs, filteredRecs...)
 
 		// Get purchase client
-		regionalCfg := cfg.Copy()
+		regionalCfg := awsCfg.Copy()
 		regionalCfg.Region = region
 		purchaseClient := createPurchaseClient(service, regionalCfg)
 
@@ -213,11 +524,11 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 		}
 
 		// Apply instance limit if specified
-		if maxInstances > 0 {
+		if cfg.MaxInstances > 0 {
 			beforeLimit := len(filteredRecs)
-			filteredRecs = common.ApplyInstanceLimit(filteredRecs, maxInstances)
+			filteredRecs = common.ApplyInstanceLimit(filteredRecs, cfg.MaxInstances)
 			if len(filteredRecs) < beforeLimit {
-				common.AppLogger.Printf("  🔒 Applied instance limit: %d recommendations after limiting to %d instances\n", len(filteredRecs), maxInstances)
+				common.AppLogger.Printf("  🔒 Applied instance limit: %d recommendations after limiting to %d instances\n", len(filteredRecs), cfg.MaxInstances)
 			}
 		}
 
@@ -233,7 +544,7 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 				result = common.PurchaseResult{
 					Config:     rec,
 					Success:    true,
-					PurchaseID: generatePurchaseID(rec, region, j+1, true),
+					PurchaseID: generatePurchaseID(rec, region, j+1, true, cfg.Coverage),
 					Message:    "Dry run - no actual purchase",
 					Timestamp:  time.Now(),
 				}
@@ -247,13 +558,13 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 					}
 
 					// Ask for confirmation before proceeding with purchases
-					if !common.ConfirmPurchase(totalInstances, totalCost, skipConfirmation) {
+					if !common.ConfirmPurchase(totalInstances, totalCost, cfg.SkipConfirmation) {
 						// User cancelled - mark all as cancelled and exit
 						for k := range filteredRecs {
 							cancelResult := common.PurchaseResult{
 								Config:     filteredRecs[k],
 								Success:    false,
-								PurchaseID: generatePurchaseID(filteredRecs[k], region, k+1, false),
+								PurchaseID: generatePurchaseID(filteredRecs[k], region, k+1, false, cfg.Coverage),
 								Message:    "Purchase cancelled by user",
 								Timestamp:  time.Now(),
 							}
@@ -267,7 +578,7 @@ func processService(ctx context.Context, cfg aws.Config, recClient common.Recomm
 				common.AppLogger.Printf("    ⚠️  ACTUAL PURCHASE: About to buy %d instances of %s\n", rec.Count, rec.InstanceType)
 				result = purchaseClient.PurchaseRI(ctx, rec)
 				if result.PurchaseID == "" {
-					result.PurchaseID = generatePurchaseID(rec, region, j+1, false)
+					result.PurchaseID = generatePurchaseID(rec, region, j+1, false, cfg.Coverage)
 				}
 				// Add delay between purchases to avoid rate limiting
 				// This delay can be disabled for testing by setting DISABLE_PURCHASE_DELAY env var
@@ -431,6 +742,8 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			UpfrontCost:              r.Config.UpfrontCost,
 			RecurringMonthlyCost:     r.Config.RecurringMonthlyCost,
 			EstimatedMonthlyOnDemand: r.Config.EstimatedMonthlyOnDemand,
+			AccountID:                r.Config.AccountID,
+			AccountName:              r.Config.AccountName,
 		}
 
 		// Add service-specific details
@@ -543,22 +856,27 @@ func printMultiServiceSummary(allRecommendations []common.Recommendation, allRes
 }
 
 // applyFilters applies region, instance type, and engine filters to recommendations
-func applyFilters(recs []common.Recommendation) []common.Recommendation {
+func applyFilters(recs []common.Recommendation, cfg Config) []common.Recommendation {
 	var filtered []common.Recommendation
 
 	for _, rec := range recs {
 		// Apply region filters
-		if !shouldIncludeRegion(rec.Region) {
+		if !shouldIncludeRegion(rec.Region, cfg) {
 			continue
 		}
 
 		// Apply instance type filters
-		if !shouldIncludeInstanceType(rec.InstanceType) {
+		if !shouldIncludeInstanceType(rec.InstanceType, cfg) {
 			continue
 		}
 
 		// Apply engine filters
-		if !shouldIncludeEngine(rec) {
+		if !shouldIncludeEngine(rec, cfg) {
+			continue
+		}
+
+		// Apply account filters
+		if !shouldIncludeAccount(rec.AccountName, cfg) {
 			continue
 		}
 
@@ -569,11 +887,11 @@ func applyFilters(recs []common.Recommendation) []common.Recommendation {
 }
 
 // shouldIncludeRegion checks if a region should be included based on filters
-func shouldIncludeRegion(region string) bool {
+func shouldIncludeRegion(region string, cfg Config) bool {
 	// If include list is specified, region must be in it
-	if len(includeRegions) > 0 {
+	if len(cfg.IncludeRegions) > 0 {
 		found := false
-		for _, r := range includeRegions {
+		for _, r := range cfg.IncludeRegions {
 			if r == region {
 				found = true
 				break
@@ -585,8 +903,8 @@ func shouldIncludeRegion(region string) bool {
 	}
 
 	// If exclude list is specified, region must not be in it
-	if len(excludeRegions) > 0 {
-		for _, r := range excludeRegions {
+	if len(cfg.ExcludeRegions) > 0 {
+		for _, r := range cfg.ExcludeRegions {
 			if r == region {
 				return false
 			}
@@ -597,11 +915,11 @@ func shouldIncludeRegion(region string) bool {
 }
 
 // shouldIncludeInstanceType checks if an instance type should be included based on filters
-func shouldIncludeInstanceType(instanceType string) bool {
+func shouldIncludeInstanceType(instanceType string, cfg Config) bool {
 	// If include list is specified, instance type must be in it
-	if len(includeInstanceTypes) > 0 {
+	if len(cfg.IncludeInstanceTypes) > 0 {
 		found := false
-		for _, t := range includeInstanceTypes {
+		for _, t := range cfg.IncludeInstanceTypes {
 			if t == instanceType {
 				found = true
 				break
@@ -613,8 +931,8 @@ func shouldIncludeInstanceType(instanceType string) bool {
 	}
 
 	// If exclude list is specified, instance type must not be in it
-	if len(excludeInstanceTypes) > 0 {
-		for _, t := range excludeInstanceTypes {
+	if len(cfg.ExcludeInstanceTypes) > 0 {
+		for _, t := range cfg.ExcludeInstanceTypes {
 			if t == instanceType {
 				return false
 			}
@@ -625,21 +943,21 @@ func shouldIncludeInstanceType(instanceType string) bool {
 }
 
 // shouldIncludeEngine checks if a recommendation should be included based on engine filters
-func shouldIncludeEngine(rec common.Recommendation) bool {
+func shouldIncludeEngine(rec common.Recommendation, cfg Config) bool {
 	// Extract engine from recommendation
 	engine := getEngineFromRecommendation(rec)
 	if engine == "" {
 		// If no engine info, include by default unless there's an include list
-		return len(includeEngines) == 0
+		return len(cfg.IncludeEngines) == 0
 	}
 
 	// Normalize engine name to lowercase for comparison
 	engine = strings.ToLower(engine)
 
 	// If include list is specified, engine must be in it
-	if len(includeEngines) > 0 {
+	if len(cfg.IncludeEngines) > 0 {
 		found := false
-		for _, e := range includeEngines {
+		for _, e := range cfg.IncludeEngines {
 			if strings.ToLower(e) == engine {
 				found = true
 				break
@@ -651,9 +969,45 @@ func shouldIncludeEngine(rec common.Recommendation) bool {
 	}
 
 	// If exclude list is specified, engine must not be in it
-	if len(excludeEngines) > 0 {
-		for _, e := range excludeEngines {
+	if len(cfg.ExcludeEngines) > 0 {
+		for _, e := range cfg.ExcludeEngines {
 			if strings.ToLower(e) == engine {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// shouldIncludeAccount checks if an account should be included based on filters
+func shouldIncludeAccount(accountName string, cfg Config) bool {
+	// If account name is empty and there are filters, skip it (unless include list is empty)
+	if accountName == "" {
+		return len(cfg.IncludeAccounts) == 0 && len(cfg.ExcludeAccounts) == 0
+	}
+
+	// Normalize account name to lowercase for comparison
+	accountLower := strings.ToLower(accountName)
+
+	// If include list is specified, account must be in it
+	if len(cfg.IncludeAccounts) > 0 {
+		found := false
+		for _, a := range cfg.IncludeAccounts {
+			if strings.ToLower(a) == accountLower {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// If exclude list is specified, account must not be in it
+	if len(cfg.ExcludeAccounts) > 0 {
+		for _, a := range cfg.ExcludeAccounts {
+			if strings.ToLower(a) == accountLower {
 				return false
 			}
 		}
