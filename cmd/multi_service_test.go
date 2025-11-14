@@ -738,7 +738,7 @@ func TestPrintMultiServiceSummary(t *testing.T) {
 			}
 
 			if len(tt.stats) > 0 {
-				assert.Contains(t, output, "By Service:")
+				assert.Contains(t, output, "RESERVED INSTANCES:")
 			}
 
 			if len(tt.results) > 0 {
