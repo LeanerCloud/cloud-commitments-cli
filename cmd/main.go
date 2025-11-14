@@ -26,6 +26,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// MaxReasonableInstances is the maximum number of instances that can be processed
+	// This is a safety limit to prevent accidental large purchases
+	MaxReasonableInstances = 10000
+)
+
 // Config holds all configuration for the RI helper tool
 type Config struct {
 	Providers            []string
@@ -63,7 +69,8 @@ var rootCmd = &cobra.Command{
 	Long: `A tool that fetches Reserved Instance recommendations from AWS Cost Explorer
 for multiple services (RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB) and
 purchases them based on specified coverage percentage. Supports multiple regions.`,
-	Run: runTool,
+	PreRunE: validateFlags,
+	Run:     runTool,
 }
 
 func init() {
@@ -91,9 +98,6 @@ func init() {
 	rootCmd.Flags().BoolVar(&toolCfg.SkipConfirmation, "yes", false, "Skip confirmation prompt for purchases (use with caution)")
 	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
 	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
-
-	// Add validation for flags
-	rootCmd.PreRunE = validateFlags
 }
 
 // Package-level Config that cobra flags bind to
@@ -111,9 +115,19 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("max-instances must be 0 (no limit) or a positive number, got: %d", toolCfg.MaxInstances)
 	}
 
+	// Validate max instances doesn't exceed reasonable limit
+	if toolCfg.MaxInstances > MaxReasonableInstances {
+		return fmt.Errorf("max-instances (%d) exceeds reasonable limit of %d", toolCfg.MaxInstances, MaxReasonableInstances)
+	}
+
 	// Validate override count
 	if toolCfg.OverrideCount < 0 {
 		return fmt.Errorf("override-count must be 0 (disabled) or a positive number, got: %d", toolCfg.OverrideCount)
+	}
+
+	// Validate override count doesn't exceed reasonable limit
+	if toolCfg.OverrideCount > MaxReasonableInstances {
+		return fmt.Errorf("override-count (%d) exceeds reasonable limit of %d", toolCfg.OverrideCount, MaxReasonableInstances)
 	}
 
 	// Validate payment option
@@ -398,4 +412,3 @@ func runTool(cmd *cobra.Command, args []string) {
 	// Always use the multi-service implementation
 	runToolMultiService(ctx, toolCfg)
 }
-

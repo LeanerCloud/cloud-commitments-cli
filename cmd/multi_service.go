@@ -754,20 +754,20 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			AccountName:              r.Config.AccountName,
 		}
 
-		// Add service-specific details
+		// Add service-specific details with nil checks
 		switch r.Config.Service {
 		case common.ServiceRDS:
-			if rdsDetails, ok := r.Config.ServiceDetails.(*common.RDSDetails); ok {
+			if rdsDetails, ok := r.Config.ServiceDetails.(*common.RDSDetails); ok && rdsDetails != nil {
 				oldRec.Engine = rdsDetails.Engine
 				oldRec.AZConfig = rdsDetails.AZConfig
 			}
 		case common.ServiceElastiCache:
-			if ecDetails, ok := r.Config.ServiceDetails.(*common.ElastiCacheDetails); ok {
+			if ecDetails, ok := r.Config.ServiceDetails.(*common.ElastiCacheDetails); ok && ecDetails != nil {
 				oldRec.Engine = ecDetails.Engine
 				oldRec.AZConfig = "N/A"
 			}
 		case common.ServiceEC2:
-			if ec2Details, ok := r.Config.ServiceDetails.(*common.EC2Details); ok {
+			if ec2Details, ok := r.Config.ServiceDetails.(*common.EC2Details); ok && ec2Details != nil {
 				oldRec.Engine = ec2Details.Platform
 				oldRec.AZConfig = ec2Details.Tenancy
 			}
