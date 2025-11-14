@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
+	"github.com/LeanerCloud/CUDly/internal/common"
+	"github.com/LeanerCloud/CUDly/internal/recommendations"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 )
@@ -85,6 +85,7 @@ func TestGetAllServices(t *testing.T) {
 		common.ServiceOpenSearch,
 		common.ServiceRedshift,
 		common.ServiceMemoryDB,
+		common.ServiceSavingsPlans,
 	}
 
 	assert.Equal(t, expected, services)

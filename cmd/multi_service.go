@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/csv"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/purchase"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
+	"github.com/LeanerCloud/CUDly/internal/common"
+	"github.com/LeanerCloud/CUDly/internal/csv"
+	"github.com/LeanerCloud/CUDly/internal/purchase"
+	"github.com/LeanerCloud/CUDly/internal/recommendations"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -420,23 +420,29 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient common.Rec
 	// Determine regions to process
 	regionsToProcess := cfg.Regions
 	if len(regionsToProcess) == 0 {
-		// Default to all AWS regions
-		common.AppLogger.Printf("🌍 Processing all AWS regions for %s...\n", getServiceDisplayName(service))
-		allRegions, err := getAllAWSRegions(ctx, awsCfg)
-		if err != nil {
-			log.Printf("❌ Failed to get AWS regions: %v", err)
-			// Fall back to auto-discovery
-			common.AppLogger.Printf("🔍 Falling back to auto-discovery...\n")
-			discoveredRegions, err := discoverRegionsForService(ctx, recClient, service)
-			if err != nil {
-				log.Printf("❌ Failed to discover regions: %v", err)
-				return nil, nil
-			}
-			regionsToProcess = discoveredRegions
+		// Savings Plans are account-level, not regional - only query once
+		if service == common.ServiceSavingsPlans {
+			common.AppLogger.Printf("🌍 Fetching account-level Savings Plans recommendations...\n")
+			regionsToProcess = []string{"us-east-1"} // Single query for account-level data
 		} else {
-			regionsToProcess = allRegions
+			// Default to all AWS regions for other services
+			common.AppLogger.Printf("🌍 Processing all AWS regions for %s...\n", getServiceDisplayName(service))
+			allRegions, err := getAllAWSRegions(ctx, awsCfg)
+			if err != nil {
+				log.Printf("❌ Failed to get AWS regions: %v", err)
+				// Fall back to auto-discovery
+				common.AppLogger.Printf("🔍 Falling back to auto-discovery...\n")
+				discoveredRegions, err := discoverRegionsForService(ctx, recClient, service)
+				if err != nil {
+					log.Printf("❌ Failed to discover regions: %v", err)
+					return nil, nil
+				}
+				regionsToProcess = discoveredRegions
+			} else {
+				regionsToProcess = allRegions
+			}
+			common.AppLogger.Printf("📍 Processing %d region(s)\n", len(regionsToProcess))
 		}
-		common.AppLogger.Printf("📍 Processing %d region(s)\n", len(regionsToProcess))
 	}
 
 	serviceRecs := make([]common.Recommendation, 0)
@@ -624,6 +630,8 @@ func getServiceDisplayName(service common.ServiceType) string {
 		return "Redshift"
 	case common.ServiceMemoryDB:
 		return "MemoryDB"
+	case common.ServiceSavingsPlans:
+		return "Savings Plans"
 	default:
 		return string(service)
 	}
@@ -798,58 +806,152 @@ func printMultiServiceSummary(allRecommendations []common.Recommendation, allRes
 		fmt.Println("Mode: ACTUAL PURCHASE")
 	}
 
-	// Overall statistics
-	totalRecommendations := len(allRecommendations)
-	totalSuccessful := 0
-	totalFailed := 0
-	totalInstances := int32(0)
-	totalSavings := float64(0)
+	// Separate Savings Plans from RIs
+	spStats := ServiceProcessingStats{}
+	riStats := make(map[common.ServiceType]ServiceProcessingStats)
 
-	for _, result := range allResults {
-		if result.Success {
-			totalSuccessful++
-			totalInstances += result.Config.Count
+	for service, stats := range serviceStats {
+		if service == common.ServiceSavingsPlans {
+			spStats = stats
 		} else {
-			totalFailed++
+			riStats[service] = stats
 		}
 	}
 
-	for _, stats := range serviceStats {
-		totalSavings += stats.TotalEstimatedSavings
+	// Calculate RI totals
+	riRecommendations := 0
+	riInstances := int32(0)
+	riSavings := float64(0)
+	riSuccess := 0
+	riFailed := 0
+
+	for _, stats := range riStats {
+		riRecommendations += stats.RecommendationsSelected
+		riInstances += stats.InstancesProcessed
+		riSavings += stats.TotalEstimatedSavings
+		riSuccess += stats.SuccessfulPurchases
+		riFailed += stats.FailedPurchases
 	}
 
-	fmt.Printf("Total services processed: %d\n", len(serviceStats))
-	fmt.Printf("Total recommendations: %d\n", totalRecommendations)
-	fmt.Printf("Successful operations: %d\n", totalSuccessful)
-	fmt.Printf("Failed operations: %d\n", totalFailed)
-	fmt.Printf("Total instances: %d\n", totalInstances)
-	if totalSavings > 0 {
-		fmt.Printf("Total estimated monthly savings: $%.2f\n", totalSavings)
-	}
-
-	// Service breakdown
-	if len(serviceStats) > 0 {
-		fmt.Println("\n📊 By Service:")
+	// Show Reserved Instances section
+	if len(riStats) > 0 {
+		fmt.Println("\n💰 RESERVED INSTANCES:")
 		fmt.Println("--------------------------------------------------")
-		for service, stats := range serviceStats {
-			fmt.Printf("%-15s | Recs: %3d | Instances: %3d | Success: %3d | Failed: %3d\n",
+		for service, stats := range riStats {
+			fmt.Printf("%-15s | Recs: %3d | Instances: %3d | Savings: $%8.2f/mo\n",
 				getServiceDisplayName(service),
 				stats.RecommendationsSelected,
 				stats.InstancesProcessed,
-				stats.SuccessfulPurchases,
-				stats.FailedPurchases)
+				stats.TotalEstimatedSavings)
+		}
+		fmt.Printf("%-15s | Recs: %3d | Instances: %3d | Savings: $%8.2f/mo\n",
+			"TOTAL RIs",
+			riRecommendations,
+			riInstances,
+			riSavings)
+	}
+
+	// Show Savings Plans section
+	if spStats.RecommendationsSelected > 0 {
+		fmt.Println("\n📊 SAVINGS PLANS (Alternative to EC2 RIs):")
+		fmt.Println("--------------------------------------------------")
+
+		// Break down by SP type from recommendations
+		computeSavings := 0.0
+		ec2InstanceSavings := 0.0
+		computeCount := 0
+		ec2InstanceCount := 0
+
+		for _, rec := range allRecommendations {
+			if rec.Service == common.ServiceSavingsPlans {
+				if details, ok := rec.ServiceDetails.(*common.SavingsPlanDetails); ok {
+					if details.PlanType == "Compute" {
+						computeSavings += rec.EstimatedCost
+						computeCount++
+					} else if details.PlanType == "EC2Instance" {
+						ec2InstanceSavings += rec.EstimatedCost
+						ec2InstanceCount++
+					}
+				}
+			}
+		}
+
+		if computeCount > 0 {
+			fmt.Printf("  Compute SP    | Recs: %3d | Covers: EC2, Fargate, Lambda | $%8.2f/mo\n", computeCount, computeSavings)
+		}
+		if ec2InstanceCount > 0 {
+			fmt.Printf("  EC2 Inst SP   | Recs: %3d | Covers: EC2 only (better rate) | $%8.2f/mo\n", ec2InstanceCount, ec2InstanceSavings)
+		}
+
+		// Show best SP option
+		bestSP := "None"
+		bestSPSavings := 0.0
+		if ec2InstanceSavings > computeSavings {
+			bestSP = "EC2 Instance SP"
+			bestSPSavings = ec2InstanceSavings
+		} else if computeSavings > 0 {
+			bestSP = "Compute SP"
+			bestSPSavings = computeSavings
+		}
+
+		fmt.Printf("\n  ⭐ Recommended: %s ($%.2f/mo)\n", bestSP, bestSPSavings)
+	}
+
+	// Show comparison if we have both
+	if len(riStats) > 0 && spStats.RecommendationsSelected > 0 {
+		fmt.Println("\n🔄 COMPARISON:")
+		fmt.Println("--------------------------------------------------")
+
+		// Option 1: All RIs
+		fmt.Printf("Option 1 (All RIs):\n")
+		fmt.Printf("  Total monthly savings: $%.2f\n", riSavings)
+		fmt.Printf("  Pros: Highest discount for specific instance types\n")
+		fmt.Printf("  Cons: Less flexible, locked to instance family\n")
+
+		// Option 2: SPs for EC2 + RIs for others
+		ec2RISavings := 0.0
+		if stats, ok := riStats[common.ServiceEC2]; ok {
+			ec2RISavings = stats.TotalEstimatedSavings
+		}
+
+		bestSPSavings := 0.0
+		for _, rec := range allRecommendations {
+			if rec.Service == common.ServiceSavingsPlans {
+				if details, ok := rec.ServiceDetails.(*common.SavingsPlanDetails); ok {
+					if details.PlanType == "EC2Instance" {
+						bestSPSavings += rec.EstimatedCost
+					} else if bestSPSavings == 0 && details.PlanType == "Compute" {
+						bestSPSavings += rec.EstimatedCost
+					}
+				}
+			}
+		}
+
+		option2Savings := riSavings - ec2RISavings + bestSPSavings
+
+		fmt.Printf("\nOption 2 (Savings Plans for EC2 + RIs for other services):\n")
+		fmt.Printf("  Total monthly savings: $%.2f\n", option2Savings)
+		fmt.Printf("  Pros: More flexible, can change instance families\n")
+		fmt.Printf("  Cons: Slightly lower EC2 discount than dedicated RIs\n")
+
+		if option2Savings > riSavings {
+			fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 2 (saves $%.2f/mo more)\n", option2Savings-riSavings)
+		} else {
+			fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 1 (saves $%.2f/mo more)\n", riSavings-option2Savings)
 		}
 	}
 
 	// Success rate
-	if len(allResults) > 0 {
-		successRate := (float64(totalSuccessful) / float64(len(allResults))) * 100
+	totalResults := riSuccess + riFailed
+	if totalResults > 0 {
+		successRate := (float64(riSuccess) / float64(totalResults)) * 100
 		fmt.Printf("\nOverall success rate: %.1f%%\n", successRate)
 	}
 
 	if isDryRun {
 		fmt.Println("\n💡 To actually purchase these RIs, run with --purchase flag")
-	} else if totalSuccessful > 0 {
+		fmt.Println("   Note: Savings Plans purchasing not yet implemented")
+	} else if riSuccess > 0 {
 		fmt.Println("\n🎉 Purchase operations completed!")
 		fmt.Println("⏰ Allow up to 15 minutes for RIs to appear in your account")
 	}

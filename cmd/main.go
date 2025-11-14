@@ -9,14 +9,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/ec2"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/elasticache"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/memorydb"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/opensearch"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/rds"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/recommendations"
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/redshift"
+	"github.com/LeanerCloud/CUDly/internal/common"
+	"github.com/LeanerCloud/CUDly/internal/ec2"
+	"github.com/LeanerCloud/CUDly/internal/elasticache"
+	"github.com/LeanerCloud/CUDly/internal/memorydb"
+	"github.com/LeanerCloud/CUDly/internal/opensearch"
+	"github.com/LeanerCloud/CUDly/internal/rds"
+	"github.com/LeanerCloud/CUDly/internal/recommendations"
+	"github.com/LeanerCloud/CUDly/internal/redshift"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/savingsplans"
+	_ "github.com/LeanerCloud/CUDly/providers/aws"
+	_ "github.com/LeanerCloud/CUDly/providers/azure"
+	_ "github.com/LeanerCloud/CUDly/providers/gcp"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -24,6 +28,7 @@ import (
 
 // Config holds all configuration for the RI helper tool
 type Config struct {
+	Providers            []string
 	Regions              []string
 	Services             []string
 	Coverage             float64
@@ -65,7 +70,7 @@ func init() {
 	// Note: We still bind to package-level variables here for cobra's flag system
 	// These will be copied into a ToolConfig in runTool
 	rootCmd.Flags().StringSliceVarP(&toolCfg.Regions, "regions", "r", []string{}, "AWS regions (comma-separated or multiple flags). If empty, auto-discovers regions from recommendations")
-	rootCmd.Flags().StringSliceVarP(&toolCfg.Services, "services", "s", []string{"rds"}, "Services to process (rds, elasticache, ec2, opensearch, redshift, memorydb)")
+	rootCmd.Flags().StringSliceVarP(&toolCfg.Services, "services", "s", []string{"rds"}, "Services to process (rds, elasticache, ec2, opensearch, redshift, memorydb, savingsplans)")
 	rootCmd.Flags().BoolVar(&toolCfg.AllServices, "all-services", false, "Process all supported services")
 	rootCmd.Flags().Float64VarP(&toolCfg.Coverage, "coverage", "c", 80.0, "Percentage of recommendations to purchase (0-100)")
 	rootCmd.Flags().BoolVar(&toolCfg.ActualPurchase, "purchase", false, "Actually purchase RIs instead of just printing the data")
@@ -124,6 +129,23 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	// Validate term years
 	if toolCfg.TermYears != 1 && toolCfg.TermYears != 3 {
 		return fmt.Errorf("invalid term: %d years. Must be 1 or 3", toolCfg.TermYears)
+	}
+
+	// Warn about RDS 3-year no-upfront limitation
+	if toolCfg.PaymentOption == "no-upfront" && toolCfg.TermYears == 3 {
+		services := determineServicesToProcess(toolCfg)
+		hasRDS := false
+		for _, svc := range services {
+			if svc == common.ServiceRDS {
+				hasRDS = true
+				break
+			}
+		}
+		if hasRDS || toolCfg.AllServices {
+			log.Println("⚠️  WARNING: AWS does not offer 3-year no-upfront Reserved Instances for RDS.")
+			log.Println("    RDS 3-year RIs only support: all-upfront, partial-upfront")
+			log.Println("    No RDS recommendations will be found with this combination.")
+		}
 	}
 
 	// Validate CSV output path if provided
@@ -196,13 +218,15 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 func parseServices(serviceNames []string) []common.ServiceType {
 	var result []common.ServiceType
 	serviceMap := map[string]common.ServiceType{
-		"rds":         common.ServiceRDS,
-		"elasticache": common.ServiceElastiCache,
-		"ec2":         common.ServiceEC2,
-		"opensearch":  common.ServiceOpenSearch,
+		"rds":           common.ServiceRDS,
+		"elasticache":   common.ServiceElastiCache,
+		"ec2":           common.ServiceEC2,
+		"opensearch":    common.ServiceOpenSearch,
 		"elasticsearch": common.ServiceElasticsearch, // Legacy alias
-		"redshift":    common.ServiceRedshift,
-		"memorydb":    common.ServiceMemoryDB,
+		"redshift":      common.ServiceRedshift,
+		"memorydb":      common.ServiceMemoryDB,
+		"savingsplans":  common.ServiceSavingsPlans,
+		"sp":            common.ServiceSavingsPlans, // Short alias
 	}
 
 	for _, name := range serviceNames {
@@ -225,6 +249,7 @@ func getAllServices() []common.ServiceType {
 		common.ServiceOpenSearch,
 		common.ServiceRedshift,
 		common.ServiceMemoryDB,
+		common.ServiceSavingsPlans,
 	}
 }
 
@@ -244,6 +269,8 @@ func createPurchaseClient(service common.ServiceType, cfg aws.Config) common.Pur
 		return redshift.NewPurchaseClient(cfg)
 	case common.ServiceMemoryDB:
 		return memorydb.NewPurchaseClient(cfg)
+	case common.ServiceSavingsPlans:
+		return savingsplans.NewPurchaseClient(cfg)
 	default:
 		return nil
 	}

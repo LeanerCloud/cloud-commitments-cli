@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/LeanerCloud/rds-ri-purchase-tool/internal/common"
+	"github.com/LeanerCloud/CUDly/internal/common"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -772,7 +772,7 @@ func TestFormatServices(t *testing.T) {
 		{
 			name:     "All services",
 			services: getAllServices(),
-			expected: "RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB",
+			expected: "RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB, Savings Plans",
 		},
 	}
 
