@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LeanerCloud/CUDly/internal/common"
@@ -16,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 )
 
 // EC2ClientInterface defines the interface for EC2 operations
@@ -98,7 +101,12 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	printPaymentAndTerm(cfg)
 
 	// Load AWS configuration
-	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+	var configOptions []func(*config.LoadOptions) error
+	configOptions = append(configOptions, config.WithRegion("us-east-1"))
+	if cfg.Profile != "" {
+		configOptions = append(configOptions, config.WithSharedConfigProfile(cfg.Profile))
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, configOptions...)
 	if err != nil {
 		log.Fatalf("Failed to load AWS config: %v", err)
 	}
@@ -163,9 +171,31 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 
 // filterAndAdjustRecommendations applies filters, coverage, count override, and instance limits to recommendations
 func filterAndAdjustRecommendations(recommendations []common.Recommendation, csvModeCoverage float64, cfg Config) []common.Recommendation {
+	// Query running instances for engine version validation
+	log.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...")
+	instanceVersions, err := queryRunningInstanceEngineVersions(context.Background(), cfg)
+	if err != nil {
+		log.Printf("⚠️  Warning: Failed to query running instances for engine version validation: %v", err)
+		log.Printf("   Continuing without engine version filtering")
+		instanceVersions = make(map[string][]InstanceEngineVersion)
+	} else {
+		log.Printf("✅ Found %d instance types with version information across all regions", len(instanceVersions))
+	}
+
+	// Query major engine versions for extended support detection
+	log.Printf("🔍 Querying AWS RDS major engine versions for extended support information...")
+	versionInfo, err := queryMajorEngineVersions(context.Background(), cfg)
+	if err != nil {
+		log.Printf("⚠️  Warning: Failed to query major engine versions: %v", err)
+		log.Printf("   Continuing without extended support detection")
+		versionInfo = make(map[string]MajorEngineVersionInfo)
+	} else {
+		log.Printf("✅ Found support information for %d major engine versions", len(versionInfo))
+	}
+
 	// Apply filters
 	originalCount := len(recommendations)
-	recommendations = applyFilters(recommendations, cfg)
+	recommendations = applyFilters(recommendations, cfg, instanceVersions, versionInfo)
 	if len(recommendations) < originalCount {
 		common.AppLogger.Printf("🔍 After filters: %d recommendations (filtered out %d)\n", len(recommendations), originalCount-len(recommendations))
 	}
@@ -342,7 +372,12 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	}
 
 	// Load AWS configuration
-	awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+	var configOptions []func(*config.LoadOptions) error
+	configOptions = append(configOptions, config.WithRegion("us-east-1"))
+	if cfg.Profile != "" {
+		configOptions = append(configOptions, config.WithSharedConfigProfile(cfg.Profile))
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, configOptions...)
 	if err != nil {
 		log.Fatalf("Failed to load AWS config: %v", err)
 	}
@@ -448,6 +483,28 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient common.Rec
 	serviceRecs := make([]common.Recommendation, 0)
 	serviceResults := make([]common.PurchaseResult, 0)
 
+	// Query running instances for engine version validation (once for all regions)
+	log.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...")
+	instanceVersions, err := queryRunningInstanceEngineVersions(ctx, cfg)
+	if err != nil {
+		log.Printf("⚠️  Warning: Failed to query running instances for engine version validation: %v", err)
+		log.Printf("   Continuing without engine version filtering")
+		instanceVersions = make(map[string][]InstanceEngineVersion)
+	} else {
+		log.Printf("✅ Found %d instance types with version information across all regions", len(instanceVersions))
+	}
+
+	// Query major engine versions for extended support detection (once for all regions)
+	log.Printf("🔍 Querying AWS RDS major engine versions for extended support information...")
+	versionInfo, err := queryMajorEngineVersions(ctx, cfg)
+	if err != nil {
+		log.Printf("⚠️  Warning: Failed to query major engine versions: %v", err)
+		log.Printf("   Continuing without extended support detection")
+		versionInfo = make(map[string]MajorEngineVersionInfo)
+	} else {
+		log.Printf("✅ Found support information for %d major engine versions", len(versionInfo))
+	}
+
 	for i, region := range regionsToProcess {
 		common.AppLogger.Printf("\n  📍 [%d/%d] Region: %s\n", i+1, len(regionsToProcess), region)
 
@@ -482,7 +539,7 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient common.Rec
 
 		// Apply region and instance type filters
 		originalCount := len(recs)
-		recs = applyFilters(recs, cfg)
+		recs = applyFilters(recs, cfg, instanceVersions, versionInfo)
 		if len(recs) == 0 {
 			common.AppLogger.Printf("  ℹ️  No recommendations after applying filters\n")
 			continue
@@ -957,8 +1014,8 @@ func printMultiServiceSummary(allRecommendations []common.Recommendation, allRes
 	}
 }
 
-// applyFilters applies region, instance type, and engine filters to recommendations
-func applyFilters(recs []common.Recommendation, cfg Config) []common.Recommendation {
+// applyFilters applies region, instance type, engine, and engine version filters to recommendations
+func applyFilters(recs []common.Recommendation, cfg Config, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo) []common.Recommendation {
 	var filtered []common.Recommendation
 
 	for _, rec := range recs {
@@ -982,35 +1039,370 @@ func applyFilters(recs []common.Recommendation, cfg Config) []common.Recommendat
 			continue
 		}
 
+		// Apply engine version filters - adjust instance count by subtracting extended support versions
+		rec = adjustRecommendationForExcludedVersions(rec, instanceVersions, versionInfo)
+		// Skip if all instances were excluded (count reduced to 0)
+		if rec.Count <= 0 {
+			continue
+		}
+
 		filtered = append(filtered, rec)
 	}
 
 	return filtered
 }
 
-// shouldIncludeRegion checks if a region should be included based on filters
-func shouldIncludeRegion(region string, cfg Config) bool {
-	// If include list is specified, region must be in it
-	if len(cfg.IncludeRegions) > 0 {
-		found := false
-		for _, r := range cfg.IncludeRegions {
-			if r == region {
-				found = true
-				break
+// InstanceEngineVersion stores engine version information for an instance
+type InstanceEngineVersion struct {
+	Engine        string
+	EngineVersion string
+	InstanceClass string
+	Region        string
+}
+
+// EngineLifecycleInfo stores lifecycle support information for a major engine version
+type EngineLifecycleInfo struct {
+	LifecycleSupportName      string
+	LifecycleSupportStartDate time.Time
+	LifecycleSupportEndDate   time.Time
+}
+
+// MajorEngineVersionInfo stores support information for a major engine version
+type MajorEngineVersionInfo struct {
+	Engine                    string
+	MajorEngineVersion        string
+	SupportedEngineLifecycles []EngineLifecycleInfo
+}
+
+// queryRunningInstanceEngineVersions queries all running RDS instances and returns their engine versions
+func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[string][]InstanceEngineVersion, error) {
+	// Determine which profile to use for validation
+	validationProfile := cfg.ValidationProfile
+	if validationProfile == "" {
+		validationProfile = cfg.Profile
+	}
+
+	// Load AWS configuration for validation
+	var configOptions []func(*config.LoadOptions) error
+	configOptions = append(configOptions, config.WithRegion("us-east-1"))
+	if validationProfile != "" {
+		configOptions = append(configOptions, config.WithSharedConfigProfile(validationProfile))
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, configOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load validation AWS config: %w", err)
+	}
+
+	// Get all regions
+	ec2Client := ec2.NewFromConfig(awsCfg)
+	regionsOutput, err := ec2Client.DescribeRegions(ctx, &ec2.DescribeRegionsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe regions: %w", err)
+	}
+
+	// Map of instanceType -> []InstanceEngineVersion
+	instanceVersions := make(map[string][]InstanceEngineVersion)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Query all regions concurrently
+	for _, region := range regionsOutput.Regions {
+		wg.Add(1)
+		go func(regionName string) {
+			defer wg.Done()
+
+			// Create RDS client for this region
+			regionCfg := awsCfg.Copy()
+			regionCfg.Region = regionName
+			rdsClient := rds.NewFromConfig(regionCfg)
+
+			// Describe all RDS instances in this region with pagination
+			var marker *string
+			for {
+				input := &rds.DescribeDBInstancesInput{
+					Marker: marker,
+				}
+
+				output, err := rdsClient.DescribeDBInstances(ctx, input)
+				if err != nil {
+					// Log error but continue with other regions
+					log.Printf("⚠️  Warning: Failed to describe RDS instances in %s: %v", regionName, err)
+					break
+				}
+
+				// Collect instances from this page
+				localVersions := make(map[string][]InstanceEngineVersion)
+				for _, dbInstance := range output.DBInstances {
+					instanceClass := aws.ToString(dbInstance.DBInstanceClass)
+					engine := aws.ToString(dbInstance.Engine)
+					engineVersion := aws.ToString(dbInstance.EngineVersion)
+
+					localVersions[instanceClass] = append(localVersions[instanceClass], InstanceEngineVersion{
+						Engine:        engine,
+						EngineVersion: engineVersion,
+						InstanceClass: instanceClass,
+						Region:        regionName,
+					})
+				}
+
+				// Merge into shared map with mutex protection
+				mu.Lock()
+				for instanceType, versions := range localVersions {
+					instanceVersions[instanceType] = append(instanceVersions[instanceType], versions...)
+				}
+				mu.Unlock()
+
+				if output.Marker == nil || aws.ToString(output.Marker) == "" {
+					break
+				}
+				marker = output.Marker
 			}
+		}(aws.ToString(region.RegionName))
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	return instanceVersions, nil
+}
+
+// queryMajorEngineVersions queries AWS for major engine version lifecycle support information
+func queryMajorEngineVersions(ctx context.Context, cfg Config) (map[string]MajorEngineVersionInfo, error) {
+	// Determine which profile to use
+	profile := cfg.ValidationProfile
+	if profile == "" {
+		profile = cfg.Profile
+	}
+
+	// Load AWS configuration
+	var configOptions []func(*config.LoadOptions) error
+	configOptions = append(configOptions, config.WithRegion("us-east-1"))
+	if profile != "" {
+		configOptions = append(configOptions, config.WithSharedConfigProfile(profile))
+	}
+	awsCfg, err := config.LoadDefaultConfig(ctx, configOptions...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	rdsClient := rds.NewFromConfig(awsCfg)
+
+	// Map of "engine:majorVersion" -> MajorEngineVersionInfo
+	versionInfo := make(map[string]MajorEngineVersionInfo)
+
+	// Query all engine types we care about
+	engines := []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}
+
+	for _, engine := range engines {
+		output, err := rdsClient.DescribeDBMajorEngineVersions(ctx, &rds.DescribeDBMajorEngineVersionsInput{
+			Engine: aws.String(engine),
+		})
+		if err != nil {
+			log.Printf("⚠️  Warning: Failed to describe major engine versions for %s: %v", engine, err)
+			continue
 		}
-		if !found {
-			return false
+
+		for _, version := range output.DBMajorEngineVersions {
+			info := MajorEngineVersionInfo{
+				Engine:             aws.ToString(version.Engine),
+				MajorEngineVersion: aws.ToString(version.MajorEngineVersion),
+			}
+
+			// Parse lifecycle support dates
+			for _, lifecycle := range version.SupportedEngineLifecycles {
+				lifecycleInfo := EngineLifecycleInfo{
+					LifecycleSupportName: string(lifecycle.LifecycleSupportName),
+				}
+
+				if lifecycle.LifecycleSupportStartDate != nil {
+					lifecycleInfo.LifecycleSupportStartDate = *lifecycle.LifecycleSupportStartDate
+				}
+				if lifecycle.LifecycleSupportEndDate != nil {
+					lifecycleInfo.LifecycleSupportEndDate = *lifecycle.LifecycleSupportEndDate
+				}
+
+				info.SupportedEngineLifecycles = append(info.SupportedEngineLifecycles, lifecycleInfo)
+			}
+
+			key := fmt.Sprintf("%s:%s", info.Engine, info.MajorEngineVersion)
+			versionInfo[key] = info
 		}
 	}
 
-	// If exclude list is specified, region must not be in it
-	if len(cfg.ExcludeRegions) > 0 {
-		for _, r := range cfg.ExcludeRegions {
-			if r == region {
-				return false
+	return versionInfo, nil
+}
+
+// extractMajorVersion extracts the major version from a full engine version string
+// Handles special cases like Aurora MySQL version mapping
+func extractMajorVersion(engine, fullVersion string) string {
+	if fullVersion == "" {
+		return ""
+	}
+
+	// Normalize engine name
+	normalizedEngine := strings.ToLower(engine)
+	normalizedEngine = strings.ReplaceAll(normalizedEngine, "-", "")
+	normalizedEngine = strings.ReplaceAll(normalizedEngine, " ", "")
+
+	// Handle Aurora MySQL special format
+	if normalizedEngine == "auroramysql" {
+		// Aurora MySQL 2.x is compatible with MySQL 5.7
+		if strings.Contains(fullVersion, "mysql_aurora.2.") {
+			return "5.7"
+		}
+		// Aurora MySQL 3.x is compatible with MySQL 8.0
+		if strings.Contains(fullVersion, "mysql_aurora.3.") {
+			return "8.0"
+		}
+		// Check if it starts with a version number
+		if strings.HasPrefix(fullVersion, "5.7") {
+			return "5.7"
+		}
+		if strings.HasPrefix(fullVersion, "8.0") {
+			return "8.0"
+		}
+	}
+
+	// For standard versions (MySQL, PostgreSQL, Aurora PostgreSQL), extract "X.Y" or "X"
+	parts := strings.Split(fullVersion, ".")
+	if len(parts) >= 2 {
+		// Try to parse as major.minor
+		major := parts[0]
+		minor := parts[1]
+		// Filter out non-numeric parts in minor version
+		numericMinor := ""
+		for _, ch := range minor {
+			if ch >= '0' && ch <= '9' {
+				numericMinor += string(ch)
+			} else {
+				break
 			}
 		}
+		if numericMinor != "" {
+			return major + "." + numericMinor
+		}
+		return major
+	}
+	if len(parts) >= 1 {
+		return parts[0]
+	}
+
+	return ""
+}
+
+// isInExtendedSupport checks if a version is currently in extended support based on lifecycle dates
+func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]MajorEngineVersionInfo) bool {
+	majorVersion := extractMajorVersion(engine, fullVersion)
+	if majorVersion == "" {
+		return false
+	}
+
+	// Normalize engine name for lookup
+	normalizedEngine := strings.ToLower(engine)
+	normalizedEngine = strings.ReplaceAll(normalizedEngine, " ", "")
+
+	// Look up the version info
+	key := fmt.Sprintf("%s:%s", normalizedEngine, majorVersion)
+	info, exists := versionInfo[key]
+	if !exists {
+		// If we don't have info, assume not in extended support
+		return false
+	}
+
+	// Check if current date falls within extended support period
+	now := time.Now()
+	for _, lifecycle := range info.SupportedEngineLifecycles {
+		if lifecycle.LifecycleSupportName == "open-source-rds-extended-support" {
+			// Check if we're past the start date of extended support
+			if now.After(lifecycle.LifecycleSupportStartDate) || now.Equal(lifecycle.LifecycleSupportStartDate) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// adjustRecommendationForExcludedVersions reduces the instance count in a recommendation
+// by the number of instances running versions in extended support
+func adjustRecommendationForExcludedVersions(rec common.Recommendation, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo) common.Recommendation {
+	// Check if this instance type has any running instances
+	versions, exists := instanceVersions[rec.InstanceType]
+	if !exists {
+		// No running instances of this type, return unchanged
+		return rec
+	}
+
+	// Get the engine name from the recommendation
+	var recEngine string
+	switch details := rec.ServiceDetails.(type) {
+	case *common.RDSDetails:
+		recEngine = details.Engine
+	default:
+		return rec // Not RDS, no engine version filtering
+	}
+
+	// Count how many instances in this region are running versions in extended support
+	excludedCount := 0
+	totalMatchingInstances := 0
+
+	for _, version := range versions {
+		// Only count instances in the same region
+		if version.Region != rec.Region {
+			continue
+		}
+
+		// Match engine (normalize by removing spaces/hyphens and comparing lowercase)
+		normalizeEngine := func(engine string) string {
+			normalized := strings.ToLower(engine)
+			normalized = strings.ReplaceAll(normalized, "-", "")
+			normalized = strings.ReplaceAll(normalized, " ", "")
+			return normalized
+		}
+
+		versionEngineNorm := normalizeEngine(version.Engine)
+		recEngineNorm := normalizeEngine(recEngine)
+
+		if versionEngineNorm != recEngineNorm {
+			continue
+		}
+
+		totalMatchingInstances++
+
+		// Check if this version is in extended support
+		if isInExtendedSupport(version.Engine, version.EngineVersion, versionInfo) {
+			majorVersion := extractMajorVersion(version.Engine, version.EngineVersion)
+			excludedCount++
+			log.Printf("🚫 Found extended support instance: %s %s in %s running version %s (major version %s is in extended support)",
+				recEngine, rec.InstanceType, rec.Region, version.EngineVersion, majorVersion)
+		}
+	}
+
+	// If we found excluded instances, reduce the recommendation count
+	if excludedCount > 0 {
+		originalCount := rec.Count
+		newCount := max(0, int32(int(rec.Count)-excludedCount))
+
+		if newCount != originalCount {
+			log.Printf("📉 Adjusting recommendation for %s %s in %s: %d instances → %d instances (excluded %d extended support instances)",
+				recEngine, rec.InstanceType, rec.Region, originalCount, newCount, excludedCount)
+			rec.Count = newCount
+		}
+	}
+
+	return rec
+}
+
+// shouldIncludeRegion checks if a region should be included based on filters
+func shouldIncludeRegion(region string, cfg Config) bool {
+	// If include list is specified, region must be in it
+	if len(cfg.IncludeRegions) > 0 && !slices.Contains(cfg.IncludeRegions, region) {
+		return false
+	}
+
+	// If exclude list is specified, region must not be in it
+	if slices.Contains(cfg.ExcludeRegions, region) {
+		return false
 	}
 
 	return true
@@ -1019,26 +1411,13 @@ func shouldIncludeRegion(region string, cfg Config) bool {
 // shouldIncludeInstanceType checks if an instance type should be included based on filters
 func shouldIncludeInstanceType(instanceType string, cfg Config) bool {
 	// If include list is specified, instance type must be in it
-	if len(cfg.IncludeInstanceTypes) > 0 {
-		found := false
-		for _, t := range cfg.IncludeInstanceTypes {
-			if t == instanceType {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
+	if len(cfg.IncludeInstanceTypes) > 0 && !slices.Contains(cfg.IncludeInstanceTypes, instanceType) {
+		return false
 	}
 
 	// If exclude list is specified, instance type must not be in it
-	if len(cfg.ExcludeInstanceTypes) > 0 {
-		for _, t := range cfg.ExcludeInstanceTypes {
-			if t == instanceType {
-				return false
-			}
-		}
+	if slices.Contains(cfg.ExcludeInstanceTypes, instanceType) {
+		return false
 	}
 
 	return true
@@ -1092,11 +1471,13 @@ func shouldIncludeAccount(accountName string, cfg Config) bool {
 	// Normalize account name to lowercase for comparison
 	accountLower := strings.ToLower(accountName)
 
-	// If include list is specified, account must be in it
+	// If include list is specified, account must contain at least one of the patterns
 	if len(cfg.IncludeAccounts) > 0 {
 		found := false
 		for _, a := range cfg.IncludeAccounts {
-			if strings.ToLower(a) == accountLower {
+			// Support both exact match and substring match
+			filterLower := strings.ToLower(a)
+			if filterLower == accountLower || strings.Contains(accountLower, filterLower) {
 				found = true
 				break
 			}
@@ -1106,10 +1487,12 @@ func shouldIncludeAccount(accountName string, cfg Config) bool {
 		}
 	}
 
-	// If exclude list is specified, account must not be in it
+	// If exclude list is specified, account must not contain any of the patterns
 	if len(cfg.ExcludeAccounts) > 0 {
 		for _, a := range cfg.ExcludeAccounts {
-			if strings.ToLower(a) == accountLower {
+			// Support both exact match and substring match
+			filterLower := strings.ToLower(a)
+			if filterLower == accountLower || strings.Contains(accountLower, filterLower) {
 				return false
 			}
 		}

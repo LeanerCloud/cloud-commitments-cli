@@ -1516,7 +1516,7 @@ func TestApplyFilters(t *testing.T) {
 			toolCfg.ExcludeInstanceTypes = tt.excludeInstanceTypes
 
 			// Apply filters with Config
-			result := applyFilters(tt.recommendations, toolCfg)
+			result := applyFilters(tt.recommendations, toolCfg, make(map[string][]InstanceEngineVersion), make(map[string]MajorEngineVersionInfo))
 
 			// Check count
 			assert.Equal(t, tt.expectedCount, len(result))
@@ -2346,4 +2346,287 @@ elasticache,us-west-2,redis,cache.t3.micro,All Upfront,12,1,123456789012
 			}
 		})
 	}
+}
+// ==================== Tests for adjustRecommendationForExcludedVersions ====================
+
+// Helper to create test version info with extended support dates
+func createTestVersionInfo() map[string]MajorEngineVersionInfo {
+	now := time.Now()
+	pastDate := now.AddDate(0, -6, 0) // 6 months ago
+	futureDate := now.AddDate(3, 0, 0) // 3 years from now
+
+	return map[string]MajorEngineVersionInfo{
+		"aurora-mysql:5.7": {
+			Engine:             "aurora-mysql",
+			MajorEngineVersion: "5.7",
+			SupportedEngineLifecycles: []EngineLifecycleInfo{
+				{
+					LifecycleSupportName:      "open-source-rds-standard-support",
+					LifecycleSupportStartDate: now.AddDate(-5, 0, 0),
+					LifecycleSupportEndDate:   pastDate,
+				},
+				{
+					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportStartDate: pastDate,
+					LifecycleSupportEndDate:   futureDate,
+				},
+			},
+		},
+		"aurora-mysql:8.0": {
+			Engine:             "aurora-mysql",
+			MajorEngineVersion: "8.0",
+			SupportedEngineLifecycles: []EngineLifecycleInfo{
+				{
+					LifecycleSupportName:      "open-source-rds-standard-support",
+					LifecycleSupportStartDate: now.AddDate(-2, 0, 0),
+					LifecycleSupportEndDate:   futureDate,
+				},
+			},
+		},
+	}
+}
+
+func TestAdjustRecommendationForExcludedVersions(t *testing.T) {
+	tests := []struct {
+		name             string
+		recommendation   common.Recommendation
+		versionInfo      map[string]MajorEngineVersionInfo
+		instanceVersions map[string][]InstanceEngineVersion
+		expectedCount    int32
+		expectedAdjusted bool
+	}{
+		{
+			name: "No running instances - recommendation unchanged",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				InstanceType: "db.r5.large",
+				Count:        10,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo:      createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{},
+			expectedCount:    10,
+			expectedAdjusted: false,
+		},
+		{
+			name: "Exclude 1 MySQL 5.7 instance in extended support",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				InstanceType: "db.r5.large",
+				Count:        10,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+					{Engine: "aurora-mysql", EngineVersion: "8.0.mysql_aurora.3.04.0", InstanceClass: "db.r5.large", Region: "us-east-1"},
+					{Engine: "aurora-mysql", EngineVersion: "8.0.mysql_aurora.3.04.0", InstanceClass: "db.r5.large", Region: "us-east-1"},
+				},
+			},
+			expectedCount:    9, // 10 - 1 MySQL 5.7 instance in extended support
+			expectedAdjusted: true,
+		},
+		{
+			name: "Exclude all MySQL 5.7 instances in extended support",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "eu-west-2",
+				InstanceType: "db.t3.small",
+				Count:        2,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.t3.small": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.2", InstanceClass: "db.t3.small", Region: "eu-west-2"},
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.2", InstanceClass: "db.t3.small", Region: "eu-west-2"},
+				},
+			},
+			expectedCount:    0, // All excluded (both in extended support)
+			expectedAdjusted: true,
+		},
+		{
+			name: "Different engine - no adjustment",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				InstanceType: "db.r5.large",
+				Count:        5,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "Aurora PostgreSQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+				},
+			},
+			expectedCount:    5, // Different engine, no adjustment
+			expectedAdjusted: false,
+		},
+		{
+			name: "Different region - no adjustment",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				InstanceType: "db.r5.large",
+				Count:        5,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "eu-west-2"},
+				},
+			},
+			expectedCount:    5, // Different region, no adjustment
+			expectedAdjusted: false,
+		},
+		{
+			name: "MySQL (not Aurora) with standard mysql engine name",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "eu-west-2",
+				InstanceType: "db.r5.4xlarge",
+				Count:        8,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "MySQL",
+				},
+			},
+			versionInfo: map[string]MajorEngineVersionInfo{
+				"mysql:5.7": {
+					Engine:             "mysql",
+					MajorEngineVersion: "5.7",
+					SupportedEngineLifecycles: []EngineLifecycleInfo{
+						{
+							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportStartDate: time.Now().AddDate(0, -6, 0),
+							LifecycleSupportEndDate:   time.Now().AddDate(3, 0, 0),
+						},
+					},
+				},
+			},
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.4xlarge": {
+					{Engine: "mysql", EngineVersion: "5.7.44", InstanceClass: "db.r5.4xlarge", Region: "eu-west-2"},
+					{Engine: "mysql", EngineVersion: "8.0.35", InstanceClass: "db.r5.4xlarge", Region: "eu-west-2"},
+				},
+			},
+			expectedCount:    7, // 8 - 1 MySQL 5.7 instance in extended support
+			expectedAdjusted: true,
+		},
+		{
+			name: "Engine name normalization - spaces vs hyphens",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-west-2",
+				InstanceType: "db.r6g.large",
+				Count:        3,
+				ServiceDetails: &common.RDSDetails{
+					Engine: "Aurora MySQL", // Space in name
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r6g.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.12.0", InstanceClass: "db.r6g.large", Region: "us-west-2"}, // Hyphen in name
+				},
+			},
+			expectedCount:    2, // Should match despite space vs hyphen
+			expectedAdjusted: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := adjustRecommendationForExcludedVersions(tt.recommendation, tt.instanceVersions, tt.versionInfo)
+
+			assert.Equal(t, tt.expectedCount, result.Count, "Instance count mismatch")
+
+			if tt.expectedAdjusted {
+				assert.NotEqual(t, tt.recommendation.Count, result.Count, "Count should have been adjusted")
+			} else {
+				assert.Equal(t, tt.recommendation.Count, result.Count, "Count should not have been adjusted")
+			}
+		})
+	}
+}
+
+func TestAdjustRecommendationForExcludedVersions_MultipleVersionsInExtendedSupport(t *testing.T) {
+	recommendation := common.Recommendation{
+		Service:      common.ServiceRDS,
+		Region:       "us-east-1",
+		InstanceType: "db.r5.large",
+		Count:        10,
+		ServiceDetails: &common.RDSDetails{
+			Engine: "Aurora MySQL",
+		},
+	}
+
+	instanceVersions := map[string][]InstanceEngineVersion{
+		"db.r5.large": {
+			{Engine: "aurora-mysql", EngineVersion: "5.6.mysql_aurora.1.22.5", InstanceClass: "db.r5.large", Region: "us-east-1"},
+			{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+			{Engine: "aurora-mysql", EngineVersion: "8.0.mysql_aurora.3.04.0", InstanceClass: "db.r5.large", Region: "us-east-1"},
+		},
+	}
+
+	// Version info with both 5.6 and 5.7 in extended support
+	versionInfo := map[string]MajorEngineVersionInfo{
+		"aurora-mysql:5.6": {
+			Engine:             "aurora-mysql",
+			MajorEngineVersion: "5.6",
+			SupportedEngineLifecycles: []EngineLifecycleInfo{
+				{
+					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportStartDate: time.Now().AddDate(0, -12, 0),
+					LifecycleSupportEndDate:   time.Now().AddDate(2, 0, 0),
+				},
+			},
+		},
+		"aurora-mysql:5.7": {
+			Engine:             "aurora-mysql",
+			MajorEngineVersion: "5.7",
+			SupportedEngineLifecycles: []EngineLifecycleInfo{
+				{
+					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportStartDate: time.Now().AddDate(0, -6, 0),
+					LifecycleSupportEndDate:   time.Now().AddDate(3, 0, 0),
+				},
+			},
+		},
+	}
+
+	result := adjustRecommendationForExcludedVersions(recommendation, instanceVersions, versionInfo)
+
+	assert.Equal(t, int32(8), result.Count, "Should exclude 2 instances (5.6 and 5.7 both in extended support)")
+}
+
+func TestAdjustRecommendationForExcludedVersions_NonRDSService(t *testing.T) {
+	recommendation := common.Recommendation{
+		Service:        common.ServiceEC2,
+		Region:         "us-east-1",
+		InstanceType:   "m5.large",
+		Count:          5,
+		ServiceDetails: nil, // Not RDS
+	}
+
+	instanceVersions := map[string][]InstanceEngineVersion{}
+	versionInfo := createTestVersionInfo()
+
+	result := adjustRecommendationForExcludedVersions(recommendation, instanceVersions, versionInfo)
+
+	assert.Equal(t, int32(5), result.Count, "Non-RDS services should not be adjusted")
 }

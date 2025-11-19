@@ -52,9 +52,11 @@ type Config struct {
 	ExcludeEngines       []string
 	IncludeAccounts      []string
 	ExcludeAccounts      []string
-	SkipConfirmation     bool
-	MaxInstances         int32
-	OverrideCount        int32
+	SkipConfirmation      bool
+	MaxInstances          int32
+	OverrideCount         int32
+	Profile               string
+	ValidationProfile     string
 }
 
 func main() {
@@ -85,6 +87,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&toolCfg.CSVInput, "input-csv", "i", "", "Input CSV file with recommendations to purchase")
 	rootCmd.Flags().StringVarP(&toolCfg.PaymentOption, "payment", "p", "no-upfront", "Payment option (all-upfront, partial-upfront, no-upfront)")
 	rootCmd.Flags().IntVarP(&toolCfg.TermYears, "term", "t", 3, "Term in years (1 or 3)")
+	rootCmd.Flags().StringVar(&toolCfg.Profile, "profile", "", "AWS profile to use (defaults to AWS_PROFILE env var or default profile)")
 
 	// Filter flags
 	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeRegions, "include-regions", []string{}, "Only include recommendations for these regions (comma-separated)")
@@ -98,6 +101,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&toolCfg.SkipConfirmation, "yes", false, "Skip confirmation prompt for purchases (use with caution)")
 	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
 	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
+	rootCmd.Flags().StringVar(&toolCfg.ValidationProfile, "validation-profile", "", "AWS profile to use for validating running instances (if different from main profile)")
 }
 
 // Package-level Config that cobra flags bind to
