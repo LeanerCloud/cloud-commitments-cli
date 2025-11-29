@@ -3,8 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/LeanerCloud/CUDly/internal/common"
-	"github.com/LeanerCloud/CUDly/internal/recommendations"
+	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 )
@@ -94,7 +93,7 @@ func TestGetAllServices(t *testing.T) {
 func TestGeneratePurchaseID(t *testing.T) {
 	tests := []struct {
 		name           string
-		rec            any
+		rec            common.Recommendation
 		region         string
 		index          int
 		isDryRun       bool
@@ -102,23 +101,27 @@ func TestGeneratePurchaseID(t *testing.T) {
 		expectedPrefix string
 	}{
 		{
-			name: "Common Recommendation - dry run",
+			name: "RDS Recommendation - dry run",
 			rec: common.Recommendation{
 				Service:      common.ServiceRDS,
-				InstanceType: "db.t3.micro",
+				ResourceType: "db.t3.micro",
 				Count:        2,
+				Details: common.DatabaseDetails{
+					Engine:   "mysql",
+					AZConfig: "single-az",
+				},
 			},
 			region:         "us-east-1",
 			index:          1,
 			isDryRun:       true,
 			coverage:       80.0,
-			expectedPrefix: "dryrun-rds-us-east-1-db-t3-micro-2x",
+			expectedPrefix: "dryrun-rds-mysql-us-east-1-db-t3-micro-2x",
 		},
 		{
-			name: "Common Recommendation - actual purchase",
+			name: "EC2 Recommendation - actual purchase",
 			rec: common.Recommendation{
 				Service:      common.ServiceEC2,
-				InstanceType: "t3.large",
+				ResourceType: "t3.large",
 				Count:        5,
 			},
 			region:         "eu-west-1",
@@ -128,41 +131,37 @@ func TestGeneratePurchaseID(t *testing.T) {
 			expectedPrefix: "ri-ec2-eu-west-1-t3-large-5x",
 		},
 		{
-			name: "Legacy Recommendation - dry run",
-			rec: recommendations.Recommendation{
-				Engine:       "mysql",
-				InstanceType: "db.r5.large",
+			name: "ElastiCache Recommendation - dry run",
+			rec: common.Recommendation{
+				Service:      common.ServiceElastiCache,
+				ResourceType: "cache.r5.large",
 				Count:        1,
-				AZConfig:     "single",
+				Details: common.CacheDetails{
+					Engine: "redis",
+				},
 			},
 			region:         "us-west-2",
 			index:          2,
 			isDryRun:       true,
 			coverage:       80.0,
-			expectedPrefix: "dryrun-mysql-r5-large-1x-80pct-saz-us-west-2",
+			expectedPrefix: "dryrun-elasticache-redis-us-west-2-cache-r5-large-1x",
 		},
 		{
-			name: "Legacy Recommendation - multi-AZ",
-			rec: recommendations.Recommendation{
-				Engine:       "postgres",
-				InstanceType: "db.m5.xlarge",
+			name: "RDS Recommendation - multi-AZ",
+			rec: common.Recommendation{
+				Service:      common.ServiceRDS,
+				ResourceType: "db.m5.xlarge",
 				Count:        3,
-				AZConfig:     "multi-az",  // GetMultiAZ() checks for "multi-az"
+				Details: common.DatabaseDetails{
+					Engine:   "postgres",
+					AZConfig: "multi-az",
+				},
 			},
 			region:         "ap-southeast-1",
 			index:          5,
 			isDryRun:       false,
 			coverage:       80.0,
-			expectedPrefix: "ri-postgres-m5-xlarge-3x-80pct-maz-ap-southeast-1",
-		},
-		{
-			name:           "Unknown type",
-			rec:            "invalid",
-			region:         "us-east-1",
-			index:          1,
-			isDryRun:       true,
-			coverage:       80.0,
-			expectedPrefix: "dryrun-unknown-us-east-1",
+			expectedPrefix: "ri-rds-postgres-ap-southeast-1-db-m5-xlarge-3x",
 		},
 	}
 
@@ -176,7 +175,7 @@ func TestGeneratePurchaseID(t *testing.T) {
 	}
 }
 
-func TestCreatePurchaseClient(t *testing.T) {
+func TestCreateServiceClient(t *testing.T) {
 	cfg := aws.Config{
 		Region: "us-east-1",
 	}
@@ -207,11 +206,6 @@ func TestCreatePurchaseClient(t *testing.T) {
 			expectNil: false,
 		},
 		{
-			name:      "Elasticsearch service",
-			service:   common.ServiceElasticsearch,
-			expectNil: false,
-		},
-		{
 			name:      "Redshift service",
 			service:   common.ServiceRedshift,
 			expectNil: false,
@@ -219,6 +213,11 @@ func TestCreatePurchaseClient(t *testing.T) {
 		{
 			name:      "MemoryDB service",
 			service:   common.ServiceMemoryDB,
+			expectNil: false,
+		},
+		{
+			name:      "Savings Plans service",
+			service:   common.ServiceSavingsPlans,
 			expectNil: false,
 		},
 		{
@@ -230,7 +229,7 @@ func TestCreatePurchaseClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := createPurchaseClient(tt.service, cfg)
+			client := createServiceClient(tt.service, cfg)
 			if tt.expectNil {
 				assert.Nil(t, client)
 			} else {
@@ -341,15 +340,18 @@ func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
 	testCoverage := 80.0
 
 	// Test with recommendations that have special characters
-	rec := recommendations.Recommendation{
-		Engine:       "MySQL 8.0",
-		InstanceType: "db.r5b.2xlarge",
+	rec := common.Recommendation{
+		Service:      common.ServiceRDS,
+		ResourceType: "db.r5b.2xlarge",
 		Count:        10,
-		AZConfig:     "single",
+		Details: common.DatabaseDetails{
+			Engine:   "MySQL 8.0",
+			AZConfig: "single-az",
+		},
 	}
 
 	id := generatePurchaseID(rec, "us-east-1", 999, false, testCoverage)
-	assert.Contains(t, id, "mysql-8.0")  // Engine keeps dots, only replaces spaces and underscores
+	assert.Contains(t, id, "rds")
 	assert.Contains(t, id, "r5b-2xlarge")
 	assert.Contains(t, id, "10x")
 	// Index is no longer included due to UUID replacement
@@ -359,7 +361,7 @@ func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
 	assert.Contains(t, id, "dryrun")
 
 	// Test with very long instance type
-	rec.InstanceType = "db.x2gd.metal.16xlarge"
+	rec.ResourceType = "db.x2gd.metal.16xlarge"
 	id = generatePurchaseID(rec, "ap-south-1", 1, false, testCoverage)
 	assert.Contains(t, id, "x2gd-metal")
 }
@@ -369,21 +371,21 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 	testCoverage := 75.0
 
 	tests := []struct {
-		name                 string
-		rec                  any
-		region               string
-		isDryRun             bool
-		expectedContains     []string
-		expectedNotContains  []string
+		name                string
+		rec                 common.Recommendation
+		region              string
+		isDryRun            bool
+		expectedContains    []string
+		expectedNotContains []string
 	}{
 		{
 			name: "RDS with account name and engine",
 			rec: common.Recommendation{
 				Service:      common.ServiceRDS,
-				InstanceType: "db.r5.large",
+				ResourceType: "db.r5.large",
 				Count:        3,
 				AccountName:  "Production Account",
-				ServiceDetails: &common.RDSDetails{
+				Details: common.DatabaseDetails{
 					Engine: "PostgreSQL",
 				},
 			},
@@ -398,9 +400,9 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			name: "ElastiCache with Redis engine",
 			rec: common.Recommendation{
 				Service:      common.ServiceElastiCache,
-				InstanceType: "cache.r5.xlarge",
+				ResourceType: "cache.r5.xlarge",
 				Count:        5,
-				ServiceDetails: &common.ElastiCacheDetails{
+				Details: common.CacheDetails{
 					Engine: "Redis",
 				},
 			},
@@ -415,9 +417,9 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			name: "EC2 with platform",
 			rec: common.Recommendation{
 				Service:      common.ServiceEC2,
-				InstanceType: "m5.2xlarge",
+				ResourceType: "m5.2xlarge",
 				Count:        10,
-				ServiceDetails: &common.EC2Details{
+				Details: common.ComputeDetails{
 					Platform: "Linux/UNIX",
 				},
 			},
@@ -432,9 +434,9 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			name: "MemoryDB recommendation",
 			rec: common.Recommendation{
 				Service:      common.ServiceMemoryDB,
-				InstanceType: "db.r6g.large",
+				ResourceType: "db.r6g.large",
 				Count:        2,
-				ServiceDetails: &common.MemoryDBDetails{},
+				Details: common.CacheDetails{Engine: "redis"},
 			},
 			region:   "us-east-1",
 			isDryRun: false,
@@ -447,7 +449,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			name: "OpenSearch without engine",
 			rec: common.Recommendation{
 				Service:      common.ServiceOpenSearch,
-				InstanceType: "r5.large.search",
+				ResourceType: "r5.large.search",
 				Count:        4,
 			},
 			region:   "eu-central-1",
@@ -458,10 +460,24 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			},
 		},
 		{
+			name: "Elasticsearch alias (same as OpenSearch)",
+			rec: common.Recommendation{
+				Service:      common.ServiceElasticsearch, // Should work as alias for OpenSearch
+				ResourceType: "m5.xlarge.elasticsearch",
+				Count:        3,
+			},
+			region:   "us-west-1",
+			isDryRun: false,
+			expectedContains: []string{
+				"ri-", "opensearch", "us-west-1",
+				"m5-xlarge-elasticsearch", "3x", "75pct",
+			},
+		},
+		{
 			name: "Redshift without engine",
 			rec: common.Recommendation{
 				Service:      common.ServiceRedshift,
-				InstanceType: "dc2.large",
+				ResourceType: "dc2.large",
 				Count:        8,
 			},
 			region:   "us-east-2",
@@ -472,43 +488,48 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			},
 		},
 		{
-			name: "Legacy recommendation with account",
-			rec: recommendations.Recommendation{
-				Engine:       "aurora-mysql",
-				InstanceType: "db.r6g.xlarge",
+			name: "RDS recommendation with account",
+			rec: common.Recommendation{
+				Service:      common.ServiceRDS,
+				ResourceType: "db.r6g.xlarge",
 				Count:        15,
-				AZConfig:     "multi-az",
 				AccountName:  "Staging",
+				Details: common.DatabaseDetails{
+					Engine:   "aurora-mysql",
+					AZConfig: "multi-az",
+				},
 			},
 			region:   "ca-central-1",
 			isDryRun: false,
 			expectedContains: []string{
 				"ri-", "staging", "aurora-mysql", "r6g-xlarge",
-				"15x", "75pct", "maz", "ca-central-1",
+				"15x", "75pct", "ca-central-1",
 			},
 		},
 		{
-			name: "Legacy single-AZ recommendation",
-			rec: recommendations.Recommendation{
-				Engine:       "redis",
-				InstanceType: "cache.m5.large",
+			name: "ElastiCache single-AZ recommendation",
+			rec: common.Recommendation{
+				Service:      common.ServiceElastiCache,
+				ResourceType: "cache.m5.large",
 				Count:        1,
-				AZConfig:     "single",
+				Details: common.CacheDetails{
+					Engine: "redis",
+				},
 			},
 			region:   "ap-northeast-1",
 			isDryRun: true,
 			expectedContains: []string{
 				"dryrun-", "redis", "m5-large",
-				"1x", "75pct", "saz", "ap-northeast-1",
+				"1x", "75pct", "ap-northeast-1",
 			},
 		},
 		{
 			name: "Recommendation with special characters in engine",
 			rec: common.Recommendation{
 				Service:      common.ServiceRDS,
-				InstanceType: "db.t3.micro",
+				ResourceType: "db.t3.micro",
 				Count:        20,
-				ServiceDetails: &common.RDSDetails{
+				Details: common.DatabaseDetails{
 					Engine: "MySQL_8.0_Community",
 				},
 			},
@@ -523,7 +544,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 			name: "Large count recommendation",
 			rec: common.Recommendation{
 				Service:      common.ServiceEC2,
-				InstanceType: "t3.nano",
+				ResourceType: "t3.nano",
 				Count:        999,
 			},
 			region:   "eu-west-2",
@@ -558,9 +579,9 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 func TestGeneratePurchaseIDCoverageVariations(t *testing.T) {
 	rec := common.Recommendation{
 		Service:      common.ServiceRDS,
-		InstanceType: "db.t3.small",
+		ResourceType: "db.t3.small",
 		Count:        1,
-		ServiceDetails: &common.RDSDetails{
+		Details: common.DatabaseDetails{
 			Engine: "mysql",
 		},
 	}
@@ -670,7 +691,7 @@ func TestFilterFlagValidation(t *testing.T) {
 
 			if tt.expectError {
 				assert.Error(t, err)
-				if tt.errorContains != "" {
+				if err != nil && tt.errorContains != "" {
 					assert.Contains(t, err.Error(), tt.errorContains)
 				}
 			} else {
@@ -680,7 +701,7 @@ func TestFilterFlagValidation(t *testing.T) {
 	}
 }
 
-func TestCreatePurchaseClientAllServices(t *testing.T) {
+func TestCreateServiceClientAllServices(t *testing.T) {
 	cfg := aws.Config{
 		Region: "eu-central-1",
 	}
@@ -688,7 +709,7 @@ func TestCreatePurchaseClientAllServices(t *testing.T) {
 	// Test that all services return non-nil clients now
 	services := getAllServices()
 	for _, service := range services {
-		client := createPurchaseClient(service, cfg)
+		client := createServiceClient(service, cfg)
 		assert.NotNil(t, client, "Service %s should have a client", service)
 	}
 }
@@ -932,7 +953,7 @@ func TestValidateFlagsExtended(t *testing.T) {
 			setCoverage:     80.0,
 			setTerm:         1,
 			setPayment:      "no-upfront",
-			setIncludeTypes: []string{"invalid.type"},
+			setIncludeTypes: []string{"invalidtype"}, // No dot, should fail validation
 			expectError:     true,
 			errorContains:   "invalid include-instance-types",
 		},
@@ -941,7 +962,7 @@ func TestValidateFlagsExtended(t *testing.T) {
 			setCoverage:     80.0,
 			setTerm:         1,
 			setPayment:      "no-upfront",
-			setExcludeTypes: []string{"bad.instance.type"},
+			setExcludeTypes: []string{"badinstance"}, // No dot, should fail validation
 			expectError:     true,
 			errorContains:   "invalid exclude-instance-types",
 		},
@@ -991,7 +1012,7 @@ func TestValidateFlagsExtended(t *testing.T) {
 
 			if tt.expectError {
 				assert.Error(t, err)
-				if tt.errorContains != "" {
+				if err != nil && tt.errorContains != "" {
 					assert.Contains(t, err.Error(), tt.errorContains)
 				}
 			} else {

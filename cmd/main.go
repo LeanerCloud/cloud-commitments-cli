@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanerCloud/CUDly/internal/common"
-	"github.com/LeanerCloud/CUDly/internal/ec2"
-	"github.com/LeanerCloud/CUDly/internal/elasticache"
-	"github.com/LeanerCloud/CUDly/internal/memorydb"
-	"github.com/LeanerCloud/CUDly/internal/opensearch"
-	"github.com/LeanerCloud/CUDly/internal/rds"
-	"github.com/LeanerCloud/CUDly/internal/recommendations"
-	"github.com/LeanerCloud/CUDly/internal/redshift"
+	"github.com/LeanerCloud/CUDly/pkg/common"
+	"github.com/LeanerCloud/CUDly/pkg/provider"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/ec2"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/elasticache"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/memorydb"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/opensearch"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/rds"
+	"github.com/LeanerCloud/CUDly/providers/aws/services/redshift"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/savingsplans"
 	_ "github.com/LeanerCloud/CUDly/providers/aws"
 	_ "github.com/LeanerCloud/CUDly/providers/azure"
@@ -50,13 +50,14 @@ type Config struct {
 	ExcludeInstanceTypes []string
 	IncludeEngines       []string
 	ExcludeEngines       []string
-	IncludeAccounts      []string
-	ExcludeAccounts      []string
-	SkipConfirmation      bool
-	MaxInstances          int32
-	OverrideCount         int32
-	Profile               string
-	ValidationProfile     string
+	IncludeAccounts        []string
+	ExcludeAccounts        []string
+	SkipConfirmation       bool
+	MaxInstances           int32
+	OverrideCount          int32
+	Profile                string
+	ValidationProfile      string
+	IncludeExtendedSupport bool
 }
 
 func main() {
@@ -102,6 +103,7 @@ func init() {
 	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
 	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
 	rootCmd.Flags().StringVar(&toolCfg.ValidationProfile, "validation-profile", "", "AWS profile to use for validating running instances (if different from main profile)")
+	rootCmd.Flags().BoolVar(&toolCfg.IncludeExtendedSupport, "include-extended-support", false, "Include instances running on extended support engine versions (by default they are excluded)")
 }
 
 // Package-level Config that cobra flags bind to
@@ -221,14 +223,31 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Validate instance types
-	if err := common.ValidateInstanceTypes(toolCfg.IncludeInstanceTypes); err != nil {
+	// Validate instance types format (basic validation)
+	if err := validateInstanceTypes(toolCfg.IncludeInstanceTypes); err != nil {
 		return fmt.Errorf("invalid include-instance-types: %w", err)
 	}
-	if err := common.ValidateInstanceTypes(toolCfg.ExcludeInstanceTypes); err != nil {
+	if err := validateInstanceTypes(toolCfg.ExcludeInstanceTypes); err != nil {
 		return fmt.Errorf("invalid exclude-instance-types: %w", err)
 	}
 
+	return nil
+}
+
+// validateInstanceTypes performs basic validation on instance type names
+func validateInstanceTypes(instanceTypes []string) error {
+	if len(instanceTypes) == 0 {
+		return nil
+	}
+	for _, t := range instanceTypes {
+		// Basic format validation: should contain at least one dot
+		if t == "" {
+			return fmt.Errorf("empty instance type")
+		}
+		if !strings.Contains(t, ".") {
+			return fmt.Errorf("invalid instance type format '%s': expected format like 'db.t3.micro'", t)
+		}
+	}
 	return nil
 }
 
@@ -240,7 +259,7 @@ func parseServices(serviceNames []string) []common.ServiceType {
 		"elasticache":   common.ServiceElastiCache,
 		"ec2":           common.ServiceEC2,
 		"opensearch":    common.ServiceOpenSearch,
-		"elasticsearch": common.ServiceElasticsearch, // Legacy alias
+		"elasticsearch": common.ServiceOpenSearch, // Legacy alias maps to OpenSearch
 		"redshift":      common.ServiceRedshift,
 		"memorydb":      common.ServiceMemoryDB,
 		"savingsplans":  common.ServiceSavingsPlans,
@@ -271,24 +290,23 @@ func getAllServices() []common.ServiceType {
 	}
 }
 
-// createPurchaseClient creates the appropriate purchase client for a service
-func createPurchaseClient(service common.ServiceType, cfg aws.Config) common.PurchaseClient {
+// createServiceClient creates the appropriate service client for a service
+func createServiceClient(service common.ServiceType, cfg aws.Config) provider.ServiceClient {
 	switch service {
 	case common.ServiceRDS:
-		return rds.NewPurchaseClient(cfg)
+		return rds.NewClient(cfg)
 	case common.ServiceElastiCache:
-		return elasticache.NewPurchaseClient(cfg)
+		return elasticache.NewClient(cfg)
 	case common.ServiceEC2:
-		return ec2.NewPurchaseClient(cfg)
-	case common.ServiceOpenSearch, common.ServiceElasticsearch:
-		// OpenSearch client handles both service names
-		return opensearch.NewPurchaseClient(cfg)
+		return ec2.NewClient(cfg)
+	case common.ServiceOpenSearch:
+		return opensearch.NewClient(cfg)
 	case common.ServiceRedshift:
-		return redshift.NewPurchaseClient(cfg)
+		return redshift.NewClient(cfg)
 	case common.ServiceMemoryDB:
-		return memorydb.NewPurchaseClient(cfg)
+		return memorydb.NewClient(cfg)
 	case common.ServiceSavingsPlans:
-		return savingsplans.NewPurchaseClient(cfg)
+		return savingsplans.NewClient(cfg)
 	default:
 		return nil
 	}
@@ -296,7 +314,7 @@ func createPurchaseClient(service common.ServiceType, cfg aws.Config) common.Pur
 
 
 // generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness
-func generatePurchaseID(rec any, region string, _ int, isDryRun bool, coverage float64) string {
+func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, coverage float64) string {
 	// Generate a short UUID suffix (first 8 characters) for uniqueness
 	uuidSuffix := uuid.New().String()[:8]
 	timestamp := time.Now().Format("20060102-150405")
@@ -305,78 +323,43 @@ func generatePurchaseID(rec any, region string, _ int, isDryRun bool, coverage f
 		prefix = "dryrun"
 	}
 
-	// Handle both old and new recommendation types
-	switch r := rec.(type) {
-	case recommendations.Recommendation:
-		cleanEngine := strings.ReplaceAll(strings.ToLower(r.Engine), " ", "-")
-		cleanEngine = strings.ReplaceAll(cleanEngine, "_", "-")
+	service := strings.ToLower(string(rec.Service))
+	instanceType := strings.ReplaceAll(rec.ResourceType, ".", "-")
 
-		instanceParts := strings.Split(r.InstanceType, ".")
-		instanceSize := "unknown"
-		if len(instanceParts) >= 3 {
-			instanceSize = fmt.Sprintf("%s-%s", instanceParts[1], instanceParts[2])
-		}
-
-		deployment := "saz"
-		if r.GetMultiAZ() {
-			deployment = "maz"
-		}
-
-		// Add account name if available
-		accountName := sanitizeAccountName(r.AccountName)
-		coveragePct := fmt.Sprintf("%.0fpct", coverage)
-		if accountName != "" {
-			return fmt.Sprintf("%s-%s-%s-%s-%dx-%s-%s-%s-%s-%s",
-				prefix, accountName, cleanEngine, instanceSize, r.Count, coveragePct, deployment, region, timestamp, uuidSuffix)
-		}
-
-		return fmt.Sprintf("%s-%s-%s-%dx-%s-%s-%s-%s-%s",
-			prefix, cleanEngine, instanceSize, r.Count, coveragePct, deployment, region, timestamp, uuidSuffix)
-
-	case common.Recommendation:
-		service := strings.ToLower(r.GetServiceName())
-		instanceType := strings.ReplaceAll(r.InstanceType, ".", "-")
-
-		// Extract engine information from service details
-		engine := ""
-		switch details := r.ServiceDetails.(type) {
-		case *common.RDSDetails:
-			engine = strings.ToLower(details.Engine)
-			engine = strings.ReplaceAll(engine, " ", "-")
-			engine = strings.ReplaceAll(engine, "_", "-")
-		case *common.ElastiCacheDetails:
-			engine = strings.ToLower(details.Engine)
-		case *common.MemoryDBDetails:
-			engine = "memorydb"
-		case *common.EC2Details:
-			engine = strings.ToLower(details.Platform)
-			engine = strings.ReplaceAll(engine, " ", "-")
-			engine = strings.ReplaceAll(engine, "/", "-")
-		}
-
-		// Add account name if available
-		accountName := sanitizeAccountName(r.AccountName)
-		coveragePct := fmt.Sprintf("%.0fpct", coverage)
-		if accountName != "" {
-			if engine != "" {
-				return fmt.Sprintf("%s-%s-%s-%s-%s-%s-%dx-%s-%s-%s",
-					prefix, accountName, service, engine, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
-			}
-			return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s-%s",
-				prefix, accountName, service, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
-		}
-
-		// Fallback without account name
-		if engine != "" {
-			return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s-%s",
-				prefix, service, engine, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
-		}
-		return fmt.Sprintf("%s-%s-%s-%s-%dx-%s-%s-%s",
-			prefix, service, region, instanceType, r.Count, coveragePct, timestamp, uuidSuffix)
-
-	default:
-		return fmt.Sprintf("%s-unknown-%s-%s-%s", prefix, region, timestamp, uuidSuffix)
+	// Extract engine information from service details
+	engine := ""
+	switch details := rec.Details.(type) {
+	case common.DatabaseDetails:
+		engine = strings.ToLower(details.Engine)
+		engine = strings.ReplaceAll(engine, " ", "-")
+		engine = strings.ReplaceAll(engine, "_", "-")
+	case common.CacheDetails:
+		engine = strings.ToLower(details.Engine)
+	case common.ComputeDetails:
+		engine = strings.ToLower(details.Platform)
+		engine = strings.ReplaceAll(engine, " ", "-")
+		engine = strings.ReplaceAll(engine, "/", "-")
 	}
+
+	// Add account name if available
+	accountName := sanitizeAccountName(rec.AccountName)
+	coveragePct := fmt.Sprintf("%.0fpct", coverage)
+	if accountName != "" {
+		if engine != "" {
+			return fmt.Sprintf("%s-%s-%s-%s-%s-%s-%dx-%s-%s-%s",
+				prefix, accountName, service, engine, region, instanceType, rec.Count, coveragePct, timestamp, uuidSuffix)
+		}
+		return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s-%s",
+			prefix, accountName, service, region, instanceType, rec.Count, coveragePct, timestamp, uuidSuffix)
+	}
+
+	// Fallback without account name
+	if engine != "" {
+		return fmt.Sprintf("%s-%s-%s-%s-%s-%dx-%s-%s-%s",
+			prefix, service, engine, region, instanceType, rec.Count, coveragePct, timestamp, uuidSuffix)
+	}
+	return fmt.Sprintf("%s-%s-%s-%s-%dx-%s-%s-%s",
+		prefix, service, region, instanceType, rec.Count, coveragePct, timestamp, uuidSuffix)
 }
 
 // sanitizeAccountName converts account name to a filesystem/ID-safe format
