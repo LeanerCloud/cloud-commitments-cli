@@ -3,7 +3,7 @@
 [![License: OSL-3.0](https://img.shields.io/badge/License-OSL--3.0-blue.svg)](https://opensource.org/licenses/OSL-3.0)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8.svg)](https://go.dev/)
 
-CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS, Azure, and GCP. It helps organizations optimize cloud spending by automating the discovery, analysis, and purchase of Reserved Instances, Savings Plans, and Committed Use Discounts.
+CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS, Azure, and GCP. It helps organizations optimize cloud spending by automating the discovery, analysis, and purchase of multiple Reserved Instances, Savings Plans, and Committed Use Discounts by running a single command.
 
 ## Key Features
 
