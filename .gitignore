@@ -4,6 +4,8 @@
 # Go binaries
 rds-ri-tool
 ri-helper
+cudly
+cmd.test
 
 # Go build artifacts
 *.exe
@@ -18,6 +20,13 @@ ri-helper
 # Output of the go coverage tool
 *.out
 
+# Log files
+*.log
+
+# Go workspace files
+go.work
+go.work.sum
+
 # Dependency directories
 vendor/
 
@@ -31,3 +40,17 @@ vendor/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Backup files
+*.tar.gz
+*.bak
+*.backup
+
+# Temporary/exploration files
+ARCHITECTURE*.md
+FINDINGS*.md
+IMPLEMENTATION*.md
+MULTI_CLOUD*.md
+MYSQL*.md
+*_SUMMARY.md
+*_INDEX.md
