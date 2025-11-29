@@ -5,6 +5,7 @@
 rds-ri-tool
 ri-helper
 cudly
+cmd/cmd
 cmd.test
 
 # Go build artifacts
