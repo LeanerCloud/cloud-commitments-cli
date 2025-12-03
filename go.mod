@@ -5,15 +5,15 @@ go 1.23.0
 toolchain go1.24.4
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.39.2
+	github.com/aws/aws-sdk-go-v2 v1.40.1
 	github.com/aws/aws-sdk-go-v2/config v1.26.2
-	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.51.2
+	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.61.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.251.2
-	github.com/aws/aws-sdk-go-v2/service/elasticache v1.50.3
-	github.com/aws/aws-sdk-go-v2/service/memorydb v1.31.4
-	github.com/aws/aws-sdk-go-v2/service/opensearch v1.52.3
+	github.com/aws/aws-sdk-go-v2/service/elasticache v1.50.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/memorydb v1.31.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/opensearch v1.52.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/rds v1.97.3
-	github.com/aws/aws-sdk-go-v2/service/redshift v1.58.3
+	github.com/aws/aws-sdk-go-v2/service/redshift v1.58.3 // indirect
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -38,16 +38,16 @@ require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.4.2 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.16.13 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.14.10 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.9 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.9 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.15 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.15 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.7.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.7 // indirect
-	github.com/aws/aws-sdk-go-v2/service/savingsplans v1.24.2 // indirect
+	github.com/aws/aws-sdk-go-v2/service/savingsplans v1.31.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.18.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.21.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.26.6 // indirect
-	github.com/aws/smithy-go v1.23.0 // indirect
+	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect

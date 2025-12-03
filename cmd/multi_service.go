@@ -583,6 +583,9 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient provider.R
 			PaymentOption:  cfg.PaymentOption,
 			Term:           termStr,
 			LookbackPeriod: "7d",
+			// Savings Plans specific filters
+			IncludeSPTypes: cfg.IncludeSPTypes,
+			ExcludeSPTypes: cfg.ExcludeSPTypes,
 		}
 
 		recs, err := recClient.GetRecommendations(ctx, params)
@@ -972,24 +975,35 @@ func printMultiServiceSummary(allRecommendations []common.Recommendation, allRes
 
 	// Show Savings Plans section
 	if spStats.RecommendationsSelected > 0 {
-		fmt.Println("\n📊 SAVINGS PLANS (Alternative to EC2 RIs):")
+		fmt.Println("\n📊 SAVINGS PLANS:")
 		fmt.Println("--------------------------------------------------")
 
 		// Break down by SP type from recommendations
 		computeSavings := 0.0
 		ec2InstanceSavings := 0.0
+		sagemakerSavings := 0.0
+		databaseSavings := 0.0
 		computeCount := 0
 		ec2InstanceCount := 0
+		sagemakerCount := 0
+		databaseCount := 0
 
 		for _, rec := range allRecommendations {
 			if rec.Service == common.ServiceSavingsPlans {
 				if details, ok := rec.Details.(common.SavingsPlanDetails); ok {
-					if details.PlanType == "Compute" {
+					switch details.PlanType {
+					case "Compute":
 						computeSavings += rec.EstimatedSavings
 						computeCount++
-					} else if details.PlanType == "EC2Instance" {
+					case "EC2Instance":
 						ec2InstanceSavings += rec.EstimatedSavings
 						ec2InstanceCount++
+					case "SageMaker":
+						sagemakerSavings += rec.EstimatedSavings
+						sagemakerCount++
+					case "Database":
+						databaseSavings += rec.EstimatedSavings
+						databaseCount++
 					}
 				}
 			}
@@ -1001,62 +1015,113 @@ func printMultiServiceSummary(allRecommendations []common.Recommendation, allRes
 		if ec2InstanceCount > 0 {
 			fmt.Printf("  EC2 Inst SP   | Recs: %3d | Covers: EC2 only (better rate) | $%8.2f/mo\n", ec2InstanceCount, ec2InstanceSavings)
 		}
-
-		// Show best SP option
-		bestSP := "None"
-		bestSPSavings := 0.0
-		if ec2InstanceSavings > computeSavings {
-			bestSP = "EC2 Instance SP"
-			bestSPSavings = ec2InstanceSavings
-		} else if computeSavings > 0 {
-			bestSP = "Compute SP"
-			bestSPSavings = computeSavings
+		if sagemakerCount > 0 {
+			fmt.Printf("  SageMaker SP  | Recs: %3d | Covers: SageMaker instances    | $%8.2f/mo\n", sagemakerCount, sagemakerSavings)
+		}
+		if databaseCount > 0 {
+			fmt.Printf("  Database SP   | Recs: %3d | Covers: RDS, Aurora, ElastiCache, etc. | $%8.2f/mo\n", databaseCount, databaseSavings)
 		}
 
-		fmt.Printf("\n  ⭐ Recommended: %s ($%.2f/mo)\n", bestSP, bestSPSavings)
+		// Show best SP options by category
+		fmt.Println()
+		if ec2InstanceSavings > 0 || computeSavings > 0 {
+			if ec2InstanceSavings > computeSavings {
+				fmt.Printf("  ⭐ Best for EC2: EC2 Instance SP ($%.2f/mo)\n", ec2InstanceSavings)
+			} else if computeSavings > 0 {
+				fmt.Printf("  ⭐ Best for Compute: Compute SP ($%.2f/mo) - more flexible\n", computeSavings)
+			}
+		}
+		if databaseSavings > 0 {
+			fmt.Printf("  ⭐ Best for Databases: Database SP ($%.2f/mo)\n", databaseSavings)
+		}
+		if sagemakerSavings > 0 {
+			fmt.Printf("  ⭐ Best for ML: SageMaker SP ($%.2f/mo)\n", sagemakerSavings)
+		}
 	}
 
-	// Show comparison if we have both
+	// Show comparison if we have both RIs and Savings Plans
 	if len(riStats) > 0 && spStats.RecommendationsSelected > 0 {
 		fmt.Println("\n🔄 COMPARISON:")
 		fmt.Println("--------------------------------------------------")
 
-		// Option 1: All RIs
-		fmt.Printf("Option 1 (All RIs):\n")
-		fmt.Printf("  Total monthly savings: $%.2f\n", riSavings)
-		fmt.Printf("  Pros: Highest discount for specific instance types\n")
-		fmt.Printf("  Cons: Less flexible, locked to instance family\n")
-
-		// Option 2: SPs for EC2 + RIs for others
-		ec2RISavings := 0.0
-		if stats, ok := riStats[common.ServiceEC2]; ok {
-			ec2RISavings = stats.TotalEstimatedSavings
-		}
-
-		bestSPSavings := 0.0
+		// Collect SP savings by type
+		ec2SPSavings := 0.0
+		computeSPSavings := 0.0
+		databaseSPSavings := 0.0
 		for _, rec := range allRecommendations {
 			if rec.Service == common.ServiceSavingsPlans {
 				if details, ok := rec.Details.(common.SavingsPlanDetails); ok {
-					if details.PlanType == "EC2Instance" {
-						bestSPSavings += rec.EstimatedSavings
-					} else if bestSPSavings == 0 && details.PlanType == "Compute" {
-						bestSPSavings += rec.EstimatedSavings
+					switch details.PlanType {
+					case "EC2Instance":
+						ec2SPSavings += rec.EstimatedSavings
+					case "Compute":
+						computeSPSavings += rec.EstimatedSavings
+					case "Database":
+						databaseSPSavings += rec.EstimatedSavings
 					}
 				}
 			}
 		}
 
-		option2Savings := riSavings - ec2RISavings + bestSPSavings
+		// Collect RI savings by service
+		ec2RISavings := 0.0
+		dbRISavings := 0.0 // RDS, ElastiCache, etc.
+		if stats, ok := riStats[common.ServiceEC2]; ok {
+			ec2RISavings = stats.TotalEstimatedSavings
+		}
+		for service, stats := range riStats {
+			if service == common.ServiceRDS || service == common.ServiceElastiCache ||
+				service == common.ServiceMemoryDB || service == common.ServiceRedshift {
+				dbRISavings += stats.TotalEstimatedSavings
+			}
+		}
 
-		fmt.Printf("\nOption 2 (Savings Plans for EC2 + RIs for other services):\n")
+		// Option 1: All RIs
+		fmt.Printf("Option 1 (All RIs):\n")
+		fmt.Printf("  Total monthly savings: $%.2f\n", riSavings)
+		fmt.Printf("  Pros: Highest discount for specific instance types\n")
+		fmt.Printf("  Cons: Less flexible, locked to instance family/engine\n")
+
+		// Option 2: Best compute SP + non-EC2 RIs
+		bestComputeSP := ec2SPSavings
+		bestComputeSPName := "EC2 Instance SP"
+		if computeSPSavings > ec2SPSavings {
+			bestComputeSP = computeSPSavings
+			bestComputeSPName = "Compute SP"
+		}
+		option2Savings := riSavings - ec2RISavings + bestComputeSP
+
+		fmt.Printf("\nOption 2 (%s for compute + RIs for databases):\n", bestComputeSPName)
 		fmt.Printf("  Total monthly savings: $%.2f\n", option2Savings)
-		fmt.Printf("  Pros: More flexible, can change instance families\n")
-		fmt.Printf("  Cons: Slightly lower EC2 discount than dedicated RIs\n")
+		fmt.Printf("  Pros: Flexible compute (can change EC2 families)\n")
+		fmt.Printf("  Cons: DB RIs still locked to engine/instance type\n")
 
-		if option2Savings > riSavings {
-			fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 2 (saves $%.2f/mo more)\n", option2Savings-riSavings)
+		// Option 3: If we have Database SP recommendations
+		if databaseSPSavings > 0 {
+			option3Savings := riSavings - ec2RISavings - dbRISavings + bestComputeSP + databaseSPSavings
+			fmt.Printf("\nOption 3 (%s + Database SP):\n", bestComputeSPName)
+			fmt.Printf("  Total monthly savings: $%.2f\n", option3Savings)
+			fmt.Printf("  Pros: Maximum flexibility for both compute and databases\n")
+			fmt.Printf("  Cons: May have slightly lower discount than targeted RIs\n")
+
+			// Find best option
+			best := "Option 1 (All RIs)"
+			bestSavings := riSavings
+			if option2Savings > bestSavings {
+				best = "Option 2 (Compute SP + DB RIs)"
+				bestSavings = option2Savings
+			}
+			if option3Savings > bestSavings {
+				best = "Option 3 (Compute SP + Database SP)"
+				bestSavings = option3Savings
+			}
+			fmt.Printf("\n  ⭐ RECOMMENDATION: %s ($%.2f/mo)\n", best, bestSavings)
 		} else {
-			fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 1 (saves $%.2f/mo more)\n", riSavings-option2Savings)
+			if option2Savings > riSavings {
+				fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 2 (saves $%.2f/mo more)\n", option2Savings-riSavings)
+			} else {
+				fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 1 (saves $%.2f/mo more)\n", riSavings-option2Savings)
+			}
 		}
 	}
 
@@ -1084,7 +1149,8 @@ func applyFilters(recs []common.Recommendation, cfg Config, instanceVersions map
 	for _, rec := range recs {
 		// Filter to only recommendations for the current region being processed
 		// This prevents duplicating recommendations across all regions
-		if currentRegion != "" && rec.Region != currentRegion {
+		// Skip this filter for Savings Plans as they are account-level, not regional
+		if currentRegion != "" && rec.Region != currentRegion && rec.Service != common.ServiceSavingsPlans {
 			continue
 		}
 

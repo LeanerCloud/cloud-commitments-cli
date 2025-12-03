@@ -27,7 +27,7 @@ CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS
 | Amazon OpenSearch | Reserved Instances | Search domain instances |
 | Amazon Redshift | Reserved Nodes | DC2 and RA3 node types |
 | Amazon MemoryDB | Reserved Nodes | Memory-optimized nodes |
-| Savings Plans | Hourly Commitments | Compute, EC2 Instance, SageMaker |
+| Savings Plans | Hourly Commitments | Compute, EC2 Instance, SageMaker, Database |
 
 ### Azure Services (Experimental)
 
@@ -140,6 +140,8 @@ go install github.com/LeanerCloud/CUDly/cmd@latest
 | `--include-accounts` | Only include these account names |
 | `--exclude-accounts` | Exclude these account names |
 | `--include-extended-support` | Include instances on extended support engine versions (see below) |
+| `--include-sp-types` | Only include these Savings Plan types (Compute, EC2Instance, SageMaker, Database) |
+| `--exclude-sp-types` | Exclude these Savings Plan types |
 
 ### Extended Support Filtering
 
@@ -234,6 +236,25 @@ Only process specific regions with instance limits:
 ./cudly --services rds,elasticache \
   --exclude-instance-types db.t2.micro,db.t2.small,db.t3.micro,cache.t2.micro \
   --payment partial-upfront \
+  --term 3
+```
+
+### Example 6: Database Savings Plans Only
+
+```bash
+# Get only Database Savings Plans recommendations
+./cudly --services savingsplans \
+  --include-sp-types Database \
+  --term 1 \
+  --coverage 80
+```
+
+### Example 7: Exclude SageMaker Savings Plans
+
+```bash
+# Get all Savings Plans except SageMaker
+./cudly --services savingsplans \
+  --exclude-sp-types SageMaker \
   --term 3
 ```
 

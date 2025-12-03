@@ -1031,6 +1031,8 @@ func TestProcessServiceWithMocks(t *testing.T) {
 					PaymentOption:  toolCfg.PaymentOption,
 					Term:           termStr,
 					LookbackPeriod: "7d",
+					IncludeSPTypes: toolCfg.IncludeSPTypes,
+					ExcludeSPTypes: toolCfg.ExcludeSPTypes,
 				}
 				mockClient.On("GetRecommendations", ctx, params).Return(tt.mockRecs, nil)
 			}

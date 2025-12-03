@@ -92,10 +92,25 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 		return []common.Recommendation{}
 	}
 
-	// Apply coverage by reducing counts
+	// Apply coverage by reducing counts (for RIs) or hourly commitment (for Savings Plans)
 	result := make([]common.Recommendation, 0, len(recs))
 	for _, rec := range recs {
 		adjusted := rec
+
+		// For Savings Plans, reduce the hourly commitment instead of count
+		if rec.Service == common.ServiceSavingsPlans {
+			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
+				newDetails := *details // Copy the struct
+				newDetails.HourlyCommitment = newDetails.HourlyCommitment * coverage / 100
+				adjusted.Details = &newDetails
+				// Also adjust the estimated savings proportionally
+				adjusted.EstimatedSavings = rec.EstimatedSavings * coverage / 100
+				result = append(result, adjusted)
+			}
+			continue
+		}
+
+		// For RIs, reduce the count
 		newCount := int(float64(rec.Count) * coverage / 100)
 		if newCount > 0 {
 			adjusted.Count = newCount

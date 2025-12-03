@@ -58,6 +58,9 @@ type Config struct {
 	Profile                string
 	ValidationProfile      string
 	IncludeExtendedSupport bool
+	// Savings Plans specific filters
+	IncludeSPTypes []string
+	ExcludeSPTypes []string
 }
 
 func main() {
@@ -104,6 +107,10 @@ func init() {
 	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
 	rootCmd.Flags().StringVar(&toolCfg.ValidationProfile, "validation-profile", "", "AWS profile to use for validating running instances (if different from main profile)")
 	rootCmd.Flags().BoolVar(&toolCfg.IncludeExtendedSupport, "include-extended-support", false, "Include instances running on extended support engine versions (by default they are excluded)")
+
+	// Savings Plans specific filters
+	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeSPTypes, "include-sp-types", []string{}, "Only include these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
+	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeSPTypes, "exclude-sp-types", []string{}, "Exclude these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
 }
 
 // Package-level Config that cobra flags bind to
