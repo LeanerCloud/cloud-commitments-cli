@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
@@ -436,7 +438,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				Service:      common.ServiceMemoryDB,
 				ResourceType: "db.r6g.large",
 				Count:        2,
-				Details: common.CacheDetails{Engine: "redis"},
+				Details:      common.CacheDetails{Engine: "redis"},
 			},
 			region:   "us-east-1",
 			isDryRun: false,
@@ -793,21 +795,21 @@ func TestValidateFlagsExtended(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name                 string
-		setCoverage          float64
-		setTerm              int
-		setPayment           string
-		setMaxInstances      int32
-		setCSVOutput         string
-		setCSVInput          string
-		setIncludeEngines    []string
-		setExcludeEngines    []string
-		setIncludeAccounts   []string
-		setExcludeAccounts   []string
-		setIncludeTypes      []string
-		setExcludeTypes      []string
-		expectError          bool
-		errorContains        string
+		name               string
+		setCoverage        float64
+		setTerm            int
+		setPayment         string
+		setMaxInstances    int32
+		setCSVOutput       string
+		setCSVInput        string
+		setIncludeEngines  []string
+		setExcludeEngines  []string
+		setIncludeAccounts []string
+		setExcludeAccounts []string
+		setIncludeTypes    []string
+		setExcludeTypes    []string
+		expectError        bool
+		errorContains      string
 	}{
 		// Coverage boundary tests
 		{
@@ -978,16 +980,16 @@ func TestValidateFlagsExtended(t *testing.T) {
 
 		// Combined validations
 		{
-			name:        "All valid flags combined",
-			setCoverage: 85.5,
-			setTerm:     3,
-			setPayment:  "partial-upfront",
-			setMaxInstances: 50,
-			setIncludeTypes: []string{"db.t3.small"},
-			setExcludeTypes: []string{"db.m5.large"},
+			name:              "All valid flags combined",
+			setCoverage:       85.5,
+			setTerm:           3,
+			setPayment:        "partial-upfront",
+			setMaxInstances:   50,
+			setIncludeTypes:   []string{"db.t3.small"},
+			setExcludeTypes:   []string{"db.m5.large"},
 			setIncludeEngines: []string{"mysql"},
 			setExcludeEngines: []string{"postgres"},
-			expectError: false,
+			expectError:       false,
 		},
 	}
 
@@ -1045,6 +1047,142 @@ func TestSanitizeAccountName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := sanitizeAccountName(tt.input)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+func TestGeneratePurchaseID_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		rec      common.Recommendation
+		region   string
+		index    int
+		isDryRun bool
+	}{
+		{
+			name: "RDS dry run",
+			rec: common.Recommendation{
+				Service:      common.ServiceRDS,
+				ResourceType: "db.t3.micro",
+				Count:        2,
+			},
+			region:   "us-east-1",
+			index:    1,
+			isDryRun: true,
+		},
+		{
+			name: "EC2 actual purchase",
+			rec: common.Recommendation{
+				Service:      common.ServiceEC2,
+				ResourceType: "t3.large",
+				Count:        5,
+			},
+			region:   "eu-west-1",
+			index:    99,
+			isDryRun: false,
+		},
+		{
+			name: "ElastiCache with dots in instance type",
+			rec: common.Recommendation{
+				Service:      common.ServiceElastiCache,
+				ResourceType: "cache.r6g.2xlarge",
+				Count:        1,
+			},
+			region:   "ap-southeast-1",
+			index:    1000,
+			isDryRun: false,
+		},
+		{
+			name: "Unknown service",
+			rec: common.Recommendation{
+				Service:      common.ServiceType("future-service"),
+				ResourceType: "unknown.large",
+				Count:        10,
+			},
+			region:   "us-west-2",
+			index:    1,
+			isDryRun: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testCoverage := 80.0
+			id := generatePurchaseID(tt.rec, tt.region, tt.index, tt.isDryRun, testCoverage)
+
+			// Verify ID contains expected parts
+			if tt.isDryRun {
+				assert.Contains(t, id, "dryrun")
+			} else {
+				assert.Contains(t, id, "ri")
+			}
+
+			assert.Contains(t, id, tt.region)
+			assert.Contains(t, id, strings.ReplaceAll(tt.rec.ResourceType, ".", "-"))
+			assert.Contains(t, id, fmt.Sprintf("%dx", tt.rec.Count))
+			// Should contain timestamp (YYYYMMDD-HHMMSS) and UUID suffix (8 chars)
+			assert.Regexp(t, `-\d{8}-\d{6}-[a-f0-9]{8}$`, id)
+		})
+	}
+}
+
+func TestValidateInstanceTypes(t *testing.T) {
+	tests := []struct {
+		name          string
+		instanceTypes []string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:          "Empty slice is valid",
+			instanceTypes: []string{},
+			expectError:   false,
+		},
+		{
+			name:          "Valid instance types",
+			instanceTypes: []string{"db.t3.micro", "cache.r5.large", "t3.medium"},
+			expectError:   false,
+		},
+		{
+			name:          "Invalid - no dot",
+			instanceTypes: []string{"t3micro"},
+			expectError:   true,
+			errorContains: "invalid instance type format",
+		},
+		{
+			name:          "Invalid - empty string",
+			instanceTypes: []string{"db.t3.micro", "", "cache.r5.large"},
+			expectError:   true,
+			errorContains: "empty instance type",
+		},
+		{
+			name:          "Valid with multiple dots",
+			instanceTypes: []string{"r5.xlarge.search", "db.r6g.2xlarge"},
+			expectError:   false,
+		},
+		{
+			name:          "Single valid instance type",
+			instanceTypes: []string{"m5.large"},
+			expectError:   false,
+		},
+		{
+			name:          "Mix of valid and invalid",
+			instanceTypes: []string{"db.t3.small", "invalidtype"},
+			expectError:   true,
+			errorContains: "invalid instance type format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateInstanceTypes(tt.instanceTypes)
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

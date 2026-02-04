@@ -16,14 +16,33 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 )
 
+// Constants for purchase processing
+const (
+	// DefaultDuplicateCheckLookbackHours is the default lookback period for checking recent purchases
+	DefaultDuplicateCheckLookbackHours = 24
+
+	// PurchaseDelaySeconds is the delay between consecutive purchases to avoid rate limiting
+	PurchaseDelaySeconds = 2
+)
+
 // AppLogger is a simple logger for application output
 var AppLogger = log.New(os.Stdout, "", 0)
 
+// OrganizationsAPI interface for describing accounts
+type OrganizationsAPI interface {
+	DescribeAccount(ctx context.Context, params *organizations.DescribeAccountInput, optFns ...func(*organizations.Options)) (*organizations.DescribeAccountOutput, error)
+}
+
+// AccountAliasGetter is an interface for getting account aliases
+type AccountAliasGetter interface {
+	GetAccountAlias(ctx context.Context, accountID string) string
+}
+
 // AccountAliasCache caches account ID to alias mappings
 type AccountAliasCache struct {
-	mu      sync.RWMutex
-	cache   map[string]string
-	orgClient *organizations.Client
+	mu        sync.RWMutex
+	cache     map[string]string
+	orgClient OrganizationsAPI
 }
 
 // NewAccountAliasCache creates a new account alias cache
@@ -31,6 +50,15 @@ func NewAccountAliasCache(cfg aws.Config) *AccountAliasCache {
 	return &AccountAliasCache{
 		cache:     make(map[string]string),
 		orgClient: organizations.NewFromConfig(cfg),
+	}
+}
+
+// NewAccountAliasCacheWithClient creates a new account alias cache with a custom client
+// This is useful for testing with mocked clients
+func NewAccountAliasCacheWithClient(orgClient OrganizationsAPI) *AccountAliasCache {
+	return &AccountAliasCache{
+		cache:     make(map[string]string),
+		orgClient: orgClient,
 	}
 }
 
@@ -180,10 +208,10 @@ type DuplicateChecker struct {
 	LookbackHours int // How many hours to look back for recent purchases
 }
 
-// NewDuplicateChecker creates a new duplicate checker with default 24-hour lookback
+// NewDuplicateChecker creates a new duplicate checker with default lookback period
 func NewDuplicateChecker() *DuplicateChecker {
 	return &DuplicateChecker{
-		LookbackHours: 24,
+		LookbackHours: DefaultDuplicateCheckLookbackHours,
 	}
 }
 
@@ -199,32 +227,49 @@ func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context,
 
 	log.Printf("    [DuplicateChecker] Found %d total existing commitments", len(existing))
 
-	// Filter to recent purchases only (within LookbackHours)
-	// This is the key filter that prevents cross-account matching issues:
-	// - The API returns RIs from the current account only
-	// - But recommendations come from all org accounts
-	// - By only checking RECENT purchases, we avoid incorrectly matching old RIs
-	//   from the payer account against recommendations for member accounts
+	recentExisting := d.filterRecentCommitments(existing)
+	log.Printf("    [DuplicateChecker] Found %d recent commitments (purchased in last %d hours)", len(recentExisting), d.LookbackHours)
+
+	if len(recentExisting) == 0 {
+		return recs, nil
+	}
+
+	existingMap := buildExistingCommitmentsMap(recentExisting)
+	log.Printf("    [DuplicateChecker] Existing map has %d unique keys", len(existingMap))
+
+	result := adjustRecommendationsAgainstExisting(recs, existingMap)
+
+	if len(result) < len(recs) {
+		log.Printf("    [DuplicateChecker] Result: %d recommendations kept out of %d (avoided %d duplicates)",
+			len(result), len(recs), len(recs)-len(result))
+	}
+	return result, nil
+}
+
+// filterRecentCommitments filters commitments to only recent purchases within the lookback window
+func (d *DuplicateChecker) filterRecentCommitments(existing []common.Commitment) []common.Commitment {
 	cutoffTime := time.Now().Add(-time.Duration(d.LookbackHours) * time.Hour)
 	recentExisting := make([]common.Commitment, 0)
+
 	for _, c := range existing {
-		// Only include active or payment-pending RIs purchased after cutoff
-		if (c.State == "active" || c.State == "payment-pending") && c.StartDate.After(cutoffTime) {
+		if isRecentActiveCommitment(c, cutoffTime) {
 			recentExisting = append(recentExisting, c)
 		}
 	}
 
-	log.Printf("    [DuplicateChecker] Found %d recent commitments (purchased in last %d hours)", len(recentExisting), d.LookbackHours)
+	return recentExisting
+}
 
-	if len(recentExisting) == 0 {
-		// No recent purchases, return all recommendations as-is
-		return recs, nil
-	}
+// isRecentActiveCommitment checks if a commitment is active and purchased after the cutoff time
+func isRecentActiveCommitment(c common.Commitment, cutoffTime time.Time) bool {
+	return (c.State == "active" || c.State == "payment-pending") && c.StartDate.After(cutoffTime)
+}
 
-	// Build a map of recent commitments by resource type, region, and engine (for RDS/ElastiCache)
-	// Key format: resourceType|region|engine (engine may be empty for non-database services)
+// buildExistingCommitmentsMap builds a map of commitments by resource type, region, and engine
+func buildExistingCommitmentsMap(commitments []common.Commitment) map[string]int {
 	existingMap := make(map[string]int)
-	for _, c := range recentExisting {
+
+	for _, c := range commitments {
 		normalizedEngine := normalizeEngineName(c.Engine)
 		key := fmt.Sprintf("%s|%s|%s", c.ResourceType, c.Region, normalizedEngine)
 		existingMap[key] += c.Count
@@ -232,39 +277,45 @@ func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context,
 			key, c.Count, c.StartDate.Format("2006-01-02 15:04:05"), c.Engine)
 	}
 
-	log.Printf("    [DuplicateChecker] Existing map has %d unique keys", len(existingMap))
+	return existingMap
+}
 
-	// Adjust recommendations - decrement existing count as we "use up" existing RIs
+// adjustRecommendationsAgainstExisting adjusts recommendations based on existing commitments
+func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existingMap map[string]int) []common.Recommendation {
 	result := make([]common.Recommendation, 0, len(recs))
-	for _, rec := range recs {
-		// Get engine from recommendation details if available
-		engine := getEngineFromRecommendation(rec)
-		key := fmt.Sprintf("%s|%s|%s", rec.ResourceType, rec.Region, engine)
-		existingCount := existingMap[key]
 
-		if existingCount >= rec.Count {
-			// All of this recommendation is covered by recent RIs
-			log.Printf("    [DuplicateChecker] SKIP %s: recent %d >= recommended %d", key, existingCount, rec.Count)
-			existingMap[key] -= rec.Count // Use up these existing RIs
-			continue
-		}
-		// Partial or no coverage by recent RIs
-		adjusted := rec
-		if existingCount > 0 {
-			adjusted.Count = rec.Count - existingCount
-			existingMap[key] = 0 // Use up all remaining existing RIs for this key
-			log.Printf("    [DuplicateChecker] PARTIAL %s: adjusted count from %d to %d", key, rec.Count, adjusted.Count)
-		}
+	for _, rec := range recs {
+		adjusted := adjustSingleRecommendation(rec, existingMap)
 		if adjusted.Count > 0 {
 			result = append(result, adjusted)
 		}
 	}
 
-	if len(result) < len(recs) {
-		log.Printf("    [DuplicateChecker] Result: %d recommendations kept out of %d (avoided %d duplicates)",
-			len(result), len(recs), len(recs)-len(result))
+	return result
+}
+
+// adjustSingleRecommendation adjusts a single recommendation based on existing commitments
+func adjustSingleRecommendation(rec common.Recommendation, existingMap map[string]int) common.Recommendation {
+	engine := getEngineFromRecommendation(rec)
+	key := fmt.Sprintf("%s|%s|%s", rec.ResourceType, rec.Region, engine)
+	existingCount := existingMap[key]
+
+	if existingCount >= rec.Count {
+		// All of this recommendation is covered by recent RIs
+		log.Printf("    [DuplicateChecker] SKIP %s: recent %d >= recommended %d", key, existingCount, rec.Count)
+		existingMap[key] -= rec.Count
+		return common.Recommendation{Count: 0}
 	}
-	return result, nil
+
+	// Partial or no coverage by recent RIs
+	adjusted := rec
+	if existingCount > 0 {
+		adjusted.Count = rec.Count - existingCount
+		existingMap[key] = 0
+		log.Printf("    [DuplicateChecker] PARTIAL %s: adjusted count from %d to %d", key, rec.Count, adjusted.Count)
+	}
+
+	return adjusted
 }
 
 // getEngineFromRecommendation extracts the engine from recommendation details
