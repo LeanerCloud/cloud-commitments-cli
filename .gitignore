@@ -66,3 +66,17 @@ MYSQL*.md
 azure_sanity_report.json
 ri-exchange_*.json
 sanity_report*.json
+
+# Compiled binaries
+cudly-final
+cudly-test
+server
+lambda
+
+# Terraform state and outputs
+terraform-apply-*.txt
+terraform-plan-*.txt
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
