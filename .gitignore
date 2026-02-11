@@ -74,8 +74,8 @@ sanity_report*.json
 # Compiled binaries
 cudly-final
 cudly-test
-server
-lambda
+/server
+/lambda
 
 # Terraform state and outputs
 terraform-apply-*.txt
