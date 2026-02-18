@@ -31,6 +31,10 @@ go.work.sum
 # Dependency directories
 vendor/
 
+# Legacy/dev-notes (local exploration, not for commit)
+.legacy/
+.dev-notes/
+
 # IDE files
 .idea/
 .vscode/

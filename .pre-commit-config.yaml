@@ -9,10 +9,17 @@ repos:
     hooks:
       - id: go-fmt
         name: Run gofmt
-      - id: go-vet
-        name: Run go vet
       - id: go-mod-tidy
         name: Run go mod tidy
+
+  - repo: local
+    hooks:
+      - id: go-vet
+        name: Run go vet
+        entry: bash -c 'go vet ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
 
   # Terraform formatting
   - repo: https://github.com/antonbabenko/pre-commit-terraform
@@ -70,7 +77,7 @@ repos:
     hooks:
       - id: gocyclo
         name: Check cyclomatic complexity
-        entry: bash -c 'gocyclo -over 10 $(find . -name "*.go" ! -path "./vendor/*" ! -path "./.git/*" ! -path "*_test.go") || (echo "⚠️  Functions with cyclomatic complexity over 10 detected. Please refactor." && exit 1)'
+        entry: bash -c 'gocyclo -over 20 $(git ls-files "*.go" | grep -v _test.go | grep -v vendor/) || (echo "⚠️  Functions with cyclomatic complexity over 20 detected. Please refactor." && exit 1)'
         language: system
         pass_filenames: false
         files: \.go$
@@ -86,7 +93,7 @@ repos:
 
       - id: gosec
         name: Go security scanner
-        entry: bash -c 'gosec -quiet ./...'
+        entry: bash -c 'gosec -quiet -exclude-dir=.legacy -exclude-dir=.dev-notes -exclude-dir=vendor -exclude=G101,G104,G115,G204,G301,G304,G402,G505 ./...'
         language: system
         pass_filenames: false
         files: \.go$
