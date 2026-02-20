@@ -1,0 +1,3 @@
+# AWS official example credentials used in tests
+# See: https://docs.aws.amazon.com/IAM/latest/UserGuide/security-creds.html#sec-access-keys-and-secret-access-keys
+internal/secrets/aws_resolver_httptest_test.go
