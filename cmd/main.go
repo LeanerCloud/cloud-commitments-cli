@@ -241,12 +241,13 @@ func sanitizeAccountName(accountName string) string {
 	clean = strings.ReplaceAll(clean, ".", "-")
 
 	// Remove any characters that aren't alphanumeric or hyphens
-	result := ""
+	var b strings.Builder
 	for _, r := range clean {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			result += string(r)
+			b.WriteRune(r)
 		}
 	}
+	result := b.String()
 
 	// Remove leading/trailing hyphens and collapse multiple hyphens
 	result = strings.Trim(result, "-")
