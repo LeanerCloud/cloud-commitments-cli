@@ -73,9 +73,9 @@ clean:
 	rm -f gosec-report.json trivy-report.json tfsec-report.json
 	go clean
 
-# Deploy (requires AWS credentials)
-deploy: build
-	./cudly deploy
+# Deploy (requires AWS credentials and terraform profiles)
+deploy:
+	./scripts/tf-deploy.sh aws dev
 
 # Format code
 fmt:
