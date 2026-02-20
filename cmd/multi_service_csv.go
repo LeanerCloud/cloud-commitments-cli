@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -68,8 +69,11 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 
 	for {
 		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
-			break // End of file
+			return nil, fmt.Errorf("failed to read CSV record: %w", err)
 		}
 
 		rec, err := parseCSVRecord(record, colIdx)
