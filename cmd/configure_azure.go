@@ -89,6 +89,17 @@ func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName st
 		return fmt.Errorf("all credentials are required: tenant-id, client-id, client-secret, subscription-id")
 	}
 
+	// Validate UUID format for all ID fields
+	if err := validateAzureUUID(creds.TenantID, "Tenant ID"); err != nil {
+		return err
+	}
+	if err := validateAzureUUID(creds.ClientID, "Client ID"); err != nil {
+		return err
+	}
+	if err := validateAzureUUID(creds.SubscriptionID, "Subscription ID"); err != nil {
+		return err
+	}
+
 	// Build expected secret name pattern
 	secretName := fmt.Sprintf("%s-AzureCredentials", stackName)
 
@@ -148,6 +159,10 @@ func runConfigureAzure(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Zero out sensitive data from memory
+	azureOpts.ClientSecret = ""
+	creds.ClientSecret = ""
+
 	log.Printf("Azure credentials stored successfully in Secrets Manager")
 	fmt.Println("\nAzure configuration complete!")
 	fmt.Println("CUDly can now manage Azure Reserved Instances and Savings Plans.")
@@ -198,14 +213,20 @@ func collectAzureCredentials(reader *bufio.Reader) (AzureCredentials, error) {
 func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredentials) error {
 	if creds.TenantID == "" {
 		fmt.Print("Azure Tenant ID: ")
-		creds.TenantID, _ = reader.ReadString('\n')
-		creds.TenantID = strings.TrimSpace(creds.TenantID)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read tenant ID: %w", err)
+		}
+		creds.TenantID = strings.TrimSpace(input)
 	}
 
 	if creds.ClientID == "" {
 		fmt.Print("Client ID (appId): ")
-		creds.ClientID, _ = reader.ReadString('\n')
-		creds.ClientID = strings.TrimSpace(creds.ClientID)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read client ID: %w", err)
+		}
+		creds.ClientID = strings.TrimSpace(input)
 	}
 
 	if creds.ClientSecret == "" {
@@ -220,8 +241,11 @@ func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredential
 
 	if creds.SubscriptionID == "" {
 		fmt.Print("Subscription ID: ")
-		creds.SubscriptionID, _ = reader.ReadString('\n')
-		creds.SubscriptionID = strings.TrimSpace(creds.SubscriptionID)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read subscription ID: %w", err)
+		}
+		creds.SubscriptionID = strings.TrimSpace(input)
 	}
 
 	return nil
@@ -234,8 +258,7 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 	fmt.Println("This will open a browser window for Azure authentication.")
 	fmt.Println()
 
-	loginCmd := "az login"
-	if err := promptAndRunCommand(reader, "Azure Login", loginCmd); err != nil {
+	if err := promptAndRunExplicitCommand(reader, "Azure Login", "az login", "az", "login"); err != nil {
 		return err
 	}
 
@@ -245,8 +268,7 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 	fmt.Println("List your Azure subscriptions to find the Subscription ID:")
 	fmt.Println()
 
-	listSubsCmd := "az account list --output table"
-	if err := promptAndRunCommand(reader, "List Subscriptions", listSubsCmd); err != nil {
+	if err := promptAndRunExplicitCommand(reader, "List Subscriptions", "az account list --output table", "az", "account", "list", "--output", "table"); err != nil {
 		return err
 	}
 
@@ -313,10 +335,10 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 	return nil
 }
 
-// promptAndRunCommand shows a command and asks to run or skip
-// Note: Edit option removed for security - prevents command injection
-func promptAndRunCommand(reader *bufio.Reader, name, command string) error {
-	fmt.Printf("Command: %s\n", command)
+// promptAndRunExplicitCommand shows a command and asks to run or skip.
+// Takes explicit program and args to avoid command injection via string splitting.
+func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, program string, args ...string) error {
+	fmt.Printf("Command: %s\n", displayCmd)
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
 
@@ -325,7 +347,7 @@ func promptAndRunCommand(reader *bufio.Reader, name, command string) error {
 
 	switch choice {
 	case "r", "run", "":
-		return executeCommand(command)
+		return executeExplicitCommand(displayCmd, program, args...)
 	case "s", "skip":
 		fmt.Printf("Skipping %s\n", name)
 		return nil
@@ -335,21 +357,13 @@ func promptAndRunCommand(reader *bufio.Reader, name, command string) error {
 	}
 }
 
-// executeCommand runs a command safely without shell interpretation
-func executeCommand(command string) error {
+// executeExplicitCommand runs a command with explicit program and arguments
+func executeExplicitCommand(displayCmd string, program string, args ...string) error {
 	fmt.Println()
-	fmt.Printf("Executing: %s\n", command)
+	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	// Parse the command into program and arguments
-	// For az commands, we can safely split on spaces for simple commands
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return fmt.Errorf("empty command")
-	}
-
-	// Use exec.Command with arguments instead of shell to prevent injection
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command(program, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
