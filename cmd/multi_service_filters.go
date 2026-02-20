@@ -180,23 +180,3 @@ func accountMatchesFilter(accountLower, filter string) bool {
 	filterLower := strings.ToLower(filter)
 	return filterLower == accountLower || strings.Contains(accountLower, filterLower)
 }
-
-// getEngineFromRecommendationRaw extracts the raw engine from a recommendation (not normalized)
-// Use getEngineFromRecommendation from helpers.go for normalized engine names
-func getEngineFromRecommendationRaw(rec common.Recommendation) string {
-	// Check service-specific details for engine information
-	if rec.Details != nil {
-		switch details := rec.Details.(type) {
-		case common.DatabaseDetails:
-			return details.Engine
-		case *common.DatabaseDetails:
-			return details.Engine
-		case common.CacheDetails:
-			return details.Engine
-		case *common.CacheDetails:
-			return details.Engine
-		}
-	}
-
-	return ""
-}
