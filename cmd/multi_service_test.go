@@ -288,7 +288,7 @@ func TestProcessServiceWithMocks(t *testing.T) {
 
 			// Now we can use the actual function directly since it accepts an interface
 			accountCache := NewAccountAliasCache(awsCfg)
-			recs, results := processService(ctx, awsCfg, mockClient, accountCache, tt.service, tt.isDryRun, toolCfg)
+			recs, results := processService(ctx, awsCfg, mockClient, accountCache, tt.service, tt.isDryRun, toolCfg, engineVersionData{})
 
 			if len(tt.mockRecs) > 0 {
 				// Should have recommendations based on coverage
@@ -349,7 +349,7 @@ func TestProcessService_SavingsPlansAccountLevel(t *testing.T) {
 	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceSavingsPlans, true, toolCfg)
+	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceSavingsPlans, true, toolCfg, engineVersionData{})
 
 	// Should get recommendations
 	assert.NotEmpty(t, recs)
@@ -396,7 +396,7 @@ func TestProcessService_WithInstanceLimit(t *testing.T) {
 	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	recs, _ := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg)
+	recs, _ := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
 
 	// Verify the function runs without error and returns recommendations
 	assert.NotEmpty(t, recs, "Should return recommendations")
@@ -438,7 +438,7 @@ func TestProcessService_WithOverrideCount(t *testing.T) {
 	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	recs, _ := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceElastiCache, true, toolCfg)
+	recs, _ := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceElastiCache, true, toolCfg, engineVersionData{})
 
 	// All recommendations should have count=3 (override)
 	for _, rec := range recs {
@@ -480,7 +480,7 @@ func TestProcessService_MultipleRegions(t *testing.T) {
 	}
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg)
+	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
 
 	// Should get recommendations from all 3 regions
 	assert.NotEmpty(t, recs)

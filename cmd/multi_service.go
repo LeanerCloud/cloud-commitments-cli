@@ -54,6 +54,9 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	// Create recommendations client
 	recClient := awsprovider.NewRecommendationsClient(awsCfg)
 
+	// Query engine version data once for all services
+	engineData := fetchEngineVersionData(ctx, cfg)
+
 	// Process each service
 	allRecommendations := make([]common.Recommendation, 0)
 	allResults := make([]common.PurchaseResult, 0)
@@ -65,7 +68,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 		AppLogger.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
 		// Process all services with common interface
-		serviceRecs, serviceResults := processService(ctx, awsCfg, recClient, accountCache, service, isDryRun, cfg)
+		serviceRecs, serviceResults := processService(ctx, awsCfg, recClient, accountCache, service, isDryRun, cfg, engineData)
 		allRecommendations = append(allRecommendations, serviceRecs...)
 		allResults = append(allResults, serviceResults...)
 
@@ -250,7 +253,7 @@ func filterAndAdjustRecommendations(recommendations []common.Recommendation, csv
 }
 
 // processService processes a single service and returns recommendations and results
-func processService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, accountCache *AccountAliasCache, service common.ServiceType, isDryRun bool, cfg Config) ([]common.Recommendation, []common.PurchaseResult) {
+func processService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, accountCache *AccountAliasCache, service common.ServiceType, isDryRun bool, cfg Config, engineData engineVersionData) ([]common.Recommendation, []common.PurchaseResult) {
 	// Determine regions to process
 	regionsToProcess, err := determineRegionsForService(ctx, awsCfg, recClient, service, cfg.Regions)
 	if err != nil {
@@ -260,9 +263,6 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient provider.R
 
 	serviceRecs := make([]common.Recommendation, 0)
 	serviceResults := make([]common.PurchaseResult, 0)
-
-	// Query running instances and engine versions (once for all regions)
-	engineData := fetchEngineVersionData(ctx, cfg)
 
 	// Process each region
 	for i, region := range regionsToProcess {
@@ -285,12 +285,6 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient provider.R
 	}
 
 	return serviceRecs, serviceResults
-}
-
-// processServicePurchases is deprecated - use processPurchaseLoop instead
-// Kept for backwards compatibility but just forwards to processPurchaseLoop
-func processServicePurchases(ctx context.Context, filteredRecs []common.Recommendation, region string, isDryRun bool, serviceClient provider.ServiceClient, cfg Config) []common.PurchaseResult {
-	return processPurchaseLoop(ctx, filteredRecs, region, isDryRun, serviceClient, cfg)
 }
 
 // processPurchaseLoop processes purchases for a single region (used by CSV mode)

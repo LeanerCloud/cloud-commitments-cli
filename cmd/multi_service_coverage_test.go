@@ -594,7 +594,7 @@ func TestProcessService_GetRegionsError(t *testing.T) {
 	}
 	mockClient.On("GetRecommendations", ctx, params).Return([]common.Recommendation{}, nil)
 
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg)
+	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
 
 	// Should return empty recommendations
 	assert.Empty(t, recs)
@@ -630,7 +630,7 @@ func TestProcessService_GetRecommendationsError(t *testing.T) {
 	}
 	mockClient.On("GetRecommendations", ctx, params).Return([]common.Recommendation(nil), errors.New("API error"))
 
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceEC2, true, toolCfg)
+	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceEC2, true, toolCfg, engineVersionData{})
 
 	// Should continue with empty results after error
 	assert.Empty(t, recs)
@@ -672,7 +672,7 @@ func TestProcessService_AllRecommendationsFilteredOut(t *testing.T) {
 	}
 	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
 
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg)
+	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
 
 	// All recommendations should be filtered out
 	assert.Empty(t, recs)
