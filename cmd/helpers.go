@@ -339,36 +339,38 @@ func getEngineFromRecommendation(rec common.Recommendation) string {
 	return normalizeEngineName(engine)
 }
 
-// normalizeEngineName normalizes database engine names to a consistent format
+// engineNameMap maps database engine names to a consistent normalized format.
 // AWS RIs use: "aurora-postgresql", "aurora-mysql", "mysql", "postgres"
 // Cost Explorer uses: "Aurora PostgreSQL", "Aurora MySQL", "MySQL", "PostgreSQL"
+var engineNameMap = map[string]string{
+	// Cost Explorer format -> normalized
+	"Aurora PostgreSQL": "aurora-postgresql",
+	"Aurora MySQL":      "aurora-mysql",
+	"MySQL":             "mysql",
+	"PostgreSQL":        "postgresql",
+	"MariaDB":           "mariadb",
+	"Oracle":            "oracle",
+	"SQL Server":        "sqlserver",
+	// Already normalized (from AWS RIs)
+	"aurora-postgresql": "aurora-postgresql",
+	"aurora-mysql":      "aurora-mysql",
+	"mysql":             "mysql",
+	"postgresql":        "postgresql",
+	"postgres":          "postgresql",
+	"mariadb":           "mariadb",
+	"oracle-se":         "oracle",
+	"oracle-se1":        "oracle",
+	"oracle-se2":        "oracle",
+	"oracle-ee":         "oracle",
+	"sqlserver-se":      "sqlserver",
+	"sqlserver-ee":      "sqlserver",
+	"sqlserver-ex":      "sqlserver",
+	"sqlserver-web":     "sqlserver",
+}
+
+// normalizeEngineName normalizes database engine names to a consistent format
 func normalizeEngineName(engine string) string {
-	engineMap := map[string]string{
-		// Cost Explorer format -> normalized
-		"Aurora PostgreSQL": "aurora-postgresql",
-		"Aurora MySQL":      "aurora-mysql",
-		"MySQL":             "mysql",
-		"PostgreSQL":        "postgresql",
-		"MariaDB":           "mariadb",
-		"Oracle":            "oracle",
-		"SQL Server":        "sqlserver",
-		// Already normalized (from AWS RIs)
-		"aurora-postgresql": "aurora-postgresql",
-		"aurora-mysql":      "aurora-mysql",
-		"mysql":             "mysql",
-		"postgresql":        "postgresql",
-		"postgres":          "postgresql",
-		"mariadb":           "mariadb",
-		"oracle-se":         "oracle",
-		"oracle-se1":        "oracle",
-		"oracle-se2":        "oracle",
-		"oracle-ee":         "oracle",
-		"sqlserver-se":      "sqlserver",
-		"sqlserver-ee":      "sqlserver",
-		"sqlserver-ex":      "sqlserver",
-		"sqlserver-web":     "sqlserver",
-	}
-	if normalized, ok := engineMap[engine]; ok {
+	if normalized, ok := engineNameMap[engine]; ok {
 		return normalized
 	}
 	// Return lowercase as fallback
