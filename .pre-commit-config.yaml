@@ -1,0 +1,112 @@
+# Pre-commit hooks configuration
+# Install: pip install pre-commit
+# Setup: pre-commit install
+
+repos:
+  # Go formatting and linting
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: Run gofmt
+      - id: go-vet
+        name: Run go vet
+      - id: go-mod-tidy
+        name: Run go mod tidy
+
+  # Terraform formatting
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.105.0
+    hooks:
+      - id: terraform_fmt
+        name: Terraform format
+      - id: terraform_validate
+        name: Terraform validate
+      - id: terraform_tflint
+        name: Terraform lint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+      - id: end-of-file-fixer
+        name: Fix end of files
+      - id: check-yaml
+        name: Check YAML syntax
+        exclude: '^(docker-compose.*\.yml|\.github/workflows/.*)$'
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1024']
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: detect-private-key
+        name: Detect private keys
+      - id: check-case-conflict
+        name: Check for case conflicts
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.14.0
+    hooks:
+      - id: hadolint-docker
+        name: Lint Dockerfiles
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.47.0
+    hooks:
+      - id: markdownlint
+        name: Lint Markdown files
+        args: ['--fix']
+
+  # Code quality checks
+  - repo: local
+    hooks:
+      - id: gocyclo
+        name: Check cyclomatic complexity
+        entry: bash -c 'gocyclo -over 10 $(find . -name "*.go" ! -path "./vendor/*" ! -path "./.git/*" ! -path "*_test.go") || (echo "⚠️  Functions with cyclomatic complexity over 10 detected. Please refactor." && exit 1)'
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+  # Security scanning
+  - repo: local
+    hooks:
+      - id: git-secrets
+        name: Scan for AWS secrets
+        entry: git-secrets --scan
+        language: system
+        types: [file]
+
+      - id: gosec
+        name: Go security scanner
+        entry: bash -c 'gosec -quiet ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+      - id: trivy-config
+        name: Trivy config scanner
+        entry: bash -c 'command -v trivy >/dev/null 2>&1 && trivy config --severity HIGH,CRITICAL --exit-code 1 . || echo "Trivy not installed, skipping..."'
+        language: system
+        pass_filenames: false
+
+  # Test execution
+  - repo: local
+    hooks:
+      - id: go-test
+        name: Run Go tests
+        entry: bash -c 'go test -short -race ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+# Global configuration
+default_stages: [pre-commit, pre-push]
+fail_fast: false
