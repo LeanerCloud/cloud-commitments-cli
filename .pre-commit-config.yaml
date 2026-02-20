@@ -114,6 +114,20 @@ repos:
         pass_filenames: false
         files: \.go$
 
+      - id: frontend-build
+        name: Build frontend
+        entry: bash -c 'cd frontend && npm run build'
+        language: system
+        pass_filenames: false
+        files: ^frontend/src/
+
+      - id: frontend-test
+        name: Run frontend tests
+        entry: bash -c 'cd frontend && npx jest --no-coverage --silent'
+        language: system
+        pass_filenames: false
+        files: ^frontend/src/
+
 # Global configuration
 default_stages: [pre-commit, pre-push]
 fail_fast: false
