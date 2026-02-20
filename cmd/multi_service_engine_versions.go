@@ -84,16 +84,23 @@ func getAWSRegions(ctx context.Context, awsCfg aws.Config) ([]ec2types.Region, e
 	return regionsOutput.Regions, nil
 }
 
+// maxConcurrentRegionQueries limits the number of concurrent AWS API calls across regions
+const maxConcurrentRegionQueries = 10
+
 // queryRDSInstancesInRegions queries RDS instances in all regions concurrently
 func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (map[string][]InstanceEngineVersion, error) {
 	instanceVersions := make(map[string][]InstanceEngineVersion)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	sem := make(chan struct{}, maxConcurrentRegionQueries)
+
 	for _, region := range regions {
 		wg.Add(1)
+		sem <- struct{}{} // acquire semaphore
 		go func(regionName string) {
 			defer wg.Done()
+			defer func() { <-sem }() // release semaphore
 			queryRDSInstancesInRegion(ctx, awsCfg, regionName, instanceVersions, &mu)
 		}(aws.ToString(region.RegionName))
 	}
