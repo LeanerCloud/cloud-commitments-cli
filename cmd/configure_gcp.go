@@ -258,8 +258,7 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	fmt.Println("This will open a browser window for GCP authentication.")
 	fmt.Println()
 
-	loginCmd := "gcloud auth login"
-	if err := promptAndRunGCPCommand(reader, "GCP Login", loginCmd); err != nil {
+	if err := promptAndRunGCPCommand(reader, "GCP Login", "gcloud auth login", "gcloud", "auth", "login"); err != nil {
 		return "", err
 	}
 
@@ -269,8 +268,7 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	fmt.Println("List your GCP projects:")
 	fmt.Println()
 
-	listProjectsCmd := "gcloud projects list"
-	if err := promptAndRunGCPCommand(reader, "List Projects", listProjectsCmd); err != nil {
+	if err := promptAndRunGCPCommand(reader, "List Projects", "gcloud projects list", "gcloud", "projects", "list"); err != nil {
 		return "", err
 	}
 
@@ -305,9 +303,12 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	fmt.Println()
 
 	saName := "cudly-service-account"
-	createSaCmd := fmt.Sprintf(`gcloud iam service-accounts create %s --display-name="CUDly Service Account" --description="Service account for CUDly commitment management"`, saName)
+	createSaDisplay := fmt.Sprintf(`gcloud iam service-accounts create %s --display-name="CUDly Service Account" --description="Service account for CUDly commitment management"`, saName)
 
-	if err := promptAndRunGCPCommand(reader, "Create Service Account", createSaCmd); err != nil {
+	if err := promptAndRunGCPCommand(reader, "Create Service Account", createSaDisplay,
+		"gcloud", "iam", "service-accounts", "create", saName,
+		"--display-name=CUDly Service Account",
+		"--description=Service account for CUDly commitment management"); err != nil {
 		return "", err
 	}
 
@@ -320,9 +321,12 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	saEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com", saName, projectID)
 
 	// Grant Compute Admin role for commitment management
-	grantRoleCmd := fmt.Sprintf(`gcloud projects add-iam-policy-binding %s --member="serviceAccount:%s" --role="roles/compute.admin"`, projectID, saEmail)
+	grantRoleDisplay := fmt.Sprintf(`gcloud projects add-iam-policy-binding %s --member="serviceAccount:%s" --role="roles/compute.admin"`, projectID, saEmail)
 
-	if err := promptAndRunGCPCommand(reader, "Grant Compute Admin Role", grantRoleCmd); err != nil {
+	if err := promptAndRunGCPCommand(reader, "Grant Compute Admin Role", grantRoleDisplay,
+		"gcloud", "projects", "add-iam-policy-binding", projectID,
+		fmt.Sprintf("--member=serviceAccount:%s", saEmail),
+		"--role=roles/compute.admin"); err != nil {
 		return "", err
 	}
 
@@ -339,9 +343,11 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	}
 	keyFile := filepath.Join(home, "cudly-gcp-key.json")
 
-	createKeyCmd := fmt.Sprintf(`gcloud iam service-accounts keys create %s --iam-account=%s`, keyFile, saEmail)
+	createKeyDisplay := fmt.Sprintf(`gcloud iam service-accounts keys create %s --iam-account=%s`, keyFile, saEmail)
 
-	if err := promptAndRunGCPCommand(reader, "Create Key File", createKeyCmd); err != nil {
+	if err := promptAndRunGCPCommand(reader, "Create Key File", createKeyDisplay,
+		"gcloud", "iam", "service-accounts", "keys", "create", keyFile,
+		fmt.Sprintf("--iam-account=%s", saEmail)); err != nil {
 		return "", err
 	}
 
@@ -352,10 +358,10 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	return keyFile, nil
 }
 
-// promptAndRunGCPCommand shows a command and asks to run or skip
-// Note: Edit option removed for security - prevents command injection
-func promptAndRunGCPCommand(reader *bufio.Reader, name, command string) error {
-	fmt.Printf("Command: %s\n", command)
+// promptAndRunGCPCommand shows a command and asks to run or skip.
+// Takes explicit program and args to avoid command injection via string splitting.
+func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, program string, args ...string) error {
+	fmt.Printf("Command: %s\n", displayCmd)
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
 
@@ -364,7 +370,7 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, command string) error {
 
 	switch choice {
 	case "r", "run", "":
-		return executeGCPCommand(command)
+		return executeGCPCommand(displayCmd, program, args...)
 	case "s", "skip":
 		fmt.Printf("Skipping %s\n", name)
 		return nil
@@ -374,21 +380,13 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, command string) error {
 	}
 }
 
-// executeGCPCommand runs a gcloud command safely without shell interpretation
-func executeGCPCommand(command string) error {
+// executeGCPCommand runs a gcloud command with explicit program and arguments
+func executeGCPCommand(displayCmd string, program string, args ...string) error {
 	fmt.Println()
-	fmt.Printf("Executing: %s\n", command)
+	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	// Parse the command into program and arguments
-	// For gcloud commands, we can safely split on spaces for simple commands
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return fmt.Errorf("empty command")
-	}
-
-	// Use exec.Command with arguments instead of shell to prevent injection
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command(program, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
