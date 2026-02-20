@@ -4,12 +4,37 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"testing"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/stretchr/testify/assert"
 )
+
+// captureAppOutput captures output from AppLogger and returns the captured string.
+// Usage: output := captureAppOutput(t, func() { printSomething() })
+func captureAppOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	oldLogger := AppLogger
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe failed: %v", err)
+	}
+	os.Stdout = w
+	AppLogger = log.New(w, "", 0)
+
+	fn()
+
+	_ = w.Close()
+	os.Stdout = old
+	AppLogger = oldLogger
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	return buf.String()
+}
 
 func TestCalculateServiceStats(t *testing.T) {
 	tests := []struct {
@@ -129,20 +154,9 @@ func TestPrintServiceSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Capture stdout
-			old := os.Stdout
-			r, w, err := os.Pipe()
-			assert.NoError(t, err, "os.Pipe should not fail")
-			os.Stdout = w
-
-			printServiceSummary(tt.service, tt.stats)
-
-			_ = w.Close()
-			os.Stdout = old
-
-			var buf bytes.Buffer
-			_, _ = io.Copy(&buf, r)
-			output := buf.String()
+			output := captureAppOutput(t, func() {
+				printServiceSummary(tt.service, tt.stats)
+			})
 
 			// Verify output contains expected information
 			assert.Contains(t, output, getServiceDisplayName(tt.service))
@@ -223,20 +237,9 @@ func TestPrintMultiServiceSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Capture stdout
-			old := os.Stdout
-			r, w, err := os.Pipe()
-			assert.NoError(t, err, "os.Pipe should not fail")
-			os.Stdout = w
-
-			printMultiServiceSummary(tt.recs, tt.results, tt.stats, tt.isDryRun)
-
-			_ = w.Close()
-			os.Stdout = old
-
-			var buf bytes.Buffer
-			_, _ = io.Copy(&buf, r)
-			output := buf.String()
+			output := captureAppOutput(t, func() {
+				printMultiServiceSummary(tt.recs, tt.results, tt.stats, tt.isDryRun)
+			})
 
 			// Verify output contains expected information
 			assert.Contains(t, output, "Final Summary")
@@ -390,20 +393,9 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Capture stdout
-			old := os.Stdout
-			r, w, err := os.Pipe()
-			assert.NoError(t, err, "os.Pipe should not fail")
-			os.Stdout = w
-
-			printSavingsPlansSection(tt.recommendations, tt.stats)
-
-			_ = w.Close()
-			os.Stdout = old
-
-			var buf bytes.Buffer
-			_, _ = io.Copy(&buf, r)
-			output := buf.String()
+			output := captureAppOutput(t, func() {
+				printSavingsPlansSection(tt.recommendations, tt.stats)
+			})
 
 			tt.checkOutput(t, output)
 		})
@@ -502,19 +494,9 @@ func TestPrintComparisonSection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Capture stdout
-			old := os.Stdout
-			r, w, err := os.Pipe()
-			assert.NoError(t, err, "os.Pipe should not fail")
-			os.Stdout = w
-
-			printComparisonSection(tt.recommendations, tt.riStats, tt.riSavings)
-
-			_ = w.Close()
-			os.Stdout = old
-
-			var buf bytes.Buffer
-			_, _ = io.Copy(&buf, r)
-			output := buf.String()
+			output := captureAppOutput(t, func() {
+				printComparisonSection(tt.recommendations, tt.riStats, tt.riSavings)
+			})
 
 			tt.checkOutput(t, output)
 		})

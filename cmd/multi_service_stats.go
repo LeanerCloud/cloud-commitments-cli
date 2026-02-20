@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/LeanerCloud/CUDly/pkg/common"
 )
 
@@ -47,13 +45,13 @@ func calculateServiceStats(service common.ServiceType, recs []common.Recommendat
 
 // printServiceSummary prints a summary for a single service
 func printServiceSummary(service common.ServiceType, stats ServiceProcessingStats) {
-	fmt.Printf("\n📊 %s Summary:\n", getServiceDisplayName(service))
-	fmt.Printf("  Regions processed: %d\n", stats.RegionsProcessed)
-	fmt.Printf("  Recommendations: %d\n", stats.RecommendationsSelected)
-	fmt.Printf("  Instances: %d\n", stats.InstancesProcessed)
-	fmt.Printf("  Successful: %d, Failed: %d\n", stats.SuccessfulPurchases, stats.FailedPurchases)
+	AppLogger.Printf("\n📊 %s Summary:\n", getServiceDisplayName(service))
+	AppLogger.Printf("  Regions processed: %d\n", stats.RegionsProcessed)
+	AppLogger.Printf("  Recommendations: %d\n", stats.RecommendationsSelected)
+	AppLogger.Printf("  Instances: %d\n", stats.InstancesProcessed)
+	AppLogger.Printf("  Successful: %d, Failed: %d\n", stats.SuccessfulPurchases, stats.FailedPurchases)
 	if stats.TotalEstimatedSavings > 0 {
-		fmt.Printf("  Estimated monthly savings: $%.2f\n", stats.TotalEstimatedSavings)
+		AppLogger.Printf("  Estimated monthly savings: $%.2f\n", stats.TotalEstimatedSavings)
 	}
 }
 
@@ -88,12 +86,12 @@ type riAggregateStats struct {
 
 // printSummaryHeader prints the summary header with mode indication
 func printSummaryHeader(isDryRun bool) {
-	fmt.Println("\n🎯 Final Summary:")
-	fmt.Println("==========================================")
+	AppLogger.Println("\n🎯 Final Summary:")
+	AppLogger.Println("==========================================")
 	if isDryRun {
-		fmt.Println("Mode: DRY RUN")
+		AppLogger.Println("Mode: DRY RUN")
 	} else {
-		fmt.Println("Mode: ACTUAL PURCHASE")
+		AppLogger.Println("Mode: ACTUAL PURCHASE")
 	}
 }
 
@@ -125,16 +123,16 @@ func printReservedInstancesSection(riStats map[common.ServiceType]ServiceProcess
 		return
 	}
 
-	fmt.Println("\n💰 RESERVED INSTANCES:")
-	fmt.Println("--------------------------------------------------")
+	AppLogger.Println("\n💰 RESERVED INSTANCES:")
+	AppLogger.Println("--------------------------------------------------")
 	for service, stats := range riStats {
-		fmt.Printf("%-15s | Recs: %3d | Instances: %3d | Savings: $%8.2f/mo\n",
+		AppLogger.Printf("%-15s | Recs: %3d | Instances: %3d | Savings: $%8.2f/mo\n",
 			getServiceDisplayName(service),
 			stats.RecommendationsSelected,
 			stats.InstancesProcessed,
 			stats.TotalEstimatedSavings)
 	}
-	fmt.Printf("%-15s | Recs: %3d | Instances: %3d | Savings: $%8.2f/mo\n",
+	AppLogger.Printf("%-15s | Recs: %3d | Instances: %3d | Savings: $%8.2f/mo\n",
 		"TOTAL RIs",
 		aggregates.recommendations,
 		aggregates.instances,
@@ -146,25 +144,25 @@ func printSuccessRate(success, failed int) {
 	totalResults := success + failed
 	if totalResults > 0 {
 		successRate := (float64(success) / float64(totalResults)) * 100
-		fmt.Printf("\nOverall success rate: %.1f%%\n", successRate)
+		AppLogger.Printf("\nOverall success rate: %.1f%%\n", successRate)
 	}
 }
 
 // printFinalMessage prints the final message based on mode and results
 func printFinalMessage(isDryRun bool, riSuccess int) {
 	if isDryRun {
-		fmt.Println("\n💡 To actually purchase these RIs, run with --purchase flag")
-		fmt.Println("   Note: Savings Plans purchasing not yet implemented")
+		AppLogger.Println("\n💡 To actually purchase these RIs, run with --purchase flag")
+		AppLogger.Println("   Note: Savings Plans purchasing not yet implemented")
 	} else if riSuccess > 0 {
-		fmt.Println("\n🎉 Purchase operations completed!")
-		fmt.Println("⏰ Allow up to 15 minutes for RIs to appear in your account")
+		AppLogger.Println("\n🎉 Purchase operations completed!")
+		AppLogger.Println("⏰ Allow up to 15 minutes for RIs to appear in your account")
 	}
 }
 
 // printSavingsPlansSection prints the Savings Plans summary section
 func printSavingsPlansSection(allRecommendations []common.Recommendation, spStats ServiceProcessingStats) {
-	fmt.Println("\n📊 SAVINGS PLANS:")
-	fmt.Println("--------------------------------------------------")
+	AppLogger.Println("\n📊 SAVINGS PLANS:")
+	AppLogger.Println("--------------------------------------------------")
 
 	// Categorize recommendations by SP type
 	breakdown := categorizeSPRecommendations(allRecommendations)
@@ -178,8 +176,8 @@ func printSavingsPlansSection(allRecommendations []common.Recommendation, spStat
 
 // printComparisonSection prints the comparison between RIs and Savings Plans
 func printComparisonSection(allRecommendations []common.Recommendation, riStats map[common.ServiceType]ServiceProcessingStats, riSavings float64) {
-	fmt.Println("\n🔄 COMPARISON:")
-	fmt.Println("--------------------------------------------------")
+	AppLogger.Println("\n🔄 COMPARISON:")
+	AppLogger.Println("--------------------------------------------------")
 
 	// Collect SP savings by type
 	spSavings := collectSPSavings(allRecommendations)

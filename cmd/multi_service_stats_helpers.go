@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/LeanerCloud/CUDly/pkg/common"
 )
 
@@ -49,44 +47,44 @@ func categorizeSPRecommendations(recommendations []common.Recommendation) SPType
 // printSPTypeSummaries prints the summary for each Savings Plan type
 func printSPTypeSummaries(breakdown SPTypeBreakdown) {
 	if breakdown.ComputeCount > 0 {
-		fmt.Printf("  Compute SP    | Recs: %3d | Covers: EC2, Fargate, Lambda | $%8.2f/mo\n",
+		AppLogger.Printf("  Compute SP    | Recs: %3d | Covers: EC2, Fargate, Lambda | $%8.2f/mo\n",
 			breakdown.ComputeCount, breakdown.ComputeSavings)
 	}
 	if breakdown.EC2InstanceCount > 0 {
-		fmt.Printf("  EC2 Inst SP   | Recs: %3d | Covers: EC2 only (better rate) | $%8.2f/mo\n",
+		AppLogger.Printf("  EC2 Inst SP   | Recs: %3d | Covers: EC2 only (better rate) | $%8.2f/mo\n",
 			breakdown.EC2InstanceCount, breakdown.EC2InstanceSavings)
 	}
 	if breakdown.SageMakerCount > 0 {
-		fmt.Printf("  SageMaker SP  | Recs: %3d | Covers: SageMaker instances    | $%8.2f/mo\n",
+		AppLogger.Printf("  SageMaker SP  | Recs: %3d | Covers: SageMaker instances    | $%8.2f/mo\n",
 			breakdown.SageMakerCount, breakdown.SageMakerSavings)
 	}
 	if breakdown.DatabaseCount > 0 {
-		fmt.Printf("  Database SP   | Recs: %3d | Covers: RDS, Aurora, ElastiCache, etc. | $%8.2f/mo\n",
+		AppLogger.Printf("  Database SP   | Recs: %3d | Covers: RDS, Aurora, ElastiCache, etc. | $%8.2f/mo\n",
 			breakdown.DatabaseCount, breakdown.DatabaseSavings)
 	}
 }
 
 // printBestSPOptions prints the best Savings Plan options by category
 func printBestSPOptions(breakdown SPTypeBreakdown) {
-	fmt.Println()
+	AppLogger.Println()
 
 	// Best for EC2/Compute
 	if breakdown.EC2InstanceSavings > 0 || breakdown.ComputeSavings > 0 {
 		if breakdown.EC2InstanceSavings > breakdown.ComputeSavings {
-			fmt.Printf("  ⭐ Best for EC2: EC2 Instance SP ($%.2f/mo)\n", breakdown.EC2InstanceSavings)
+			AppLogger.Printf("  ⭐ Best for EC2: EC2 Instance SP ($%.2f/mo)\n", breakdown.EC2InstanceSavings)
 		} else if breakdown.ComputeSavings > 0 {
-			fmt.Printf("  ⭐ Best for Compute: Compute SP ($%.2f/mo) - more flexible\n", breakdown.ComputeSavings)
+			AppLogger.Printf("  ⭐ Best for Compute: Compute SP ($%.2f/mo) - more flexible\n", breakdown.ComputeSavings)
 		}
 	}
 
 	// Best for Databases
 	if breakdown.DatabaseSavings > 0 {
-		fmt.Printf("  ⭐ Best for Databases: Database SP ($%.2f/mo)\n", breakdown.DatabaseSavings)
+		AppLogger.Printf("  ⭐ Best for Databases: Database SP ($%.2f/mo)\n", breakdown.DatabaseSavings)
 	}
 
 	// Best for ML
 	if breakdown.SageMakerSavings > 0 {
-		fmt.Printf("  ⭐ Best for ML: SageMaker SP ($%.2f/mo)\n", breakdown.SageMakerSavings)
+		AppLogger.Printf("  ⭐ Best for ML: SageMaker SP ($%.2f/mo)\n", breakdown.SageMakerSavings)
 	}
 }
 
@@ -185,23 +183,23 @@ func calculateComparisonOptions(riSavings float64, spSavings SPSavingsByType, ri
 // printComparisonOptions prints all comparison options
 func printComparisonOptions(opts ComparisonOptions) {
 	// Option 1: All RIs
-	fmt.Printf("Option 1 (All RIs):\n")
-	fmt.Printf("  Total monthly savings: $%.2f\n", opts.Option1Savings)
-	fmt.Printf("  Pros: Highest discount for specific instance types\n")
-	fmt.Printf("  Cons: Less flexible, locked to instance family/engine\n")
+	AppLogger.Printf("Option 1 (All RIs):\n")
+	AppLogger.Printf("  Total monthly savings: $%.2f\n", opts.Option1Savings)
+	AppLogger.Printf("  Pros: Highest discount for specific instance types\n")
+	AppLogger.Printf("  Cons: Less flexible, locked to instance family/engine\n")
 
 	// Option 2: Best compute SP + non-EC2 RIs
-	fmt.Printf("\nOption 2 (%s for compute + RIs for databases):\n", opts.BestComputeSPName)
-	fmt.Printf("  Total monthly savings: $%.2f\n", opts.Option2Savings)
-	fmt.Printf("  Pros: Flexible compute (can change EC2 families)\n")
-	fmt.Printf("  Cons: DB RIs still locked to engine/instance type\n")
+	AppLogger.Printf("\nOption 2 (%s for compute + RIs for databases):\n", opts.BestComputeSPName)
+	AppLogger.Printf("  Total monthly savings: $%.2f\n", opts.Option2Savings)
+	AppLogger.Printf("  Pros: Flexible compute (can change EC2 families)\n")
+	AppLogger.Printf("  Cons: DB RIs still locked to engine/instance type\n")
 
 	// Option 3: If we have Database SP recommendations
 	if opts.HasDatabaseSP {
-		fmt.Printf("\nOption 3 (%s + Database SP):\n", opts.BestComputeSPName)
-		fmt.Printf("  Total monthly savings: $%.2f\n", opts.Option3Savings)
-		fmt.Printf("  Pros: Maximum flexibility for both compute and databases\n")
-		fmt.Printf("  Cons: May have slightly lower discount than targeted RIs\n")
+		AppLogger.Printf("\nOption 3 (%s + Database SP):\n", opts.BestComputeSPName)
+		AppLogger.Printf("  Total monthly savings: $%.2f\n", opts.Option3Savings)
+		AppLogger.Printf("  Pros: Maximum flexibility for both compute and databases\n")
+		AppLogger.Printf("  Cons: May have slightly lower discount than targeted RIs\n")
 	}
 }
 
@@ -210,10 +208,10 @@ func determineBestOption(opts ComparisonOptions) {
 	if !opts.HasDatabaseSP {
 		// Only 2 options available
 		if opts.Option2Savings > opts.Option1Savings {
-			fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 2 (saves $%.2f/mo more)\n",
+			AppLogger.Printf("\n  ⭐ RECOMMENDATION: Use Option 2 (saves $%.2f/mo more)\n",
 				opts.Option2Savings-opts.Option1Savings)
 		} else {
-			fmt.Printf("\n  ⭐ RECOMMENDATION: Use Option 1 (saves $%.2f/mo more)\n",
+			AppLogger.Printf("\n  ⭐ RECOMMENDATION: Use Option 1 (saves $%.2f/mo more)\n",
 				opts.Option1Savings-opts.Option2Savings)
 		}
 		return
@@ -233,5 +231,5 @@ func determineBestOption(opts ComparisonOptions) {
 		bestSavings = opts.Option3Savings
 	}
 
-	fmt.Printf("\n  ⭐ RECOMMENDATION: %s ($%.2f/mo)\n", best, bestSavings)
+	AppLogger.Printf("\n  ⭐ RECOMMENDATION: %s ($%.2f/mo)\n", best, bestSavings)
 }
