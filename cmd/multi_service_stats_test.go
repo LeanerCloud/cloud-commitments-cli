@@ -273,7 +273,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 500.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType:         "Compute",
 						HourlyCommitment: 1.5,
 					},
@@ -296,7 +296,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 300.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType:         "EC2Instance",
 						HourlyCommitment: 1.0,
 					},
@@ -318,7 +318,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 400.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType:         "Database",
 						HourlyCommitment: 1.2,
 					},
@@ -340,7 +340,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 250.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType:         "SageMaker",
 						HourlyCommitment: 0.8,
 					},
@@ -362,7 +362,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 500.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType:         "Compute",
 						HourlyCommitment: 1.5,
 					},
@@ -370,7 +370,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 600.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType:         "EC2Instance",
 						HourlyCommitment: 1.8,
 					},
@@ -416,7 +416,7 @@ func TestPrintComparisonSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 600.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType: "EC2Instance",
 					},
 				},
@@ -440,7 +440,7 @@ func TestPrintComparisonSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 800.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType: "Database",
 					},
 				},
@@ -466,14 +466,14 @@ func TestPrintComparisonSection(t *testing.T) {
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 500.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType: "EC2Instance",
 					},
 				},
 				{
 					Service:          common.ServiceSavingsPlans,
 					EstimatedSavings: 700.0,
-					Details: common.SavingsPlanDetails{
+					Details: &common.SavingsPlanDetails{
 						PlanType: "Compute",
 					},
 				},
