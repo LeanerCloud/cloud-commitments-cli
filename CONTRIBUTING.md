@@ -33,9 +33,11 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 1. **Fork the repository**
 2. **Create a feature branch** from `main`:
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
+
 3. **Make your changes** following our coding standards
 4. **Write or update tests** for your changes
 5. **Run the test suite** to ensure everything passes
@@ -243,6 +245,7 @@ the first page. Now properly iterates all pages.
 **Do not report security vulnerabilities through public issues.**
 
 Instead, please email security concerns to the maintainers directly. Include:
+
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
@@ -261,18 +264,21 @@ Instead, please email security concerns to the maintainers directly. Include:
 We welcome contributions in these areas:
 
 ### High Priority
+
 - Additional AWS services (Lambda, DynamoDB, etc.)
 - Azure service implementations
 - GCP service implementations
 - Improved error messages and user experience
 
 ### Medium Priority
+
 - Enhanced reporting and analytics
 - Terraform/CloudFormation integration
 - Web UI dashboard
 - Performance optimizations
 
 ### Documentation
+
 - Usage tutorials and guides
 - Architecture documentation
 - API documentation
@@ -289,6 +295,7 @@ We welcome contributions in these areas:
 By contributing to CUDly, you agree that your contributions will be licensed under the Open Software License 3.0 (OSL-3.0).
 
 This means:
+
 - Your contributions can be used commercially
 - Derivative works must also be OSL-3.0 licensed
 - You grant a patent license for your contributions
