@@ -77,6 +77,19 @@ cudly-test
 /server
 /lambda
 
+# Frontend build artifacts
+frontend/dist/
+frontend/coverage/
+frontend/node_modules/
+
+# Temporary files
+tmp/
+
+# Terraform local config (contain environment-specific settings)
+*.tfvars
+!*.tfvars.example
+*.tfbackend
+
 # Terraform state and outputs
 terraform-apply-*.txt
 terraform-plan-*.txt
