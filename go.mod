@@ -46,7 +46,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/savingsplans v1.31.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.18.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.21.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.26.6 // indirect
 	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -93,6 +92,7 @@ require (
 	github.com/LeanerCloud/CUDly/providers/azure v0.0.0
 	github.com/LeanerCloud/CUDly/providers/gcp v0.0.0
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.45.3
+	github.com/aws/aws-sdk-go-v2/service/sts v1.26.6
 	github.com/google/uuid v1.6.0
 )
 

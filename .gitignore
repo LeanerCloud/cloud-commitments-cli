@@ -55,3 +55,14 @@ MULTI_CLOUD*.md
 MYSQL*.md
 *_SUMMARY.md
 *_INDEX.md
+
+#build artifacts (root-level binaries only)
+/sanity
+/azure-sanity
+/ri-exchange
+
+#sanity reports / artifacts
+*sanity_report.json
+azure_sanity_report.json
+ri-exchange_*.json
+sanity_report*.json
