@@ -57,15 +57,12 @@ git secrets --add 'type.*service_account'                               # GCP Se
 git secrets --add 'AIza[0-9A-Za-z-_]{35}'                              # GCP API Key
 
 # Azure patterns
-git secrets --add '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' # Azure GUID
 git secrets --add 'DefaultEndpointsProtocol=https'                      # Azure Connection String
 
-# Generic secrets
-git secrets --add 'password.*[=:]\s*[^\s]+'                            # Password assignments
-git secrets --add 'api[_-]?key.*[=:]\s*[^\s]+'                        # API keys
-git secrets --add 'secret.*[=:]\s*[^\s]+'                             # Secrets
-git secrets --add 'token.*[=:]\s*[^\s]+'                              # Tokens
-git secrets --add 'private[_-]?key'                                   # Private keys
+# Generic secrets (require quoted values to avoid matching variable declarations)
+git secrets --add 'password\s*[=:]\s*['\''"][^'\''"]{8,}'             # Password with quoted value
+git secrets --add 'api[_-]?key\s*[=:]\s*['\''"][^'\''"]{8,}'         # API key with quoted value
+git secrets --add 'secret[_-]?key\s*[=:]\s*['\''"][^'\''"]{8,}'      # Secret key with quoted value
 git secrets --add '-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----'  # PEM private keys
 
 # Database connection strings
@@ -94,6 +91,18 @@ git secrets --add --allowed 'example\.com'
 git secrets --add --allowed 'YOUR_'
 git secrets --add --allowed '<your-'
 git secrets --add --allowed 'placeholder'
+
+# Go code patterns (function signatures, struct fields, variable names)
+git secrets --add --allowed 'func.*password'
+git secrets --add --allowed 'func.*secret'
+git secrets --add --allowed 'func.*token'
+git secrets --add --allowed 'Password\s+string'
+git secrets --add --allowed 'Secret\s+string'
+git secrets --add --allowed 'Token\s+string'
+
+# Terraform resource references
+git secrets --add --allowed 'resource\s'
+git secrets --add --allowed 'module\.'
 
 echo -e "${GREEN}✓ Secret patterns registered${NC}"
 
