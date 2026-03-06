@@ -82,21 +82,24 @@ func init() {
 	configureAzureCmd.Flags().BoolVar(&azureOpts.SkipSetup, "skip-setup", false, "Skip Azure CLI setup commands (az login, create service principal)")
 }
 
-// storeAzureCredentials stores Azure credentials in the secrets store
-func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName string, creds AzureCredentials) error {
-	// Validate credentials
+// validateAzureCredentialFields checks that all required fields are non-empty
+// and that UUID-typed fields have the correct format.
+func validateAzureCredentialFields(creds AzureCredentials) error {
 	if creds.TenantID == "" || creds.ClientID == "" || creds.ClientSecret == "" || creds.SubscriptionID == "" {
 		return fmt.Errorf("all credentials are required: tenant-id, client-id, client-secret, subscription-id")
 	}
-
-	// Validate UUID format for all ID fields
 	if err := validateAzureUUID(creds.TenantID, "Tenant ID"); err != nil {
 		return err
 	}
 	if err := validateAzureUUID(creds.ClientID, "Client ID"); err != nil {
 		return err
 	}
-	if err := validateAzureUUID(creds.SubscriptionID, "Subscription ID"); err != nil {
+	return validateAzureUUID(creds.SubscriptionID, "Subscription ID")
+}
+
+// storeAzureCredentials stores Azure credentials in the secrets store
+func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName string, creds AzureCredentials) error {
+	if err := validateAzureCredentialFields(creds); err != nil {
 		return err
 	}
 
