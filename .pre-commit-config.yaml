@@ -93,6 +93,15 @@ repos:
 
       - id: gosec
         name: Go security scanner
+        # Exclusion rationale:
+        # G101: False positives on variable names containing "password/secret/token"
+        # G104: Unchecked errors — covered by go vet and golangci-lint errcheck
+        # G115: Integer overflow — false positives on safe conversions (e.g. int to int32)
+        # G204: Subprocess launched with variable — CLI tool needs dynamic commands
+        # G301: Directory created with permissions > 0750 — acceptable for dev tooling
+        # G304: File path from variable — CLI tool reads user-specified file paths
+        # G402: TLS MinVersion not set — handled by cloud SDK defaults
+        # G505: Import of crypto/sha1 — not used for security, only checksums
         entry: bash -c 'gosec -quiet -exclude-dir=.legacy -exclude-dir=.dev-notes -exclude-dir=vendor -exclude=G101,G104,G115,G204,G301,G304,G402,G505 ./...'
         language: system
         pass_filenames: false
