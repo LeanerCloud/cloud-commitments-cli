@@ -43,16 +43,16 @@ jobs:
           cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.10.1
           args: --timeout=5m
 
       - name: Run go vet
         run: go vet ./...
 
       - name: Install gocyclo
-        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
 
       - name: Check cyclomatic complexity
         run: |
@@ -152,7 +152,7 @@ jobs:
 
       - name: Install golang-migrate
         run: |
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
 
       - name: Run database migrations
         env:
