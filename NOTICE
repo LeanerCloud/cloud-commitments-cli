@@ -1,0 +1,93 @@
+CUDly - Multi-Cloud Commitment & Usage Discount Manager
+Copyright (c) LeanerCloud
+
+This product includes software developed by third parties.
+
+========================================================================
+Go Dependencies (from go.mod)
+========================================================================
+
+AWS SDK for Go v2                   Apache-2.0
+  github.com/aws/aws-sdk-go-v2
+  https://github.com/aws/aws-sdk-go-v2/blob/main/LICENSE.txt
+
+AWS Lambda Go                       Apache-2.0
+  github.com/aws/aws-lambda-go
+  https://github.com/aws/aws-lambda-go/blob/main/LICENSE
+
+Azure SDK for Go                    MIT
+  github.com/Azure/azure-sdk-for-go
+  https://github.com/Azure/azure-sdk-for-go/blob/main/LICENSE.txt
+
+Google Cloud Go SDK                 Apache-2.0
+  cloud.google.com/go
+  https://github.com/googleapis/google-cloud-go/blob/main/LICENSE
+
+Google API Go Client                BSD-3-Clause
+  google.golang.org/api
+  https://github.com/googleapis/google-api-go-client/blob/main/LICENSE
+
+gRPC-Go                            Apache-2.0
+  google.golang.org/grpc
+  https://github.com/grpc/grpc-go/blob/master/LICENSE
+
+Cobra                               Apache-2.0
+  github.com/spf13/cobra
+  https://github.com/spf13/cobra/blob/main/LICENSE.txt
+
+Testify                             MIT
+  github.com/stretchr/testify
+  https://github.com/stretchr/testify/blob/master/LICENSE
+
+pgx (PostgreSQL driver)             MIT
+  github.com/jackc/pgx/v5
+  https://github.com/jackc/pgx/blob/master/LICENSE
+
+pgxmock                             BSD-3-Clause
+  github.com/pashagolub/pgxmock/v4
+  https://github.com/pashagolub/pgxmock/blob/master/LICENSE
+
+golang-migrate                      MIT
+  github.com/golang-migrate/migrate/v4
+  https://github.com/golang-migrate/migrate/blob/master/LICENSE
+
+google/uuid                         BSD-3-Clause
+  github.com/google/uuid
+  https://github.com/google/uuid/blob/master/LICENSE
+
+testcontainers-go                   MIT
+  github.com/testcontainers/testcontainers-go
+  https://github.com/testcontainers/testcontainers-go/blob/main/LICENSE
+
+Go standard library extensions      BSD-3-Clause
+  golang.org/x/crypto, golang.org/x/term
+  https://github.com/golang/crypto/blob/master/LICENSE
+
+YAML v3                             MIT / Apache-2.0
+  gopkg.in/yaml.v3
+  https://github.com/go-yaml/yaml/blob/v3/LICENSE
+
+========================================================================
+Frontend Dependencies (from frontend/package.json)
+========================================================================
+
+Chart.js                            MIT
+  https://github.com/chartjs/Chart.js/blob/master/LICENSE.md
+
+webpack                             MIT
+  https://github.com/webpack/webpack/blob/main/LICENSE
+
+TypeScript                          Apache-2.0
+  https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt
+
+Jest                                MIT
+  https://github.com/jestjs/jest/blob/main/LICENSE
+
+Testing Library                     MIT
+  https://github.com/testing-library/dom-testing-library/blob/main/LICENSE
+
+ESLint                              MIT
+  https://github.com/eslint/eslint/blob/main/LICENSE
+
+Babel                               MIT
+  https://github.com/babel/babel/blob/main/LICENSE
