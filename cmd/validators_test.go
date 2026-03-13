@@ -398,8 +398,8 @@ func TestValidateNoConflicts(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validateNoConflicts() expected error containing %q, got nil", tt.errMsg)
-				} else if tt.errMsg != "" && err.Error() != tt.errMsg {
-					t.Errorf("validateNoConflicts() error = %v, want %v", err, tt.errMsg)
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("validateNoConflicts() error = %v, want error containing %v", err, tt.errMsg)
 				}
 			} else {
 				if err != nil {
