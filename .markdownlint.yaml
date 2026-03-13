@@ -5,6 +5,3 @@ MD013: false
 # Allow duplicate headings in different sections (e.g., multiple "Infrastructure Created")
 MD024:
   siblings_only: true
-
-# Table column style - allow compact tables
-MD060: false
