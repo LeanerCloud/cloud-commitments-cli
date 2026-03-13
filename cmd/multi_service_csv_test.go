@@ -67,7 +67,7 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 	tests := []struct {
 		name     string
 		results  []common.PurchaseResult
-		filepath string
+		filename string
 		wantErr  bool
 	}{
 		{
@@ -94,7 +94,7 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 					Timestamp:    time.Now(),
 				},
 			},
-			filepath: "/tmp/test-rds.csv",
+			filename: "test-rds.csv",
 			wantErr:  false,
 		},
 		{
@@ -117,7 +117,7 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 					Timestamp:    time.Now(),
 				},
 			},
-			filepath: "/tmp/test-cache.csv",
+			filename: "test-cache.csv",
 			wantErr:  false,
 		},
 		{
@@ -142,13 +142,13 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 					Timestamp:    time.Now(),
 				},
 			},
-			filepath: "/tmp/test-ec2.csv",
+			filename: "test-ec2.csv",
 			wantErr:  false,
 		},
 		{
 			name:     "Empty results",
 			results:  []common.PurchaseResult{},
-			filepath: "/tmp/test-empty.csv",
+			filename: "test-empty.csv",
 			wantErr:  false,
 		},
 		{
@@ -165,23 +165,23 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 					Success: true,
 				},
 			},
-			filepath: "/tmp/test-unknown.csv",
+			filename: "test-unknown.csv",
 			wantErr:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := writeMultiServiceCSVReport(tt.results, tt.filepath)
+			tmpDir := t.TempDir()
+			filepath := tmpDir + "/" + tt.filename
+
+			err := writeMultiServiceCSVReport(tt.results, filepath)
 
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-
-			// Clean up test files
-			_ = os.Remove(tt.filepath)
 		})
 	}
 }
