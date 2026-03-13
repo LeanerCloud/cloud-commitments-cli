@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -251,9 +252,7 @@ func sanitizeAccountName(accountName string) string {
 
 	// Remove leading/trailing hyphens and collapse multiple hyphens
 	result = strings.Trim(result, "-")
-	for strings.Contains(result, "--") {
-		result = strings.ReplaceAll(result, "--", "-")
-	}
+	result = regexp.MustCompile("-{2,}").ReplaceAllString(result, "-")
 
 	return result
 }
