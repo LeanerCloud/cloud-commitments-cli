@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,9 +91,9 @@ func warnRDS3YearNoUpfront() error {
 	hasRDS := toolCfg.AllServices || containsService(services, common.ServiceRDS)
 
 	if hasRDS {
-		fmt.Println("⚠️  WARNING: AWS does not offer 3-year no-upfront Reserved Instances for RDS.")
-		fmt.Println("    RDS 3-year RIs only support: all-upfront, partial-upfront")
-		fmt.Println("    No RDS recommendations will be found with this combination.")
+		log.Println("⚠️  WARNING: AWS does not offer 3-year no-upfront Reserved Instances for RDS.")
+		log.Println("    RDS 3-year RIs only support: all-upfront, partial-upfront")
+		log.Println("    No RDS recommendations will be found with this combination.")
 	}
 
 	return nil
