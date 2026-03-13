@@ -211,7 +211,11 @@ func createCancelledResults(recs []common.Recommendation, region string, cfg Con
 // executePurchase executes an actual RI purchase
 func executePurchase(ctx context.Context, rec common.Recommendation, region string, index int, serviceClient provider.ServiceClient, cfg Config) common.PurchaseResult {
 	AppLogger.Printf("    ⚠️  ACTUAL PURCHASE: About to buy %d instances of %s\n", rec.Count, rec.ResourceType)
-	result, _ := serviceClient.PurchaseCommitment(ctx, rec)
+	result, err := serviceClient.PurchaseCommitment(ctx, rec)
+	if err != nil {
+		result.Success = false
+		result.Error = err
+	}
 	if result.CommitmentID == "" {
 		result.CommitmentID = generatePurchaseID(rec, region, index, false, cfg.Coverage)
 	}
