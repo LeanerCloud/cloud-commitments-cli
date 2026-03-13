@@ -148,6 +148,15 @@ func TestValidatePaymentAndTerm(t *testing.T) {
 			errMsg:  "invalid payment option",
 		},
 		{
+			name: "empty payment option",
+			setupFunc: func() {
+				toolCfg.PaymentOption = ""
+				toolCfg.TermYears = 1
+			},
+			wantErr: true,
+			errMsg:  "invalid payment option",
+		},
+		{
 			name: "invalid term - 2 years",
 			setupFunc: func() {
 				toolCfg.PaymentOption = "no-upfront"
