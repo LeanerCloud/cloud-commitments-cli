@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -89,8 +90,8 @@ func TestGetAllAWSRegions(t *testing.T) {
 
 	t.Run("Integration test", func(t *testing.T) {
 		// This test requires actual AWS credentials
-		if testing.Short() {
-			t.Skip("Skipping integration test")
+		if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+			t.Skip("Skipping integration test: AWS credentials not present")
 		}
 
 		cfg := aws.Config{Region: "us-east-1"}
