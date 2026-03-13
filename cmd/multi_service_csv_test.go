@@ -186,36 +186,6 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 	}
 }
 
-func TestDetermineCSVCoverage_Additional(t *testing.T) {
-	tests := []struct {
-		name             string
-		cfg              Config
-		expectedCoverage float64
-	}{
-		{
-			name: "Coverage from config at 75%",
-			cfg: Config{
-				Coverage: 75.0,
-			},
-			expectedCoverage: 75.0,
-		},
-		{
-			name: "Coverage at 100%",
-			cfg: Config{
-				Coverage: 100.0,
-			},
-			expectedCoverage: 100.0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := determineCSVCoverage(tt.cfg)
-			assert.Equal(t, tt.expectedCoverage, result)
-		})
-	}
-}
-
 // Tests for loadRecommendationsFromCSV function
 func TestLoadRecommendationsFromCSV(t *testing.T) {
 	tests := []struct {
