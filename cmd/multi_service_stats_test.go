@@ -25,11 +25,13 @@ func captureAppOutput(t *testing.T, fn func()) string {
 	os.Stdout = w
 	AppLogger = log.New(w, "", 0)
 
-	fn()
+	defer func() {
+		os.Stdout = old
+		AppLogger = oldLogger
+		w.Close()
+	}()
 
-	_ = w.Close()
-	os.Stdout = old
-	AppLogger = oldLogger
+	fn()
 
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
