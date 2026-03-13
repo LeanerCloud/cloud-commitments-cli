@@ -102,3 +102,6 @@ terraform-plan-*.txt
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
+
+# PR review swarm output
+PR_review/
