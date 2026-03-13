@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
@@ -93,7 +94,7 @@ func TestValidateNumericRanges(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validateNumericRanges() expected error containing %q, got nil", tt.errMsg)
-				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("validateNumericRanges() error = %v, want error containing %q", err, tt.errMsg)
 				}
 			} else {
@@ -179,7 +180,7 @@ func TestValidatePaymentAndTerm(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validatePaymentAndTerm() expected error containing %q, got nil", tt.errMsg)
-				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("validatePaymentAndTerm() error = %v, want error containing %q", err, tt.errMsg)
 				}
 			} else {
@@ -322,7 +323,7 @@ func TestValidateFilePaths(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validateFilePaths() expected error containing %q, got nil", tt.errMsg)
-				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("validateFilePaths() error = %v, want error containing %q", err, tt.errMsg)
 				}
 			} else {
@@ -401,18 +402,3 @@ func TestValidateNoConflicts(t *testing.T) {
 }
 
 // Note: TestValidateInstanceTypes and TestValidateFlags already exist in main_test.go
-
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && containsHelper(s, substr)))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
