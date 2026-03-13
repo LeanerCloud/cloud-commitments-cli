@@ -414,9 +414,6 @@ func TestAdjustRecsForDuplicates(t *testing.T) {
 			mockClient := &MockServiceClient{}
 			mockClient.On("GetExistingCommitments", ctx).Return(tt.existingRIs, nil)
 
-			// Suppress logger output (no return value from SetEnabled)
-			// Logger output disabled for testing
-
 			results, err := adjustRecsForDuplicates(ctx, tt.inputRecs, mockClient)
 
 			if tt.expectedError {
