@@ -140,9 +140,13 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 
 	// Process purchases
 	allResults := make([]common.PurchaseResult, 0)
+	serviceResults := make([]common.PurchaseResult, 0)
 	serviceStats := make(map[common.ServiceType]ServiceProcessingStats)
 
 	for service, regionRecs := range recsByServiceRegion {
+		// Reset service results for each service
+		serviceResults = serviceResults[:0]
+
 		AppLogger.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 		AppLogger.Printf("🎯 Processing %s\n", getServiceDisplayName(service))
 		AppLogger.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
@@ -174,11 +178,14 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 
 			// Process purchases for this region
 			regionResults := processPurchaseLoop(ctx, recs, region, isDryRun, serviceClient, cfg)
-			allResults = append(allResults, regionResults...)
+			serviceResults = append(serviceResults, regionResults...)
 		}
 
-		// Calculate service statistics
-		stats := calculateServiceStats(service, serviceRecs, allResults)
+		// Add service results to overall results
+		allResults = append(allResults, serviceResults...)
+
+		// Calculate service statistics (using only this service's results)
+		stats := calculateServiceStats(service, serviceRecs, serviceResults)
 		serviceStats[service] = stats
 		printServiceSummary(service, stats)
 	}
