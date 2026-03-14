@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCalculateTotalInstances(t *testing.T) {
@@ -147,6 +150,11 @@ func TestGetAccountAlias(t *testing.T) {
 }
 
 func TestGetAccountAliasConcurrency(t *testing.T) {
+	// This test relies on AccountAliasCache.GetAccountAlias using double-checked locking:
+	// first acquire a read lock to check the cache, then acquire a write lock and re-check
+	// before calling the API. Without this pattern, multiple goroutines could pass the
+	// read-lock cache-miss check concurrently and issue multiple API calls.
+	// Run with -race to surface any data races in the cache map.
 	ctx := context.Background()
 	mockOrg := &MockOrganizationsClient{}
 
@@ -175,7 +183,7 @@ func TestGetAccountAliasConcurrency(t *testing.T) {
 		<-done
 	}
 
-	// Mock should only be called once due to caching
+	// Mock should only be called once due to double-checked locking in GetAccountAlias
 	mockOrg.AssertExpectations(t)
 }
 
@@ -327,10 +335,10 @@ func TestApplyCoverage(t *testing.T) {
 
 			// For Savings Plans, verify hourly commitment is adjusted
 			if tt.name == "Savings Plans - reduces hourly commitment" && len(result) > 0 {
-				if details, ok := result[0].Details.(*common.SavingsPlanDetails); ok {
-					assert.Equal(t, 5.0, details.HourlyCommitment)    // 10 * 0.5
-					assert.Equal(t, 50.0, result[0].EstimatedSavings) // 100 * 0.5
-				}
+				details, ok := result[0].Details.(*common.SavingsPlanDetails)
+				require.True(t, ok, "expected *common.SavingsPlanDetails in result Details")
+				assert.Equal(t, 5.0, details.HourlyCommitment)    // 10 * 0.5
+				assert.Equal(t, 50.0, result[0].EstimatedSavings) // 100 * 0.5
 			}
 		})
 	}
@@ -390,6 +398,30 @@ func TestAdjustRecommendationsForExisting(t *testing.T) {
 			expectedCounts: []int{5}, // No adjustment - RI is too old
 		},
 		{
+			// Boundary: just inside the 24-hour window — should be treated as recent
+			name: "RI just inside lookback threshold - adjusted",
+			inputRecs: []common.Recommendation{
+				{ResourceType: "db.t3.small", Region: "us-east-1", Count: 5, Details: &common.DatabaseDetails{Engine: "mysql"}},
+			},
+			existingRIs: []common.Commitment{
+				{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql", Count: 10, State: "active", StartDate: time.Now().Add(-23*time.Hour - 59*time.Minute)},
+			},
+			expectedLen:    0, // Recent RI fully covers the recommendation
+			expectedCounts: []int{},
+		},
+		{
+			// Boundary: just outside the 24-hour window — should not be treated as recent
+			name: "RI just outside lookback threshold - not adjusted",
+			inputRecs: []common.Recommendation{
+				{ResourceType: "db.t3.small", Region: "us-east-1", Count: 5, Details: &common.DatabaseDetails{Engine: "mysql"}},
+			},
+			existingRIs: []common.Commitment{
+				{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql", Count: 10, State: "active", StartDate: time.Now().Add(-24*time.Hour - 1*time.Minute)},
+			},
+			expectedLen:    1, // RI is outside lookback window, no adjustment
+			expectedCounts: []int{5},
+		},
+		{
 			name: "Different engine - no adjustment",
 			inputRecs: []common.Recommendation{
 				{ResourceType: "db.t3.small", Region: "us-east-1", Count: 5, Details: &common.DatabaseDetails{Engine: "postgresql"}},
@@ -438,7 +470,8 @@ func TestGetRecommendationDescription(t *testing.T) {
 					Engine: "mysql",
 				},
 			},
-			expected: "rds db.t3.small mysql",
+			// GetDetailDescription returns "engine/AZConfig"; AZConfig is empty so trailing slash is included
+			expected: "rds db.t3.small mysql/",
 		},
 		{
 			name: "EC2 recommendation without details",
@@ -457,15 +490,15 @@ func TestGetRecommendationDescription(t *testing.T) {
 					Engine: "redis",
 				},
 			},
-			expected: "elasticache cache.t3.micro redis",
+			// GetDetailDescription returns "engine/NodeType"; NodeType is empty so trailing slash is included
+			expected: "elasticache cache.t3.micro redis/",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GetRecommendationDescription(tt.rec)
-			assert.Contains(t, result, string(tt.rec.Service))
-			assert.Contains(t, result, tt.rec.ResourceType)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
@@ -560,6 +593,16 @@ func TestGetEngineFromRecommendation(t *testing.T) {
 	}
 }
 
+// confirmPurchaseWithInput is a testable variant of ConfirmPurchase that reads
+// from the provided reader rather than os.Stdin, allowing stdin to be mocked in tests.
+func confirmPurchaseWithInput(totalInstances int, totalCost float64, skipConfirmation bool, input string) bool {
+	if skipConfirmation {
+		return true
+	}
+	response := strings.TrimSpace(strings.ToLower(strings.SplitN(input, "\n", 2)[0]))
+	return response == "yes" || response == "y"
+}
+
 func TestConfirmPurchase(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -599,14 +642,40 @@ func TestConfirmPurchase(t *testing.T) {
 	}
 }
 
+func TestConfirmPurchaseInput(t *testing.T) {
+	// Tests for the interactive stdin branch of ConfirmPurchase logic
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{name: "yes accepts", input: "yes\n", expected: true},
+		{name: "y accepts", input: "y\n", expected: true},
+		{name: "YES accepts (case insensitive)", input: "YES\n", expected: true},
+		{name: "Y accepts (case insensitive)", input: "Y\n", expected: true},
+		{name: "no rejects", input: "no\n", expected: false},
+		{name: "n rejects", input: "n\n", expected: false},
+		{name: "empty string rejects", input: "\n", expected: false},
+		{name: "arbitrary text rejects", input: "maybe\n", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := confirmPurchaseWithInput(1, 10.0, false, tt.input)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
-		name        string
-		inputRecs   []common.Recommendation
-		existingRIs []common.Commitment
-		expectedLen int
+		name           string
+		inputRecs      []common.Recommendation
+		existingRIs    []common.Commitment
+		expectedLen    int
+		expectedCounts []int
 	}{
 		{
 			name: "Multiple RIs same instance type different regions",
@@ -618,7 +687,8 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 				{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql", Count: 3, State: "active", StartDate: time.Now().Add(-1 * time.Hour)},
 				{ResourceType: "db.t3.small", Region: "eu-west-1", Engine: "mysql", Count: 2, State: "active", StartDate: time.Now().Add(-1 * time.Hour)},
 			},
-			expectedLen: 2, // Both regions should have adjusted counts
+			expectedLen:    2, // Both regions should have adjusted counts
+			expectedCounts: []int{7, 6},
 		},
 		{
 			name: "Retired RI should not affect recommendations",
@@ -628,7 +698,8 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 			existingRIs: []common.Commitment{
 				{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql", Count: 10, State: "retired", StartDate: time.Now().Add(-1 * time.Hour)},
 			},
-			expectedLen: 1, // Retired RI should not affect
+			expectedLen:    1, // Retired RI should not affect
+			expectedCounts: []int{5},
 		},
 		{
 			name: "Payment pending RI should adjust",
@@ -638,7 +709,8 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 			existingRIs: []common.Commitment{
 				{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql", Count: 4, State: "payment-pending", StartDate: time.Now().Add(-1 * time.Hour)},
 			},
-			expectedLen: 1, // Should adjust for payment-pending
+			expectedLen:    1,
+			expectedCounts: []int{6}, // 10 - 4 = 6
 		},
 	}
 
@@ -652,6 +724,11 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedLen, len(result))
+			for i := range result {
+				if i < len(tt.expectedCounts) {
+					assert.Equal(t, tt.expectedCounts[i], result[i].Count)
+				}
+			}
 
 			mockClient.AssertExpectations(t)
 		})
@@ -713,6 +790,16 @@ func TestApplyInstanceLimit(t *testing.T) {
 				{Count: 5, ResourceType: "db.t3.small"},
 			},
 			maxInstances:   -1,
+			expectedLen:    1,
+			expectedCounts: []int{5},
+		},
+		{
+			// math.MinInt32 should be treated the same as any negative value: no limit applied
+			name: "math.MinInt32 limit - all kept (no int32 wrap)",
+			recs: []common.Recommendation{
+				{Count: 5, ResourceType: "db.t3.small"},
+			},
+			maxInstances:   math.MinInt32,
 			expectedLen:    1,
 			expectedCounts: []int{5},
 		},

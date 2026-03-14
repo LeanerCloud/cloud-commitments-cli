@@ -103,8 +103,8 @@ func TestGCPCredentials_Struct(t *testing.T) {
 	assert.Equal(t, "service_account", creds.Type)
 	assert.Equal(t, "my-project", creds.ProjectID)
 	assert.Equal(t, "key-123", creds.PrivateKeyID)
-	assert.Contains(t, creds.PrivateKey, "PRIVATE KEY")
-	assert.Contains(t, creds.ClientEmail, "iam.gserviceaccount.com")
+	assert.Equal(t, "-----BEGIN PRIVATE KEY-----\n...", creds.PrivateKey)
+	assert.Equal(t, "sa@project.iam.gserviceaccount.com", creds.ClientEmail)
 	assert.Equal(t, "12345678901234567890", creds.ClientID)
 }
 
@@ -455,6 +455,8 @@ func TestStoreAzureCredentials(t *testing.T) {
 			},
 		},
 		{
+			// No mockSetup needed for error-path cases: credential validation runs
+			// before any store operation, so UpdateSecret is never called.
 			name:      "Error when tenant ID is missing",
 			stackName: "my-stack",
 			creds: AzureCredentials{
@@ -549,6 +551,8 @@ func TestStoreAzureCredentials(t *testing.T) {
 
 // Tests for storeGCPCredentials function
 func TestStoreGCPCredentials(t *testing.T) {
+	// private_key validation is presence-only; the key content is not parsed or
+	// validated as a real PEM block by storeGCPCredentials.
 	validGCPJSON := `{
 		"type": "service_account",
 		"project_id": "my-project",

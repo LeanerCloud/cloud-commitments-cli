@@ -301,7 +301,9 @@ func adjustSingleRecommendation(rec common.Recommendation, existingMap map[strin
 	existingCount := existingMap[key]
 
 	if existingCount >= rec.Count {
-		// All of this recommendation is covered by recent RIs
+		// All of this recommendation is covered by recent RIs.
+		// Return a zero-value Recommendation (Count=0) as a sentinel; the caller
+		// (adjustRecommendationsAgainstExisting) filters out recommendations with Count <= 0.
 		log.Printf("    [DuplicateChecker] SKIP %s: recent %d >= recommended %d", key, existingCount, rec.Count)
 		existingMap[key] -= rec.Count
 		return common.Recommendation{Count: 0}
