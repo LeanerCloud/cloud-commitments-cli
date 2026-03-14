@@ -82,11 +82,23 @@ func TestApplyFilters(t *testing.T) {
 				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1},
 				{Region: "us-west-2", ResourceType: "db.t3.micro", Count: 1},
 			},
-			includeRegions:       []string{"us-east-1"},
+			includeRegions:       []string{},
 			excludeRegions:       []string{},
 			includeInstanceTypes: []string{},
 			excludeInstanceTypes: []string{"db.t3.micro"},
 			expectedCount:        1, // Only us-east-1 with db.t3.small
+		},
+		{
+			name: "Include and exclude same instance type - exclude takes precedence",
+			recommendations: []common.Recommendation{
+				{Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1},
+				{Region: "us-west-2", ResourceType: "db.t3.small", Count: 1},
+			},
+			includeRegions:       []string{},
+			excludeRegions:       []string{},
+			includeInstanceTypes: []string{"db.t3.micro", "db.t3.small"},
+			excludeInstanceTypes: []string{"db.t3.micro"},
+			expectedCount:        1, // db.t3.micro excluded, only db.t3.small remains
 		},
 	}
 
@@ -274,6 +286,26 @@ func TestShouldIncludeEngine(t *testing.T) {
 			includeEngines: []string{},
 			excludeEngines: []string{"redis"},
 			expected:       false,
+		},
+		{
+			name: "RDS with nil Details",
+			recommendation: common.Recommendation{
+				Service: common.ServiceRDS,
+				Details: nil,
+			},
+			includeEngines: []string{"mysql"},
+			excludeEngines: []string{},
+			expected:       false, // nil Details with include list - exclude unknown engines
+		},
+		{
+			name: "RDS with nil Details - no filters",
+			recommendation: common.Recommendation{
+				Service: common.ServiceRDS,
+				Details: nil,
+			},
+			includeEngines: []string{},
+			excludeEngines: []string{},
+			expected:       true, // nil Details with no filters - include by default
 		},
 		{
 			name: "RDS MySQL - with ServiceDetails",
