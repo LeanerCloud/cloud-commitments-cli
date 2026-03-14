@@ -211,6 +211,13 @@ func TestShouldIncludeInstanceType(t *testing.T) {
 			excludeInstanceTypes: []string{"db.t3.large"},
 			expected:             false,
 		},
+		{
+			name:                 "Not in include list - excluded via whitelist",
+			instanceType:         "db.r5.large",
+			includeInstanceTypes: []string{"db.t3.micro"},
+			excludeInstanceTypes: []string{},
+			expected:             false,
+		},
 	}
 
 	for _, tt := range tests {
