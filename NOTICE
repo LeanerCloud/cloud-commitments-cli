@@ -43,7 +43,7 @@ pgx (PostgreSQL driver)             MIT
   github.com/jackc/pgx/v5
   https://github.com/jackc/pgx/blob/master/LICENSE
 
-pgxmock                             BSD-3-Clause
+pgxmock                             BSD-2-Clause
   github.com/pashagolub/pgxmock/v4
   https://github.com/pashagolub/pgxmock/blob/master/LICENSE
 
