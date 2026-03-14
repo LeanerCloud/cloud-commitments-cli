@@ -28,11 +28,11 @@ func captureAppOutput(t *testing.T, fn func()) string {
 	defer func() {
 		os.Stdout = old
 		AppLogger = oldLogger
-		w.Close()
 	}()
 
 	fn()
 
+	w.Close() // Must close writer before reading to unblock io.Copy
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
 	return buf.String()
