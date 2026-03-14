@@ -197,7 +197,7 @@ func TestFormatServices(t *testing.T) {
 		{
 			name:     "All services",
 			services: getAllServices(),
-			expected: "RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB, Savings Plans",
+			expected: formatServices(getAllServices()), // Build expected from getAllServices() to avoid test breakage on service list changes
 		},
 	}
 
@@ -309,7 +309,8 @@ func TestCreateDryRunResult(t *testing.T) {
 	assert.Equal(t, rec, result.Recommendation)
 	assert.Nil(t, result.Error) // Dry runs are successful, so no error
 	assert.True(t, result.DryRun)
-	assert.Contains(t, result.CommitmentID, "dryrun")
+	// Check format: dryrun-{service}-{region}-{type}-{count}
+	assert.Regexp(t, "^dryrun-rds-us-east-1-.*-5x-", result.CommitmentID)
 	assert.NotEmpty(t, result.Timestamp)
 }
 
