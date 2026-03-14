@@ -309,12 +309,12 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 			// Ask for confirmation before proceeding with purchases (only on first item)
 			if j == 0 {
 				totalInstances := CalculateTotalInstances(recs)
-				totalCost := 0.0
+				totalSavings := 0.0
 				for _, r := range recs {
-					totalCost += r.EstimatedSavings
+					totalSavings += r.EstimatedSavings
 				}
 
-				if !ConfirmPurchase(totalInstances, totalCost, cfg.SkipConfirmation) {
+				if !ConfirmPurchase(totalInstances, totalSavings, cfg.SkipConfirmation) {
 					// User cancelled - return cancelled results for all
 					return createCancelledResults(recs, region, cfg)
 				}
