@@ -79,6 +79,7 @@ sanity_report*.json
 # Compiled binaries
 cudly-final
 cudly-test
+cleanup-lambda
 /server
 /lambda
 
@@ -94,6 +95,10 @@ tmp/
 *.tfvars
 !*.tfvars.example
 *.tfbackend
+
+# Terraform plan files
+tfplan
+*.tfplan
 
 # Terraform state and outputs
 terraform-apply-*.txt
