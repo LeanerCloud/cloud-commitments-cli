@@ -95,6 +95,7 @@ tmp/
 *.tfvars
 !*.tfvars.example
 *.tfbackend
+backend.hcl
 
 # Terraform plan files
 tfplan
