@@ -111,3 +111,6 @@ terraform-plan-*.txt
 
 # PR review swarm output
 PR_review/
+
+# Generated docs (security runbooks etc.)
+docs/
