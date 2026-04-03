@@ -112,5 +112,13 @@ terraform-plan-*.txt
 # PR review swarm output
 PR_review/
 
+# Claude Code / claude-flow framework runtime files (not project source)
+.claude-flow/
+.swarm/
+.mcp.json
+clear-rate-limit
+security-audit-swarm.zip
+security-audit-swarm/
+
 # Generated docs (security runbooks etc.)
 docs/
