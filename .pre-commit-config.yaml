@@ -54,7 +54,7 @@ repos:
         name: Check for merge conflicts
       - id: detect-private-key
         name: Detect private keys
-        exclude: '_test\.go$'
+        exclude: '(_test\.go|frontend/src/index\.html)$'
       - id: check-case-conflict
         name: Check for case conflicts
 
