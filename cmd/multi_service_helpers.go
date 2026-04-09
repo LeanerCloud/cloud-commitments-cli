@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -486,4 +487,75 @@ func checkDuplicatesAndApplyLimit(
 	}
 
 	return filteredRecs
+}
+
+// fetchAndFilterRegionRecs fetches, filters, applies coverage, and deduplicates
+// recommendations for a single service+region. No purchases are made.
+func fetchAndFilterRegionRecs(
+	ctx context.Context,
+	awsCfg aws.Config,
+	recClient provider.RecommendationsClient,
+	accountCache *AccountAliasCache,
+	service common.ServiceType,
+	region string,
+	regionIndex, totalRegions int,
+	engineData engineVersionData,
+	cfg Config,
+) []common.Recommendation {
+	AppLogger.Printf("\n  📍 [%d/%d] Region: %s\n", regionIndex, totalRegions, region)
+
+	recs := fetchRecommendationsForRegion(ctx, recClient, service, region, cfg)
+	if len(recs) == 0 {
+		AppLogger.Printf("  ℹ️  No recommendations found\n")
+		return nil
+	}
+	AppLogger.Printf("  ✅ Found %d recommendations\n", len(recs))
+
+	populateRecommendationAccountNames(ctx, recs, accountCache)
+	recs = applyRegionFilters(recs, engineData, region, cfg)
+	if len(recs) == 0 {
+		AppLogger.Printf("  ℹ️  No recommendations after applying filters\n")
+		return nil
+	}
+
+	recs = applyCoverageAndOverrides(recs, cfg)
+
+	// Deduplication: skip recs matching recently-purchased commitments
+	regionalCfg := awsCfg.Copy()
+	regionalCfg.Region = region
+	serviceClient := createServiceClient(service, regionalCfg)
+	if serviceClient != nil {
+		recs = checkDuplicatesAndApplyLimit(ctx, recs, serviceClient, cfg)
+	}
+
+	return recs
+}
+
+// fetchAllRecs collects recommendations from all services and regions without purchasing.
+func fetchAllRecs(
+	ctx context.Context,
+	awsCfg aws.Config,
+	recClient provider.RecommendationsClient,
+	accountCache *AccountAliasCache,
+	servicesToProcess []common.ServiceType,
+	engineData engineVersionData,
+	cfg Config,
+) []common.Recommendation {
+	all := make([]common.Recommendation, 0)
+	for _, service := range servicesToProcess {
+		AppLogger.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		AppLogger.Printf("🔍 Fetching %s recommendations\n", getServiceDisplayName(service))
+		AppLogger.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+		regions, err := determineRegionsForService(ctx, awsCfg, recClient, service, cfg.Regions)
+		if err != nil {
+			log.Printf("❌ Failed to determine regions for %s: %v", getServiceDisplayName(service), err)
+			continue
+		}
+		for i, region := range regions {
+			recs := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg)
+			all = append(all, recs...)
+		}
+	}
+	return all
 }

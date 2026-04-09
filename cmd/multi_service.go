@@ -2,94 +2,202 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"sync/atomic"
 	"time"
 
+	"github.com/LeanerCloud/CUDly/internal/reporter"
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/LeanerCloud/CUDly/pkg/provider"
+	"github.com/LeanerCloud/CUDly/pkg/scorer"
 	awsprovider "github.com/LeanerCloud/CUDly/providers/aws"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/google/uuid"
 )
 
-// runToolMultiService is the main entry point for processing multiple services
-func runToolMultiService(ctx context.Context, cfg Config) {
-	// Validation is now handled in PreRunE
+// shutdownRequested is set to true when SIGINT is received during a purchase run.
+var shutdownRequested atomic.Bool
 
-	// Check if we're using CSV input mode
+// runToolMultiService is the main entry point for processing multiple services.
+// It runs a two-phase pipeline: (1) fetch+filter all recommendations, then
+// (2) score, display, confirm, and purchase.
+func runToolMultiService(ctx context.Context, cfg Config) {
 	if cfg.CSVInput != "" {
 		runToolFromCSV(ctx, cfg)
 		return
 	}
 
-	// Determine services to process
 	servicesToProcess := determineServicesToProcess(cfg)
-
 	if len(servicesToProcess) == 0 {
 		log.Fatalf("No valid services specified")
 	}
 
-	// Determine if this is a dry run
-	isDryRun := !cfg.ActualPurchase
-	printRunMode(isDryRun)
+	isDryRun := !cfg.ActualPurchase || cfg.DryRun
 
+	// Register SIGINT handler so a running purchase loop can be interrupted cleanly.
+	shutdownRequested.Store(false)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func() { <-sigCh; shutdownRequested.Store(true) }()
+	defer signal.Stop(sigCh)
+
+	// Verify audit log is writable before making any cloud API calls.
+	if err := CheckAuditLogWritable(cfg.AuditLog); err != nil {
+		log.Fatalf("Cannot write audit log: %v", err)
+	}
+
+	printRunMode(isDryRun)
 	AppLogger.Printf("📊 Processing services: %s\n", formatServices(servicesToProcess))
 	printPaymentAndTerm(cfg)
 
-	// Load AWS configuration
-	var configOptions []func(*config.LoadOptions) error
-	configOptions = append(configOptions, config.WithRegion("us-east-1"))
-	if cfg.Profile != "" {
-		configOptions = append(configOptions, config.WithSharedConfigProfile(cfg.Profile))
-	}
-	awsCfg, err := config.LoadDefaultConfig(ctx, configOptions...)
+	awsCfg, err := loadAWSConfig(ctx, cfg)
 	if err != nil {
 		log.Fatalf("Failed to load AWS config: %v", err)
 	}
 
-	// Create account alias cache for lookup
 	accountCache := NewAccountAliasCache(awsCfg)
-
-	// Create recommendations client
 	recClient := awsprovider.NewRecommendationsClient(awsCfg)
-
-	// Query engine version data once for all services
 	engineData := fetchEngineVersionData(ctx, cfg)
 
-	// Process each service
-	allRecommendations := make([]common.Recommendation, 0)
-	allResults := make([]common.PurchaseResult, 0)
-	serviceStats := make(map[common.ServiceType]ServiceProcessingStats)
+	// Phase 1: collect all recommendations without purchasing.
+	AppLogger.Printf("\n📥 Fetching recommendations from all services...\n")
+	allRecs := fetchAllRecs(ctx, awsCfg, recClient, accountCache, servicesToProcess, engineData, cfg)
 
-	for _, service := range servicesToProcess {
-		AppLogger.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		AppLogger.Printf("🎯 Processing %s\n", getServiceDisplayName(service))
-		AppLogger.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-
-		// Process all services with common interface
-		serviceRecs, serviceResults := processService(ctx, awsCfg, recClient, accountCache, service, isDryRun, cfg, engineData)
-		allRecommendations = append(allRecommendations, serviceRecs...)
-		allResults = append(allResults, serviceResults...)
-
-		// Calculate service statistics
-		stats := calculateServiceStats(service, serviceRecs, serviceResults)
-		serviceStats[service] = stats
-		printServiceSummary(service, stats)
+	// Phase 2: score and display.
+	scoredResult := scoreAndDisplay(allRecs, cfg)
+	if len(scoredResult.Passed) == 0 {
+		AppLogger.Printf("\nℹ️  No recommendations passed filters. Nothing to purchase.\n")
+		return
 	}
 
-	// Generate CSV filename
-	finalCSVOutput := generateCSVFilename(isDryRun, cfg)
+	// Phase 3: confirm (skipped in dry-run).
+	runID := uuid.New().String()
+	if !isDryRun {
+		totalInstances, totalSavings := sumPassedRecs(scoredResult.Passed)
+		if !ConfirmPurchase(totalInstances, totalSavings, cfg.SkipConfirmation) {
+			AppLogger.Printf("\n❌ Purchase cancelled.\n")
+			return
+		}
+	}
 
-	// Write CSV report
+	// Phase 4: purchase each recommendation and write audit records.
+	allResults := executePurchasePipeline(ctx, awsCfg, scoredResult.Passed, isDryRun, runID, cfg)
+
+	// Produce summary outputs.
+	serviceStats := buildServiceStats(scoredResult.Passed, allResults)
+	finalCSVOutput := generateCSVFilename(isDryRun, cfg)
 	if err := writeMultiServiceCSVReport(allResults, finalCSVOutput); err != nil {
 		log.Printf("Warning: Failed to write CSV output: %v", err)
 	} else {
 		AppLogger.Printf("\n📋 CSV report written to: %s\n", finalCSVOutput)
 	}
+	printMultiServiceSummary(scoredResult.Passed, allResults, serviceStats, isDryRun)
+}
 
-	// Print final summary
-	printMultiServiceSummary(allRecommendations, allResults, serviceStats, isDryRun)
+// loadAWSConfig builds an aws.Config from the tool config.
+func loadAWSConfig(ctx context.Context, cfg Config) (aws.Config, error) {
+	var opts []func(*awsconfig.LoadOptions) error
+	opts = append(opts, awsconfig.WithRegion("us-east-1"))
+	if cfg.Profile != "" {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(cfg.Profile))
+	}
+	return awsconfig.LoadDefaultConfig(ctx, opts...)
+}
+
+// scoreAndDisplay runs the scorer on recs and prints the scored table and summary.
+func scoreAndDisplay(recs []common.Recommendation, cfg Config) scorer.ScoredResult {
+	scorerCfg := scorer.Config{
+		MinSavingsPct:      cfg.MinSavingsPct,
+		MaxBreakEvenMonths: cfg.MaxBreakEvenMonths,
+		MinCount:           cfg.MinCount,
+	}
+	result := scorer.Score(recs, scorerCfg)
+	fmt.Print(reporter.RenderTable(result))
+	fmt.Print(reporter.RenderExcluded(result))
+	fmt.Print(reporter.RenderSummary(result))
+	return result
+}
+
+// sumPassedRecs returns total instance count and total estimated savings for passed recs.
+func sumPassedRecs(recs []common.Recommendation) (int, float64) {
+	total := 0
+	savings := 0.0
+	for _, r := range recs {
+		total += r.Count
+		savings += r.EstimatedSavings
+	}
+	return total, savings
+}
+
+// executePurchasePipeline purchases each rec in the passed list (or dry-runs) and writes audit records.
+func executePurchasePipeline(ctx context.Context, awsCfg aws.Config, recs []common.Recommendation, isDryRun bool, runID string, cfg Config) []common.PurchaseResult {
+	results := make([]common.PurchaseResult, 0, len(recs))
+	for i, rec := range recs {
+		if shutdownRequested.Load() {
+			log.Printf("Shutdown requested — skipping %d remaining recommendations", len(recs)-i)
+			break
+		}
+		result, status := purchaseSingleRec(ctx, awsCfg, rec, i+1, isDryRun, cfg)
+		results = append(results, result)
+		auditRec := common.NewAuditRecord(runID, rec, result, status, isDryRun)
+		if err := common.WriteAuditRecord(auditRec, cfg.AuditLog); err != nil {
+			log.Printf("Warning: failed to write audit record: %v", err)
+		}
+		if !isDryRun && i < len(recs)-1 && os.Getenv("DISABLE_PURCHASE_DELAY") != "true" {
+			time.Sleep(PurchaseDelaySeconds * time.Second)
+		}
+	}
+	return results
+}
+
+// purchaseSingleRec executes or dry-runs a single purchase and returns the result + audit status.
+func purchaseSingleRec(ctx context.Context, awsCfg aws.Config, rec common.Recommendation, index int, isDryRun bool, cfg Config) (common.PurchaseResult, string) {
+	AppLogger.Printf("  [%d] %s %s %s (count=%d)\n", index, rec.Service, rec.Region, rec.ResourceType, rec.Count)
+	if isDryRun {
+		result := createDryRunResult(rec, rec.Region, index, cfg)
+		AppLogger.Printf("    [dry-run] %s\n", result.CommitmentID)
+		return result, "skipped"
+	}
+
+	regionalCfg := awsCfg.Copy()
+	regionalCfg.Region = rec.Region
+	serviceClient := createServiceClient(rec.Service, regionalCfg)
+	if serviceClient == nil {
+		AppLogger.Printf("    ⚠️  No service client for %s\n", rec.Service)
+		return common.PurchaseResult{Success: false}, "error"
+	}
+
+	result := executePurchase(ctx, rec, rec.Region, index, serviceClient, cfg)
+	status := "success"
+	if !result.Success {
+		status = "error"
+		AppLogger.Printf("    ❌ %v\n", result.Error)
+	} else {
+		AppLogger.Printf("    ✅ %s\n", result.CommitmentID)
+	}
+	return result, status
+}
+
+// buildServiceStats computes per-service statistics from a purchase run.
+// Results are assumed to be in the same order as recs (1:1 correspondence).
+func buildServiceStats(recs []common.Recommendation, results []common.PurchaseResult) map[common.ServiceType]ServiceProcessingStats {
+	byService := make(map[common.ServiceType][]common.Recommendation)
+	resultsByService := make(map[common.ServiceType][]common.PurchaseResult)
+	for i, rec := range recs {
+		byService[rec.Service] = append(byService[rec.Service], rec)
+		if i < len(results) {
+			resultsByService[rec.Service] = append(resultsByService[rec.Service], results[i])
+		}
+	}
+	stats := make(map[common.ServiceType]ServiceProcessingStats)
+	for service, serviceRecs := range byService {
+		stats[service] = calculateServiceStats(service, serviceRecs, resultsByService[service])
+	}
+	return stats
 }
 
 // runToolFromCSV processes recommendations from a CSV input file
@@ -119,12 +227,12 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	}
 
 	// Load AWS configuration
-	var configOptions []func(*config.LoadOptions) error
-	configOptions = append(configOptions, config.WithRegion("us-east-1"))
+	var configOptions []func(*awsconfig.LoadOptions) error
+	configOptions = append(configOptions, awsconfig.WithRegion("us-east-1"))
 	if cfg.Profile != "" {
-		configOptions = append(configOptions, config.WithSharedConfigProfile(cfg.Profile))
+		configOptions = append(configOptions, awsconfig.WithSharedConfigProfile(cfg.Profile))
 	}
-	awsCfg, err := config.LoadDefaultConfig(ctx, configOptions...)
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, configOptions...)
 	if err != nil {
 		log.Fatalf("Failed to load AWS config: %v", err)
 	}
@@ -259,9 +367,9 @@ func filterAndAdjustRecommendations(recommendations []common.Recommendation, csv
 	return recommendations
 }
 
-// processService processes a single service and returns recommendations and results
+// processService processes a single service and returns recommendations and results.
+// Used by legacy callers; new code should use fetchAllRecs + executePurchasePipeline.
 func processService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, accountCache *AccountAliasCache, service common.ServiceType, isDryRun bool, cfg Config, engineData engineVersionData) ([]common.Recommendation, []common.PurchaseResult) {
-	// Determine regions to process
 	regionsToProcess, err := determineRegionsForService(ctx, awsCfg, recClient, service, cfg.Regions)
 	if err != nil {
 		log.Printf("❌ Failed to determine regions: %v", err)
@@ -271,22 +379,12 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient provider.R
 	serviceRecs := make([]common.Recommendation, 0)
 	serviceResults := make([]common.PurchaseResult, 0)
 
-	// Process each region
 	for i, region := range regionsToProcess {
 		regionResult := processRegionRecommendations(
-			ctx,
-			awsCfg,
-			recClient,
-			accountCache,
-			service,
-			region,
-			i+1,
-			len(regionsToProcess),
-			engineData,
-			isDryRun,
-			cfg,
+			ctx, awsCfg, recClient, accountCache,
+			service, region, i+1, len(regionsToProcess),
+			engineData, isDryRun, cfg,
 		)
-
 		serviceRecs = append(serviceRecs, regionResult.recommendations...)
 		serviceResults = append(serviceResults, regionResult.results...)
 	}

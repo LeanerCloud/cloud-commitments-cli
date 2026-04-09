@@ -60,6 +60,13 @@ type Config struct {
 	// Savings Plans specific filters
 	IncludeSPTypes []string
 	ExcludeSPTypes []string
+	// Purchase pipeline settings
+	AuditLog           string
+	DryRun             bool
+	IdempotencyWindow  string
+	MinSavingsPct      float64
+	MaxBreakEvenMonths int
+	MinCount           int
 }
 
 func main() {
@@ -110,6 +117,14 @@ func init() {
 	// Savings Plans specific filters
 	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeSPTypes, "include-sp-types", []string{}, "Only include these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeSPTypes, "exclude-sp-types", []string{}, "Exclude these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
+
+	// Purchase pipeline flags
+	rootCmd.Flags().StringVar(&toolCfg.AuditLog, "audit-log", "./cudly-audit.jsonl", "Path to JSONL audit log file")
+	rootCmd.Flags().BoolVar(&toolCfg.DryRun, "dry-run", true, "Dry-run mode: show what would be purchased without actually buying")
+	rootCmd.Flags().StringVar(&toolCfg.IdempotencyWindow, "idempotency-window", "24h", "Lookback window for duplicate purchase detection")
+	rootCmd.Flags().Float64Var(&toolCfg.MinSavingsPct, "min-savings-pct", 0, "Minimum savings percentage to include a recommendation (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.MaxBreakEvenMonths, "max-break-even-months", 0, "Maximum break-even period in months (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.MinCount, "min-count", 0, "Minimum instance count to include a recommendation (0 = no filter)")
 }
 
 // Package-level Config that cobra flags bind to
