@@ -209,10 +209,13 @@ type DuplicateChecker struct {
 	LookbackHours int // How many hours to look back for recent purchases
 }
 
-// NewDuplicateChecker creates a new duplicate checker with default lookback period
-func NewDuplicateChecker() *DuplicateChecker {
+// NewDuplicateChecker creates a new duplicate checker. Pass 0 to use the default lookback period.
+func NewDuplicateChecker(hours int) *DuplicateChecker {
+	if hours <= 0 {
+		hours = DefaultDuplicateCheckLookbackHours
+	}
 	return &DuplicateChecker{
-		LookbackHours: DefaultDuplicateCheckLookbackHours,
+		LookbackHours: hours,
 	}
 }
 
@@ -220,10 +223,10 @@ func NewDuplicateChecker() *DuplicateChecker {
 // This checks for recently purchased RIs (within LookbackHours) to avoid duplicate purchases.
 // Note: This is designed to prevent re-purchasing something you just bought, not to prevent
 // purchasing RIs in other accounts that happen to have the same characteristics.
-func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, error) {
+func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, []common.Recommendation, error) {
 	existing, err := client.GetExistingCommitments(ctx)
 	if err != nil {
-		return recs, err
+		return recs, nil, err
 	}
 
 	log.Printf("    [DuplicateChecker] Found %d total existing commitments", len(existing))
@@ -232,19 +235,19 @@ func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context,
 	log.Printf("    [DuplicateChecker] Found %d recent commitments (purchased in last %d hours)", len(recentExisting), d.LookbackHours)
 
 	if len(recentExisting) == 0 {
-		return recs, nil
+		return recs, nil, nil
 	}
 
 	existingMap := buildExistingCommitmentsMap(recentExisting)
 	log.Printf("    [DuplicateChecker] Existing map has %d unique keys", len(existingMap))
 
-	result := adjustRecommendationsAgainstExisting(recs, existingMap)
+	passed, filtered := adjustRecommendationsAgainstExisting(recs, existingMap)
 
-	if len(result) < len(recs) {
+	if len(filtered) > 0 {
 		log.Printf("    [DuplicateChecker] Result: %d recommendations kept out of %d (avoided %d duplicates)",
-			len(result), len(recs), len(recs)-len(result))
+			len(passed), len(recs), len(filtered))
 	}
-	return result, nil
+	return passed, filtered, nil
 }
 
 // filterRecentCommitments filters commitments to only recent purchases within the lookback window
@@ -281,18 +284,22 @@ func buildExistingCommitmentsMap(commitments []common.Commitment) map[string]int
 	return existingMap
 }
 
-// adjustRecommendationsAgainstExisting adjusts recommendations based on existing commitments
-func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existingMap map[string]int) []common.Recommendation {
-	result := make([]common.Recommendation, 0, len(recs))
+// adjustRecommendationsAgainstExisting adjusts recommendations based on existing commitments.
+// Returns (passed, filtered) where filtered contains recs whose count was reduced to zero.
+func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existingMap map[string]int) ([]common.Recommendation, []common.Recommendation) {
+	passed := make([]common.Recommendation, 0, len(recs))
+	filtered := make([]common.Recommendation, 0)
 
 	for _, rec := range recs {
 		adjusted := adjustSingleRecommendation(rec, existingMap)
 		if adjusted.Count > 0 {
-			result = append(result, adjusted)
+			passed = append(passed, adjusted)
+		} else {
+			filtered = append(filtered, rec)
 		}
 	}
 
-	return result
+	return passed, filtered
 }
 
 // adjustSingleRecommendation adjusts a single recommendation based on existing commitments
@@ -381,7 +388,7 @@ func normalizeEngineName(engine string) string {
 }
 
 // AdjustRecommendationsForExistingRIs is an alias for AdjustRecommendationsForExisting
-func (d *DuplicateChecker) AdjustRecommendationsForExistingRIs(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, error) {
+func (d *DuplicateChecker) AdjustRecommendationsForExistingRIs(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, []common.Recommendation, error) {
 	return d.AdjustRecommendationsForExisting(ctx, recs, client)
 }
 

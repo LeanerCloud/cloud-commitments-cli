@@ -439,8 +439,8 @@ func TestAdjustRecommendationsForExisting(t *testing.T) {
 			mockClient := &MockServiceClient{}
 			mockClient.On("GetExistingCommitments", ctx).Return(tt.existingRIs, nil)
 
-			checker := NewDuplicateChecker()
-			result, err := checker.AdjustRecommendationsForExisting(ctx, tt.inputRecs, mockClient)
+			checker := NewDuplicateChecker(0)
+			result, _, err := checker.AdjustRecommendationsForExisting(ctx, tt.inputRecs, mockClient)
 
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedLen, len(result))
@@ -719,8 +719,8 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 			mockClient := &MockServiceClient{}
 			mockClient.On("GetExistingCommitments", ctx).Return(tt.existingRIs, nil)
 
-			checker := NewDuplicateChecker()
-			result, err := checker.AdjustRecommendationsForExisting(ctx, tt.inputRecs, mockClient)
+			checker := NewDuplicateChecker(0)
+			result, _, err := checker.AdjustRecommendationsForExisting(ctx, tt.inputRecs, mockClient)
 
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedLen, len(result))
@@ -816,4 +816,85 @@ func TestApplyInstanceLimit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewDuplicateChecker_CustomWindow(t *testing.T) {
+	checker := NewDuplicateChecker(48)
+	assert.Equal(t, 48, checker.LookbackHours)
+}
+
+func TestNewDuplicateChecker_ZeroUsesDefault(t *testing.T) {
+	checker := NewDuplicateChecker(0)
+	assert.Equal(t, DefaultDuplicateCheckLookbackHours, checker.LookbackHours)
+}
+
+func TestAdjustRecommendationsForExisting_WithinWindow(t *testing.T) {
+	ctx := context.Background()
+	rec := common.Recommendation{
+		ResourceType: "db.t3.small", Region: "us-east-1", Count: 5,
+		Details: &common.DatabaseDetails{Engine: "mysql"},
+	}
+	existing := []common.Commitment{
+		{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql",
+			Count: 5, State: "active", StartDate: time.Now().Add(-1 * time.Hour)},
+	}
+
+	mockClient := &MockServiceClient{}
+	mockClient.On("GetExistingCommitments", ctx).Return(existing, nil)
+
+	checker := NewDuplicateChecker(24)
+	passed, filtered, err := checker.AdjustRecommendationsForExisting(ctx, []common.Recommendation{rec}, mockClient)
+
+	require.NoError(t, err)
+	assert.Empty(t, passed)
+	assert.Len(t, filtered, 1)
+	mockClient.AssertExpectations(t)
+}
+
+func TestAdjustRecommendationsForExisting_OutsideWindow(t *testing.T) {
+	ctx := context.Background()
+	rec := common.Recommendation{
+		ResourceType: "db.t3.small", Region: "us-east-1", Count: 5,
+		Details: &common.DatabaseDetails{Engine: "mysql"},
+	}
+	existing := []common.Commitment{
+		{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql",
+			Count: 5, State: "active", StartDate: time.Now().Add(-30 * 24 * time.Hour)},
+	}
+
+	mockClient := &MockServiceClient{}
+	mockClient.On("GetExistingCommitments", ctx).Return(existing, nil)
+
+	checker := NewDuplicateChecker(24)
+	passed, filtered, err := checker.AdjustRecommendationsForExisting(ctx, []common.Recommendation{rec}, mockClient)
+
+	require.NoError(t, err)
+	assert.Len(t, passed, 1)
+	assert.Equal(t, 5, passed[0].Count)
+	assert.Empty(t, filtered)
+	mockClient.AssertExpectations(t)
+}
+
+func TestAdjustRecommendationsForExisting_PartialCoverage(t *testing.T) {
+	ctx := context.Background()
+	rec := common.Recommendation{
+		ResourceType: "db.t3.small", Region: "us-east-1", Count: 10,
+		Details: &common.DatabaseDetails{Engine: "mysql"},
+	}
+	existing := []common.Commitment{
+		{ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql",
+			Count: 3, State: "active", StartDate: time.Now().Add(-1 * time.Hour)},
+	}
+
+	mockClient := &MockServiceClient{}
+	mockClient.On("GetExistingCommitments", ctx).Return(existing, nil)
+
+	checker := NewDuplicateChecker(24)
+	passed, filtered, err := checker.AdjustRecommendationsForExisting(ctx, []common.Recommendation{rec}, mockClient)
+
+	require.NoError(t, err)
+	require.Len(t, passed, 1)
+	assert.Equal(t, 7, passed[0].Count) // 10 - 3 = 7
+	assert.Empty(t, filtered)           // partial coverage stays in passed, not filtered
+	mockClient.AssertExpectations(t)
 }

@@ -167,8 +167,8 @@ func populateAccountNames(ctx context.Context, recommendations []common.Recommen
 
 // adjustRecsForDuplicates checks for existing RIs and adjusts recommendations to avoid duplicates
 func adjustRecsForDuplicates(ctx context.Context, recs []common.Recommendation, serviceClient provider.ServiceClient) ([]common.Recommendation, error) {
-	duplicateChecker := NewDuplicateChecker()
-	adjustedRecs, err := duplicateChecker.AdjustRecommendationsForExisting(ctx, recs, serviceClient)
+	duplicateChecker := NewDuplicateChecker(0)
+	adjustedRecs, _, err := duplicateChecker.AdjustRecommendationsForExisting(ctx, recs, serviceClient)
 	if err != nil {
 		return recs, err // Return original recommendations with error
 	}
@@ -461,8 +461,8 @@ func checkDuplicatesAndApplyLimit(
 	cfg Config,
 ) []common.Recommendation {
 	// Check for duplicate RIs to avoid double purchasing
-	duplicateChecker := NewDuplicateChecker()
-	adjustedRecs, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
+	duplicateChecker := NewDuplicateChecker(0)
+	adjustedRecs, _, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
 	if err != nil {
 		AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v\n", err)
 		adjustedRecs = filteredRecs // Continue with original recommendations if check fails
