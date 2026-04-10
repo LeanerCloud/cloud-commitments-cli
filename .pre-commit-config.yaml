@@ -44,7 +44,7 @@ repos:
         name: Fix end of files
       - id: check-yaml
         name: Check YAML syntax
-        exclude: '^(docker-compose.*\.yml|\.github/workflows/.*|cloudformation/.*)$'
+        exclude: '^(docker-compose.*\.yml|\.github/workflows/.*|cloudformation/.*|iac/.*/cloudformation/.*)$'
       - id: check-json
         name: Check JSON syntax
       - id: check-added-large-files
