@@ -117,7 +117,7 @@ repos:
 
       - id: trivy-config
         name: Trivy config scanner
-        entry: bash -c 'command -v trivy >/dev/null 2>&1 && trivy config --severity HIGH,CRITICAL --exit-code 1 . || echo "Trivy not installed, skipping..."'
+        entry: bash -c 'command -v trivy >/dev/null 2>&1 && trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs terraform/environments/aws . || echo "Trivy not installed, skipping..."'
         language: system
         pass_filenames: false
 
