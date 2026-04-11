@@ -121,6 +121,16 @@ repos:
         language: system
         pass_filenames: false
 
+  # Migration checks
+  - repo: local
+    hooks:
+      - id: check-migration-conflicts
+        name: Check for conflicting migration numbers
+        entry: bash -c 'dups=$(ls internal/database/postgres/migrations/*.up.sql 2>/dev/null | sed "s/.*\///" | cut -c1-6 | sort | uniq -d); if [ -n "$dups" ]; then echo "Duplicate migration number(s) found:"; echo "$dups"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        files: ^internal/database/postgres/migrations/
+
   # Test execution
   - repo: local
     hooks:
