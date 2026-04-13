@@ -1,7 +1,7 @@
 .PHONY: build clean test deploy help all build-server build-lambda test-unit test-integration \
         test-coverage full-test security-scan terraform-validate docker-build \
         fmt vet lint complexity complexity-report security-scan-go security-scan-docker \
-        security-scan-terraform terraform-fmt terraform-fmt-check docker-test pre-commit \
+        security-scan-terraform terraform-fmt terraform-fmt-check iac-arm docker-test pre-commit \
         setup-git-secrets security-scan-snyk security-scan-all cost-estimate docker-compose-test \
         install-dev-tools
 
@@ -175,6 +175,13 @@ terraform-fmt:
 
 terraform-fmt-check:
 	terraform fmt -check -recursive terraform/
+
+# Regenerate the committed ARM JSON from the Bicep source. CI verifies sync via
+# `make iac-arm && git diff --exit-code`.
+iac-arm:
+	az bicep build \
+		--file iac/federation/azure-target/bicep/azure-wif.bicep \
+		--outfile iac/federation/azure-target/bicep/azure-wif.arm.json
 
 # Docker
 docker-build:
