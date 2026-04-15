@@ -120,5 +120,11 @@ clear-rate-limit
 security-audit-swarm.zip
 security-audit-swarm/
 
+# Per-session Claude Code artefacts under .claude/: commit-message
+# drafts, one-off tmp scripts, project-local memory, known-issues
+# scratch space. Session tooling, not committed code. See
+# ~/.claude/CLAUDE.md §2a (Tool Selection) for the full rationale.
+.claude/
+
 # Generated docs (security runbooks etc.)
 docs/
