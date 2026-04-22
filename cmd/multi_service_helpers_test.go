@@ -367,7 +367,7 @@ func TestExecutePurchase(t *testing.T) {
 		Error:          nil,
 		Timestamp:      time.Now(),
 	}
-	mockClient.On("PurchaseCommitment", ctx, rec).Return(expectedResult, nil)
+	mockClient.On("PurchaseCommitment", ctx, rec, common.PurchaseOptions{}).Return(expectedResult, nil)
 
 	result := executePurchase(ctx, rec, "eu-west-1", 5, mockClient, toolCfg)
 
