@@ -212,7 +212,8 @@ func createCancelledResults(recs []common.Recommendation, region string, cfg Con
 // executePurchase executes an actual RI purchase
 func executePurchase(ctx context.Context, rec common.Recommendation, region string, index int, serviceClient provider.ServiceClient, cfg Config) common.PurchaseResult {
 	AppLogger.Printf("    ⚠️  ACTUAL PURCHASE: About to buy %d instances of %s\n", rec.Count, rec.ResourceType)
-	result, err := serviceClient.PurchaseCommitment(ctx, rec, common.PurchaseOptions{})
+	opts := common.PurchaseOptions{Source: common.PurchaseSourceCLI}
+	result, err := serviceClient.PurchaseCommitment(ctx, rec, opts)
 	if err != nil {
 		result.Success = false
 		result.Error = err

@@ -143,7 +143,7 @@ func executePurchasePipeline(ctx context.Context, awsCfg aws.Config, recs []comm
 		}
 		result, status := purchaseSingleRec(ctx, awsCfg, rec, i+1, isDryRun, cfg)
 		results = append(results, result)
-		auditRec := common.NewAuditRecord(runID, rec, result, status, isDryRun)
+		auditRec := common.NewAuditRecord(runID, rec, result, status, isDryRun, common.PurchaseSourceCLI)
 		if err := common.WriteAuditRecord(auditRec, cfg.AuditLog); err != nil {
 			log.Printf("Warning: failed to write audit record: %v", err)
 		}
