@@ -9,11 +9,11 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.26.2
 	github.com/aws/aws-sdk-go-v2/service/costexplorer v1.61.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.251.2
-	github.com/aws/aws-sdk-go-v2/service/elasticache v1.50.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/memorydb v1.31.4 // indirect
-	github.com/aws/aws-sdk-go-v2/service/opensearch v1.52.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/elasticache v1.50.3
+	github.com/aws/aws-sdk-go-v2/service/memorydb v1.31.4
+	github.com/aws/aws-sdk-go-v2/service/opensearch v1.52.3
 	github.com/aws/aws-sdk-go-v2/service/rds v1.97.3
-	github.com/aws/aws-sdk-go-v2/service/redshift v1.58.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/redshift v1.58.3
 	github.com/spf13/cobra v1.8.0
 	github.com/stretchr/testify v1.11.1
 )
