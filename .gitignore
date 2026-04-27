@@ -128,3 +128,6 @@ security-audit-swarm/
 
 # Generated docs (security runbooks etc.)
 docs/
+
+# Graphify knowledge graph output — regenerated locally, not committed
+graphify-out/

@@ -244,6 +244,26 @@ Key rules:
 
 Directory structure: `~/.claude/agent-comms/{messages,locks,status}`
 
+## Knowledge graph (graphify)
+
+**This project uses the graphify knowledge graph at `graphify-out/` — always consult it for architecture/codebase questions, and (re)build it when missing or stale.**
+
+Rules, in priority order:
+
+1. **Before answering architecture or codebase questions**: read `graphify-out/GRAPH_REPORT.md` for god nodes + community structure, and `graphify-out/wiki/index.md` for a navigable summary. The graph often surfaces helpers/utilities that grep misses because names don't overlap.
+2. **If `graphify-out/` is missing**: build it FIRST before doing any non-trivial exploration. Command (from the repo root):
+
+   ```bash
+   "${GRAPHIFY_PYTHON:-python3}" \
+     -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
+   ```
+
+   Set `GRAPHIFY_PYTHON` to your graphify venv's Python interpreter (`<graphify-checkout>/.venv/bin/python3`); falls back to `python3` if the package is installed system-wide. Runs for ~1–3 minutes on this repo; run it in the background (`run_in_background: true`) so you can start reading other things while it finishes.
+3. **After modifying code files in a session**: re-run the same command to keep the graph current. The installed `PreToolUse` hook in `.claude/settings.json` handles this automatically for Write/Edit/MultiEdit, but the hook has a 5-second timeout — on a large edit batch the rebuild may be skipped; run the command manually in that case.
+4. **Never edit code you haven't mapped** when the graph is available. Prefer graph-assisted navigation over raw grep for cross-cutting questions ("who calls X", "where is Y implemented", "what would break if I rename Z").
+
+If `graphify` is not on PATH, locate your local install (typically `~/bin/graphify` or your venv's `bin/`). The `graphify claude install` subcommand re-registers the PreToolUse hook if it's been removed.
+
 ## Support
 
 - Documentation: <https://github.com/ruvnet/claude-flow>
