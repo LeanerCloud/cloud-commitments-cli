@@ -333,9 +333,11 @@ func TestProcessService_SavingsPlansAccountLevel(t *testing.T) {
 
 	mockClient := &MockRecommendationsClient{}
 
-	// Savings Plans should only query us-east-1 once (account-level)
+	// Savings Plans should only query us-east-1 once (account-level). Use the
+	// per-plan-type Compute slug now that the legacy umbrella has been
+	// retired from createServiceClient dispatch.
 	params := common.RecommendationParams{
-		Service:        common.ServiceSavingsPlans,
+		Service:        common.ServiceSavingsPlansCompute,
 		Region:         "us-east-1",
 		PaymentOption:  "all-upfront",
 		Term:           "3yr",
@@ -344,12 +346,12 @@ func TestProcessService_SavingsPlansAccountLevel(t *testing.T) {
 		ExcludeSPTypes: toolCfg.ExcludeSPTypes,
 	}
 	mockRecs := []common.Recommendation{
-		{Service: common.ServiceSavingsPlans, ResourceType: "ComputeSP", Count: 1, Region: "us-east-1", EstimatedSavings: 1000},
+		{Service: common.ServiceSavingsPlansCompute, ResourceType: "ComputeSP", Count: 1, Region: "us-east-1", EstimatedSavings: 1000},
 	}
 	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceSavingsPlans, true, toolCfg, engineVersionData{})
+	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceSavingsPlansCompute, true, toolCfg, engineVersionData{})
 
 	// Should get recommendations
 	assert.NotEmpty(t, recs)

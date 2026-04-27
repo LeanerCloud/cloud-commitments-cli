@@ -126,16 +126,23 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 	for _, rec := range recs {
 		adjusted := rec
 
-		// For Savings Plans, reduce the hourly commitment instead of count
-		if rec.Service == common.ServiceSavingsPlans {
+		// For Savings Plans, reduce the hourly commitment instead of count.
+		// If the type assertion fails (defensive — Details should always
+		// be *SavingsPlanDetails for SP recs), preserve the recommendation
+		// at its original values rather than silently dropping it. A
+		// missing-Details record is a logged anomaly, not a reason to
+		// erase coverage from the run.
+		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				newDetails := *details // Copy the struct
 				newDetails.HourlyCommitment = newDetails.HourlyCommitment * coverage / 100
 				adjusted.Details = &newDetails
 				// Also adjust the estimated savings proportionally
 				adjusted.EstimatedSavings = rec.EstimatedSavings * coverage / 100
-				result = append(result, adjusted)
+			} else {
+				AppLogger.Printf("WARNING: SP recommendation for service %q has unexpected Details type %T; passing through unscaled\n", rec.Service, rec.Details)
 			}
+			result = append(result, adjusted)
 			continue
 		}
 

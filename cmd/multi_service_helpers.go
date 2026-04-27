@@ -43,11 +43,28 @@ func getServiceDisplayName(service common.ServiceType) string {
 		return "Redshift"
 	case common.ServiceMemoryDB:
 		return "MemoryDB"
-	case common.ServiceSavingsPlans:
-		return "Savings Plans"
-	default:
-		return string(service)
 	}
+	if name, ok := savingsPlanDisplayName(service); ok {
+		return name
+	}
+	return string(service)
+}
+
+// savingsPlanDisplayName returns a friendly label for the four per-plan-type
+// SP slugs and the legacy umbrella. Hoisted out of getServiceDisplayName to
+// keep the main switch under the gocyclo limit; using a small lookup map
+// instead of a five-arm switch also makes adding a fifth plan type a
+// one-line change.
+func savingsPlanDisplayName(service common.ServiceType) (string, bool) {
+	labels := map[common.ServiceType]string{
+		common.ServiceSavingsPlans:            "Savings Plans",
+		common.ServiceSavingsPlansCompute:     "Compute Savings Plans",
+		common.ServiceSavingsPlansEC2Instance: "EC2 Instance Savings Plans",
+		common.ServiceSavingsPlansSageMaker:   "SageMaker Savings Plans",
+		common.ServiceSavingsPlansDatabase:    "Database Savings Plans",
+	}
+	name, ok := labels[service]
+	return name, ok
 }
 
 // getAllAWSRegions retrieves all available AWS regions
@@ -232,7 +249,7 @@ func determineRegionsForService(ctx context.Context, awsCfg aws.Config, recClien
 	}
 
 	// Savings Plans are account-level, not regional - only query once
-	if service == common.ServiceSavingsPlans {
+	if common.IsSavingsPlan(service) {
 		AppLogger.Printf("🌍 Fetching account-level Savings Plans recommendations...\n")
 		return []string{"us-east-1"}, nil // Single query for account-level data
 	}

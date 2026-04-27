@@ -27,7 +27,7 @@ func processRecommendation(rec common.Recommendation, cfg Config, instanceVersio
 	// Filter to only recommendations for the current region being processed
 	// This prevents duplicating recommendations across all regions
 	// Skip this filter for Savings Plans as they are account-level, not regional
-	if currentRegion != "" && rec.Region != currentRegion && rec.Service != common.ServiceSavingsPlans {
+	if currentRegion != "" && rec.Region != currentRegion && !common.IsSavingsPlan(rec.Service) {
 		return rec, false
 	}
 

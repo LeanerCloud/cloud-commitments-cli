@@ -86,7 +86,10 @@ func TestGetAllServices(t *testing.T) {
 		common.ServiceOpenSearch,
 		common.ServiceRedshift,
 		common.ServiceMemoryDB,
-		common.ServiceSavingsPlans,
+		common.ServiceSavingsPlansCompute,
+		common.ServiceSavingsPlansEC2Instance,
+		common.ServiceSavingsPlansSageMaker,
+		common.ServiceSavingsPlansDatabase,
 	}
 
 	assert.Equal(t, expected, services)
@@ -218,9 +221,33 @@ func TestCreateServiceClient(t *testing.T) {
 			expectNil: false,
 		},
 		{
-			name:      "Savings Plans service",
-			service:   common.ServiceSavingsPlans,
+			name:      "Compute Savings Plans service",
+			service:   common.ServiceSavingsPlansCompute,
 			expectNil: false,
+		},
+		{
+			name:      "EC2 Instance Savings Plans service",
+			service:   common.ServiceSavingsPlansEC2Instance,
+			expectNil: false,
+		},
+		{
+			name:      "SageMaker Savings Plans service",
+			service:   common.ServiceSavingsPlansSageMaker,
+			expectNil: false,
+		},
+		{
+			name:      "Database Savings Plans service",
+			service:   common.ServiceSavingsPlansDatabase,
+			expectNil: false,
+		},
+		{
+			// Legacy umbrella slug is no longer dispatched to a client — the
+			// per-plan-type slugs above carry the actual work. Keep the case
+			// to lock the contract: createServiceClient returns nil for the
+			// umbrella so the caller knows to fan out.
+			name:      "Savings Plans umbrella service (legacy, returns nil)",
+			service:   common.ServiceSavingsPlans,
+			expectNil: true,
 		},
 		{
 			name:      "Unknown service",

@@ -101,9 +101,28 @@ func separateAndAggregateStats(serviceStats map[common.ServiceType]ServiceProces
 	riStats := make(map[common.ServiceType]ServiceProcessingStats)
 	aggregates := riAggregateStats{}
 
+	// Aggregate Savings Plans stats across all matching slugs (legacy
+	// umbrella + the four per-plan-type slugs from issue #22). Pre-split,
+	// only one SP slug existed so a plain assignment was correct; post-
+	// split, multiple SP slugs can land in serviceStats and Go map
+	// iteration order is non-deterministic, so a last-write-wins
+	// assignment would discard data unpredictably. Sum the relevant
+	// counters into spStats so the printed Savings Plans summary
+	// reflects every plan type's contribution.
 	for service, stats := range serviceStats {
-		if service == common.ServiceSavingsPlans {
-			spStats = stats
+		if common.IsSavingsPlan(service) {
+			if spStats.Service == "" {
+				spStats.Service = common.ServiceSavingsPlans
+			}
+			if stats.RegionsProcessed > spStats.RegionsProcessed {
+				spStats.RegionsProcessed = stats.RegionsProcessed
+			}
+			spStats.RecommendationsFound += stats.RecommendationsFound
+			spStats.RecommendationsSelected += stats.RecommendationsSelected
+			spStats.InstancesProcessed += stats.InstancesProcessed
+			spStats.SuccessfulPurchases += stats.SuccessfulPurchases
+			spStats.FailedPurchases += stats.FailedPurchases
+			spStats.TotalEstimatedSavings += stats.TotalEstimatedSavings
 		} else {
 			riStats[service] = stats
 			aggregates.recommendations += stats.RecommendationsSelected

@@ -21,7 +21,7 @@ func categorizeSPRecommendations(recommendations []common.Recommendation) SPType
 	breakdown := SPTypeBreakdown{}
 
 	for _, rec := range recommendations {
-		if rec.Service == common.ServiceSavingsPlans {
+		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				switch details.PlanType {
 				case "Compute":
@@ -100,7 +100,7 @@ func collectSPSavings(recommendations []common.Recommendation) SPSavingsByType {
 	savings := SPSavingsByType{}
 
 	for _, rec := range recommendations {
-		if rec.Service == common.ServiceSavingsPlans {
+		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				switch details.PlanType {
 				case "EC2Instance":
