@@ -8,6 +8,11 @@ cudly
 cmd/cmd
 cmd.test
 
+# Local build output directory at repo root (e.g. `bin/cudly-server` from
+# `go build -o bin/...` in Makefile:45). Anchored with a leading slash so
+# nested bin/ directories elsewhere in the tree are not affected.
+/bin/
+
 # Go build artifacts
 *.exe
 *.exe~
