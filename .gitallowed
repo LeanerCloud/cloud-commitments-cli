@@ -1,0 +1,42 @@
+# git-secrets allowlist: regexes that should NOT trigger the AWS-secret scanner.
+#
+# The scanner's `--register-aws` adds a 12-digit account-ID pattern that
+# matches our test fixtures. The values below are obvious test placeholders
+# (sequential 123456789012, all-same-digit blocks like 111111111111, and
+# countdown patterns like 999888777666) — chosen specifically because they
+# cannot be real customer accounts. Adding these is safer than disabling the
+# AWS-account check entirely.
+#
+# DO NOT add a real account ID here. If a real account ID lands in the repo,
+# rotate it and treat the leak seriously instead of silencing the scanner.
+#
+# Format: one regex per line, matched against each line of file content
+# (path-scoping is not supported by .gitallowed).
+
+# Sequential test placeholders (ascending and descending).
+123456789012
+210987654321
+
+# All-same-digit blocks of 12 — used as table-row distinctions in fixtures.
+# Listed explicitly rather than via a regex back-reference because not every
+# git-secrets build supports back-refs in its allowlist regexes.
+000000000000
+111111111111
+222222222222
+333333333333
+444444444444
+555555555555
+666666666666
+777777777777
+888888888888
+999999999999
+
+# Group-block placeholders used in cmd/helpers_test.go variants and
+# cmd/multi_service_helpers_test.go.
+111222333444
+555666777888
+999888777666
+
+# UUID-shaped account ID used in handler_accounts_test.go (synthetic, not a
+# real subscription/account).
+11111111-1111-1111-1111-111111111111

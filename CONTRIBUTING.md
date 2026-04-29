@@ -144,7 +144,7 @@ We aim to maintain the following minimum test coverage:
 
 ## Project Structure
 
-```
+```text
 CUDly/
 ├── cmd/                      # CLI entry point
 ├── pkg/                      # Shared packages
@@ -182,7 +182,7 @@ CUDly/
 
 ### Commit Message Format
 
-```
+```text
 type(scope): brief description
 
 Longer description if needed. Explain what and why,
@@ -204,7 +204,7 @@ Fixes #123
 
 ### Examples
 
-```
+```text
 feat(aws): add MemoryDB reserved node support
 
 Implements purchase and recommendation fetching for
@@ -213,7 +213,7 @@ Amazon MemoryDB reserved nodes.
 Fixes #42
 ```
 
-```
+```text
 fix(azure): handle subscription pagination correctly
 
 The previous implementation missed subscriptions after

@@ -1,0 +1,136 @@
+name: pre-commit
+
+on:
+  pull_request:
+    branches: [main, feat/multicloud-web-frontend]
+  push:
+    branches: [main, feat/multicloud-web-frontend]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    name: Run pre-commit hooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.4"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Set up Terraform
+        # Required by the terraform_fmt + terraform_validate pre-commit hooks.
+        # terraform_validate calls `terraform init` per module, which the
+        # action wraps with HTTP-cached provider downloads.
+        #
+        # Pin must satisfy `required_version = ">= 1.10.0"` declared by every
+        # `terraform/environments/*/main.tf` — pinning to a sub-1.10 version
+        # makes init abort before validate even runs. Action major matches
+        # `.github/workflows/ci.yml` so both workflows resolve to the same
+        # Terraform binary; otherwise a behavioural drift between the two
+        # could pass one and fail the other.
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Install tflint
+        # Pinned to a release tag (not master) so a malicious or accidental
+        # change to install_linux.sh on master can't silently land on this
+        # CI runner. `curl -fsSL` makes transport errors fail loudly
+        # instead of writing an HTML error page to stdin and feeding it
+        # to bash.
+        env:
+          TFLINT_VERSION: v0.55.0
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/tflint-install.sh \
+            "https://raw.githubusercontent.com/terraform-linters/tflint/${TFLINT_VERSION}/install_linux.sh"
+          bash /tmp/tflint-install.sh
+
+      - name: Install gosec
+        # Pinned to the same version ci.yml's `securego/gosec` Action uses,
+        # so an upstream gosec release with rule changes can't silently
+        # downgrade the gate between the two workflows.
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.4
+
+      - name: Install gocyclo
+        # Pinned to match ci.yml — security tool installs must not use
+        # @latest; that's exactly the supply-chain weakness this PR is
+        # closing for Dockerfile FROMs.
+        run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
+
+      - name: Install Trivy
+        # Pinned to v0.69.3 (the latest release with published GitHub-release
+        # tarballs as of writing). Tags exist for v0.58 onwards but several
+        # mid-range releases skipped publishing assets to the Releases page;
+        # the install.sh script fetches via GitHub Releases, so picking one
+        # of those tags makes install bail silently after detecting the
+        # version. v0.69.3 ships the standard `trivy_<ver>_Linux-64bit.tar.gz`
+        # asset.
+        run: |
+          set -eo pipefail
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.69.3
+
+      - name: Install git-secrets
+        # Pinned to a release tag rather than master HEAD. After install
+        # we register the AWS pattern set and ASSERT at least one pattern
+        # was registered — without the assert, a registration failure
+        # produces a patternless scanner that exits 0 unconditionally,
+        # leaving the gate silently downgraded.
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 1.3.0 https://github.com/awslabs/git-secrets.git /tmp/git-secrets
+          sudo make -C /tmp/git-secrets install
+          git secrets --register-aws --global
+          git secrets --list --global | grep -q '.' || {
+            echo "git-secrets registration produced no patterns — gate would be silently disabled"
+            exit 1
+          }
+
+      # Note: the hadolint-docker pre-commit hook
+      # (.pre-commit-config.yaml:80) runs the official
+      # hadolint/hadolint:v2.14.0 Docker image. We do NOT install a host
+      # binary here — it would be dead code (never invoked by the hook)
+      # AND a supply-chain hole (latest tag, no checksum). If a future
+      # change switches the hook from hadolint-docker to plain hadolint,
+      # install a pinned + sha256-verified binary here.
+
+      - name: Install pre-commit
+        run: pip install 'pre-commit==4.0.1'
+
+      - name: Install frontend deps
+        run: |
+          if [ -f frontend/package-lock.json ]; then
+            cd frontend && npm ci
+          fi
+
+      - name: Run pre-commit
+        # SKIP=terraform_validate: that hook calls `terraform init` per
+        # module, which creates `.terraform.lock.hcl` files. Those are
+        # gitignored, so on a fresh CI checkout they don't exist and the
+        # init step "modifies files", which pre-commit reports as a
+        # failure. Local pre-commit runs work because lock files persist
+        # between invocations. terraform_fmt and terraform_tflint still
+        # run and catch the syntax/style issues that terraform_validate
+        # would catch; the deeper schema validation runs in
+        # `terraform plan` during deploy workflows.
+        env:
+          SKIP: terraform_validate
+        run: pre-commit run --all-files

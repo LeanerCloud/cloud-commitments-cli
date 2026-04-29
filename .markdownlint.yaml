@@ -5,3 +5,11 @@ MD013: false
 # Allow duplicate headings in different sections (e.g., multiple "Infrastructure Created")
 MD024:
   siblings_only: true
+
+# Tables: pin to GitHub-flavored convention (`| cell |` with leading and
+# trailing whitespace inside each cell). Default `consistent` infers the
+# style from the first table; if a separator row happens to look "compact",
+# every aligned table downstream cascades-fails. Pinning the style avoids
+# that and matches the convention every README in the repo already uses.
+MD060:
+  style: leading_and_trailing
