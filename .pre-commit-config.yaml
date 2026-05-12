@@ -152,29 +152,57 @@ repos:
         pass_filenames: false
         files: ^internal/database/postgres/migrations/
 
-  # Test execution
+  # Heavy test execution: pre-push stage only.
+  #
+  # These three hooks rebuild + run the full Go and frontend test suites,
+  # which is ~6-7 min of work and the bulk of the CI pre-commit job's
+  # runtime. They are *redundant in CI* — the same suites are run by
+  # dedicated workflows that PRs and pushes already trigger:
+  #
+  #   - go-test (-short -race ./...)  : ci.yml `unit-tests` runs the same
+  #                                     suite with -race AND an integration
+  #                                     pass with -tags=integration.
+  #   - frontend-build (npm run build): frontend-build.yml runs npm run
+  #                                     typecheck + npm run build on PRs;
+  #                                     frontend-build-sentinel.yml runs
+  #                                     the build on every push to main /
+  #                                     feat/**.
+  #   - frontend-test (jest)          : frontend-build-sentinel.yml runs
+  #                                     `npx jest --no-coverage --silent`
+  #                                     on every push to feat/** (which
+  #                                     fires on every PR-branch update).
+  #
+  # Moving them to the pre-push stage keeps the local safety net (devs
+  # who run `pre-commit install --hook-type pre-push` still get these
+  # tests on `git push`) while letting the CI pre-commit workflow stay
+  # focused on style/security/syntax. Pre-commit's default stage filter
+  # is `pre-commit`, so the CI workflow's `pre-commit run --all-files`
+  # skips these hooks automatically.
   - repo: local
     hooks:
       - id: go-test
-        name: Run Go tests
+        name: Run Go tests (pre-push only; CI covers via ci.yml)
         entry: bash -c 'go test -short -race ./...'
         language: system
         pass_filenames: false
         files: \.go$
+        stages: [pre-push]
 
       - id: frontend-build
-        name: Build frontend
+        name: Build frontend (pre-push only; CI covers via frontend-build.yml)
         entry: bash -c 'cd frontend && npm run build'
         language: system
         pass_filenames: false
         files: ^frontend/src/
+        stages: [pre-push]
 
       - id: frontend-test
-        name: Run frontend tests
+        name: Run frontend tests (pre-push only; CI covers via frontend-build-sentinel.yml)
         entry: bash -c 'cd frontend && npx jest --no-coverage --silent'
         language: system
         pass_filenames: false
         files: ^frontend/src/
+        stages: [pre-push]
 
 # Global configuration
 default_stages: [pre-commit, pre-push]
