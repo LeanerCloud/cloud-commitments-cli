@@ -22,7 +22,10 @@ func applyFilters(recs []common.Recommendation, cfg Config, instanceVersions map
 	return filtered
 }
 
-// processRecommendation applies all filters to a recommendation and returns the adjusted recommendation and whether to include it
+// processRecommendation applies all filters to a recommendation and returns
+// the adjusted recommendation and whether to include it. The flat
+// boolean-filter checks are delegated to passesDimensionFilters to keep
+// this function under gocyclo's complexity threshold.
 func processRecommendation(rec common.Recommendation, cfg Config, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo, currentRegion string) (common.Recommendation, bool) {
 	// Filter to only recommendations for the current region being processed
 	// This prevents duplicating recommendations across all regions
@@ -31,20 +34,7 @@ func processRecommendation(rec common.Recommendation, cfg Config, instanceVersio
 		return rec, false
 	}
 
-	// Apply basic filters
-	if !shouldIncludeRegion(rec.Region, cfg) {
-		return rec, false
-	}
-
-	if !shouldIncludeInstanceType(rec.ResourceType, cfg) {
-		return rec, false
-	}
-
-	if !shouldIncludeEngine(rec, cfg) {
-		return rec, false
-	}
-
-	if !shouldIncludeAccount(rec.AccountName, cfg) {
+	if !passesDimensionFilters(rec, cfg) {
 		return rec, false
 	}
 
@@ -58,6 +48,52 @@ func processRecommendation(rec common.Recommendation, cfg Config, instanceVersio
 	}
 
 	return rec, true
+}
+
+// passesDimensionFilters runs the stateless include/exclude checks on
+// region, instance type, engine, account, and pool size. Returns false on
+// the first failing filter. Split out of processRecommendation to keep
+// each function's cyclomatic complexity under the gocyclo limit; the
+// dimension filters here are pure functions of rec + cfg with no side
+// effects.
+func passesDimensionFilters(rec common.Recommendation, cfg Config) bool {
+	if !shouldIncludeRegion(rec.Region, cfg) {
+		return false
+	}
+	if !shouldIncludeInstanceType(rec.ResourceType, cfg) {
+		return false
+	}
+	if !shouldIncludeEngine(rec, cfg) {
+		return false
+	}
+	if !shouldIncludeAccount(rec.AccountName, cfg) {
+		return false
+	}
+	if !shouldIncludePoolSize(rec, cfg) {
+		return false
+	}
+	return true
+}
+
+// shouldIncludePoolSize filters out RI recommendations for pools whose
+// AverageInstancesUsedPerHour is below cfg.MinPoolSize. The purpose is to
+// drop tiny pools where integer-arithmetic sizing forces 100% coverage
+// regardless of --target-coverage (e.g. avg=1 with target=80% → floor(0.8)=0
+// drops, ceil(0.8)=1 over-covers). Setting --min-pool-size=2 keeps pools
+// where target can be meaningfully approximated.
+//
+// Pass-through cases: filter disabled (MinPoolSize<=0), or rec has no
+// per-hour signal (avg<=0 — SPs and recs CE didn't return usage for).
+// Those pools aren't sized via the per-hour formula so the filter doesn't
+// apply to them.
+func shouldIncludePoolSize(rec common.Recommendation, cfg Config) bool {
+	if cfg.MinPoolSize <= 0 {
+		return true
+	}
+	if rec.AverageInstancesUsedPerHour <= 0 {
+		return true
+	}
+	return rec.AverageInstancesUsedPerHour >= cfg.MinPoolSize
 }
 
 // shouldIncludeRegion checks if a region should be included based on filters

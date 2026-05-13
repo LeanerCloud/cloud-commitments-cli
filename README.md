@@ -114,9 +114,21 @@ go install github.com/LeanerCloud/CUDly/cmd@latest
 |------|-------------|---------|
 | `-p, --payment` | Payment option: `all-upfront`, `partial-upfront`, `no-upfront` | no-upfront |
 | `-t, --term` | Term in years: `1` or `3` | 3 |
-| `-c, --coverage` | Coverage percentage (0-100) | 80 |
+| `-c, --coverage` | Coverage percentage (0-100) — % of each recommendation's instance count to purchase | 80 |
+| `-u, --target-coverage` | Target % (0-100) of historical demand to cover with commitments; the rest spills to on-demand. Sizes counts so projected coverage approximates target, projected utilization stays near 100%. Overrides `--coverage`. | 0 (disabled) |
 | `--max-instances` | Maximum instances to purchase (0 = unlimited) | 0 |
 | `--override-count` | Override recommended count with specific value | 0 |
+
+> **`--coverage` vs `--target-coverage`**: two related but distinct
+> sizing levers. `--coverage` scales each AWS recommendation's instance
+> count by a fixed fraction (`rec.Count * coverage/100`).
+> `--target-coverage` sizes against historical average hourly usage
+> instead (`floor(avg * target/100)`), so the resulting count reflects
+> real demand rather than AWS's recommended count. Both lean the same
+> direction (higher value = more RIs, lower value = fewer), but
+> `--target-coverage` is the right lever when the historical-usage
+> signal is what you want to size by and you're explicitly leaving
+> on-demand headroom for growth or bursts.
 
 ### Execution Control
 

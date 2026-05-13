@@ -33,10 +33,17 @@ const (
 
 // Config holds all configuration for the RI helper tool
 type Config struct {
-	Providers              []string
-	Regions                []string
-	Services               []string
-	Coverage               float64
+	Providers []string
+	Regions   []string
+	Services  []string
+	Coverage  float64
+	// TargetCoverage, when > 0, switches sizing from --coverage's
+	// rec.Count-scaling to under-buy against historical hourly usage:
+	// each rec is sized to floor(avg * TargetCoverage/100), leaving
+	// (100-TargetCoverage)% of historical demand on-demand. Mutually
+	// exclusive with --coverage (target wins, with an info log). See
+	// cmd/helpers.go: ApplyTargetCoverage.
+	TargetCoverage         float64
 	ActualPurchase         bool
 	CSVOutput              string
 	CSVInput               string
@@ -67,6 +74,19 @@ type Config struct {
 	MinSavingsPct      float64
 	MaxBreakEvenMonths int
 	MinCount           int
+	// RebuyWindowDays, when > 0, treats existing RIs whose remaining term
+	// is at most this many days as already uncovered, so --target-coverage
+	// recommends replacements before they expire. Zero (default) keeps the
+	// strict per-pool subtraction — existing coverage is fully trusted
+	// regardless of when it expires.
+	RebuyWindowDays int
+	// MinPoolSize, when > 0, drops RI recommendations for pools whose
+	// AverageInstancesUsedPerHour is below this threshold. Used to avoid
+	// the integer-arithmetic over-cover problem on tiny pools (avg < 5
+	// can't approximate target=80% without buying enough RIs to hit
+	// 100% coverage). Zero (default) keeps all pools. SPs and recs
+	// without a per-hour signal pass through unfiltered.
+	MinPoolSize float64
 }
 
 func main() {
@@ -92,6 +112,11 @@ func init() {
 	rootCmd.Flags().StringSliceVarP(&toolCfg.Services, "services", "s", []string{"rds"}, "Services to process (rds, elasticache, ec2, opensearch, redshift, memorydb, savingsplans)")
 	rootCmd.Flags().BoolVar(&toolCfg.AllServices, "all-services", false, "Process all supported services")
 	rootCmd.Flags().Float64VarP(&toolCfg.Coverage, "coverage", "c", 80.0, "Percentage of recommendations to purchase (0-100)")
+	rootCmd.Flags().Float64VarP(&toolCfg.TargetCoverage, "target-coverage", "u", 0,
+		"Target % (0-100) of historical avg-hourly usage to cover with commitments. "+
+			"When >0, sizes each rec to floor(avg * target/100) so projected coverage "+
+			"approximates target and projected utilization stays near 100%, leaving "+
+			"(100-target)% on-demand headroom. Overrides --coverage. Default 0 = disabled.")
 	rootCmd.Flags().BoolVar(&toolCfg.ActualPurchase, "purchase", false, "Actually purchase RIs instead of just printing the data")
 	rootCmd.Flags().StringVarP(&toolCfg.CSVOutput, "output", "o", "", "Output CSV file path (if not specified, auto-generates filename)")
 	rootCmd.Flags().StringVarP(&toolCfg.CSVInput, "input-csv", "i", "", "Input CSV file with recommendations to purchase")
@@ -125,6 +150,15 @@ func init() {
 	rootCmd.Flags().Float64Var(&toolCfg.MinSavingsPct, "min-savings-pct", 0, "Minimum savings percentage to include a recommendation (0 = no filter)")
 	rootCmd.Flags().IntVar(&toolCfg.MaxBreakEvenMonths, "max-break-even-months", 0, "Maximum break-even period in months (0 = no filter)")
 	rootCmd.Flags().IntVar(&toolCfg.MinCount, "min-count", 0, "Minimum instance count to include a recommendation (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.RebuyWindowDays, "rebuy-window-days", 0,
+		"When >0, treat existing RIs expiring within this many days as already "+
+			"uncovered, so --target-coverage sizes recommendations to replace them "+
+			"before they expire. Default 0 = trust existing coverage fully.")
+	rootCmd.Flags().Float64Var(&toolCfg.MinPoolSize, "min-pool-size", 0,
+		"When >0, drop RI recommendations for pools with AverageInstancesUsedPerHour "+
+			"below this threshold. Useful with --target-coverage to skip tiny pools "+
+			"that integer arithmetic forces above target (e.g. avg=1 cannot hit 80%%). "+
+			"Default 0 = no filter.")
 }
 
 // Package-level Config that cobra flags bind to
@@ -238,8 +272,22 @@ func createServiceClient(service common.ServiceType, cfg aws.Config) provider.Se
 	}
 }
 
-// generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness
-func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, coverage float64) string {
+// effectiveSizingPct returns the sizing % actually applied to recommendations:
+// cfg.TargetCoverage when set (>0), else cfg.Coverage. Use this when
+// emitting human-facing labels (purchase IDs, audit-log fields) so the label
+// reflects the value that drove the sizing, not the unused default.
+func effectiveSizingPct(cfg Config) float64 {
+	if cfg.TargetCoverage > 0 {
+		return cfg.TargetCoverage
+	}
+	return cfg.Coverage
+}
+
+// generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness.
+// sizingPct is the percentage that actually drove the sizing decision (see
+// effectiveSizingPct); it appears in the ID as e.g. "80pct" purely for human
+// readability and audit traceability.
+func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, sizingPct float64) string {
 	// Generate a short UUID suffix (first 8 characters) for uniqueness
 	uuidSuffix := uuid.New().String()[:8]
 	timestamp := time.Now().Format("20060102-150405")
@@ -268,7 +316,7 @@ func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRu
 
 	// Add account name if available
 	accountName := sanitizeAccountName(rec.AccountName)
-	coveragePct := fmt.Sprintf("%.0fpct", coverage)
+	coveragePct := fmt.Sprintf("%.0fpct", sizingPct)
 	if accountName != "" {
 		if engine != "" {
 			return fmt.Sprintf("%s-%s-%s-%s-%s-%s-%dx-%s-%s-%s",

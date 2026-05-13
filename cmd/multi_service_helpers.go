@@ -10,6 +10,7 @@ import (
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/LeanerCloud/CUDly/pkg/provider"
+	"github.com/LeanerCloud/CUDly/providers/aws/recommendations"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )
@@ -205,7 +206,7 @@ func createDryRunResult(rec common.Recommendation, region string, index int, cfg
 	return common.PurchaseResult{
 		Recommendation: rec,
 		Success:        true,
-		CommitmentID:   generatePurchaseID(rec, region, index, true, cfg.Coverage),
+		CommitmentID:   generatePurchaseID(rec, region, index, true, effectiveSizingPct(cfg)),
 		DryRun:         true,
 		Timestamp:      time.Now(),
 	}
@@ -218,7 +219,7 @@ func createCancelledResults(recs []common.Recommendation, region string, cfg Con
 		results[k] = common.PurchaseResult{
 			Recommendation: recs[k],
 			Success:        false,
-			CommitmentID:   generatePurchaseID(recs[k], region, k+1, false, cfg.Coverage),
+			CommitmentID:   generatePurchaseID(recs[k], region, k+1, false, effectiveSizingPct(cfg)),
 			Error:          fmt.Errorf("purchase cancelled by user"),
 			Timestamp:      time.Now(),
 		}
@@ -236,7 +237,7 @@ func executePurchase(ctx context.Context, rec common.Recommendation, region stri
 		result.Error = err
 	}
 	if result.CommitmentID == "" {
-		result.CommitmentID = generatePurchaseID(rec, region, index, false, cfg.Coverage)
+		result.CommitmentID = generatePurchaseID(rec, region, index, false, effectiveSizingPct(cfg))
 	}
 	return result
 }
@@ -346,6 +347,7 @@ func processRegionRecommendations(
 	engineData engineVersionData,
 	isDryRun bool,
 	cfg Config,
+	coverageMap recommendations.PoolCoverageMap,
 ) regionRecommendations {
 	result := regionRecommendations{
 		recommendations: make([]common.Recommendation, 0),
@@ -373,8 +375,11 @@ func processRegionRecommendations(
 		return result
 	}
 
-	// Apply coverage and overrides
-	filteredRecs := applyCoverageAndOverrides(recs, cfg)
+	// Apply coverage and overrides. This legacy path (test-only) doesn't
+	// fetch expiring commitments — expiry-aware sizing only runs via the
+	// main pipeline in fetchAndFilterRegionRecs, which has access to the
+	// regional service client at the right moment.
+	filteredRecs := applyCoverageAndOverrides(recs, cfg, coverageMap, nil)
 
 	result.recommendations = filteredRecs
 
@@ -458,11 +463,45 @@ func applyRegionFilters(
 	return recs
 }
 
-// applyCoverageAndOverrides applies coverage percentage and count overrides
-func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config) []common.Recommendation {
-	// Apply coverage
-	filteredRecs := applyCommonCoverage(recs, cfg.Coverage)
-	AppLogger.Printf("  📈 Applying %.1f%% coverage: %d recommendations selected\n", cfg.Coverage, len(filteredRecs))
+// applyCoverageAndOverrides applies sizing (coverage % or target-coverage)
+// and count overrides. Sizing mode is selected by cfg.TargetCoverage: > 0
+// routes to ApplyTargetCoverage; otherwise the legacy ApplyCoverage path.
+// coverageMap (when non-nil) populates Recommendation.ExistingCoveragePct
+// before sizing so the under-buy formula can subtract pool coverage already
+// owned. Nil map = no-op; recs keep their default zero values and the
+// sizing path falls back to the no-existing-commitments formula.
+//
+// expiringCommitments (when non-empty and cfg.RebuyWindowDays > 0) reduces
+// ExistingCoveragePct further by the share of pool demand attributable to
+// RIs expiring within the window, so --target-coverage recommends
+// replacements before the cliff. Doesn't run if either input is empty.
+func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment) []common.Recommendation {
+	recommendations.ApplyCoverageMapToRecommendations(recs, coverageMap)
+	if cfg.RebuyWindowDays > 0 && len(expiringCommitments) > 0 {
+		n := recommendations.AdjustExistingCoverageForExpiringCommitments(recs, expiringCommitments, cfg.RebuyWindowDays)
+		if n > 0 {
+			AppLogger.Printf("  ⏰ Treating %d recs as partially uncovered (RIs expiring within %d days)\n", n, cfg.RebuyWindowDays)
+		}
+	}
+	// Family-NU sizing for RDS recs: AWS rec API already bundles size-flex
+	// demand within a family into one rec at one size, so per-pool sizing
+	// under-buys. Run the family-NU pass first (RDS only, target-coverage
+	// mode only); non-RDS recs flow through the per-pool path unchanged.
+	// When TargetCoverage isn't set (legacy --coverage path) the per-pool
+	// flow handles everything as before.
+	var sizedRDS []common.Recommendation
+	rest := recs
+	if cfg.TargetCoverage > 0 {
+		sizedRDS, rest = recommendations.ApplyFamilyNUSizingRDS(recs, coverageMap, cfg.TargetCoverage)
+	}
+	filteredRecs := applySizing(rest, cfg, cfg.Coverage)
+	filteredRecs = append(filteredRecs, sizedRDS...)
+	if cfg.TargetCoverage > 0 {
+		AppLogger.Printf("  🎯 Applying %.1f%% target-coverage: %d recommendations selected (%d via family-NU, %d via per-pool)\n",
+			cfg.TargetCoverage, len(filteredRecs), len(sizedRDS), len(filteredRecs)-len(sizedRDS))
+	} else {
+		AppLogger.Printf("  📈 Applying %.1f%% coverage: %d recommendations selected\n", cfg.Coverage, len(filteredRecs))
+	}
 
 	// Apply count override if specified
 	if cfg.OverrideCount > 0 {
@@ -509,6 +548,8 @@ func checkDuplicatesAndApplyLimit(
 
 // fetchAndFilterRegionRecs fetches, filters, applies coverage, and deduplicates
 // recommendations for a single service+region. No purchases are made.
+// coverageMap (when non-nil) feeds existing-pool coverage into the sizing
+// step for --target-coverage.
 func fetchAndFilterRegionRecs(
 	ctx context.Context,
 	awsCfg aws.Config,
@@ -519,6 +560,7 @@ func fetchAndFilterRegionRecs(
 	regionIndex, totalRegions int,
 	engineData engineVersionData,
 	cfg Config,
+	coverageMap recommendations.PoolCoverageMap,
 ) []common.Recommendation {
 	AppLogger.Printf("\n  📍 [%d/%d] Region: %s\n", regionIndex, totalRegions, region)
 
@@ -536,12 +578,29 @@ func fetchAndFilterRegionRecs(
 		return nil
 	}
 
-	recs = applyCoverageAndOverrides(recs, cfg)
-
-	// Deduplication: skip recs matching recently-purchased commitments
+	// Build the regional service client once and reuse for both expiry-aware
+	// coverage adjustment and the downstream duplicate check.
 	regionalCfg := awsCfg.Copy()
 	regionalCfg.Region = region
 	serviceClient := createServiceClient(service, regionalCfg)
+
+	// Fetch existing commitments up front when --rebuy-window-days is set so
+	// the sizing step can deduct expiring RIs from ExistingCoveragePct.
+	// Best-effort: a failure here logs and continues; expiry adjustment
+	// becomes a no-op for this region.
+	var expiringCommitments []common.Commitment
+	if cfg.RebuyWindowDays > 0 && serviceClient != nil {
+		commits, err := serviceClient.GetExistingCommitments(ctx)
+		if err != nil {
+			AppLogger.Printf("  ⚠️  Could not fetch existing commitments for expiry check: %v\n", err)
+		} else {
+			expiringCommitments = commits
+		}
+	}
+
+	recs = applyCoverageAndOverrides(recs, cfg, coverageMap, expiringCommitments)
+
+	// Deduplication: skip recs matching recently-purchased commitments.
 	if serviceClient != nil {
 		recs = checkDuplicatesAndApplyLimit(ctx, recs, serviceClient, cfg)
 	}
@@ -549,7 +608,10 @@ func fetchAndFilterRegionRecs(
 	return recs
 }
 
-// fetchAllRecs collects recommendations from all services and regions without purchasing.
+// fetchAllRecs collects recommendations from all services and regions without
+// purchasing. coverageMap (when non-nil) populates Recommendation.ExistingCoveragePct
+// on each rec before sizing, so --target-coverage can subtract what's already
+// owned in the same pool.
 func fetchAllRecs(
 	ctx context.Context,
 	awsCfg aws.Config,
@@ -558,6 +620,7 @@ func fetchAllRecs(
 	servicesToProcess []common.ServiceType,
 	engineData engineVersionData,
 	cfg Config,
+	coverageMap recommendations.PoolCoverageMap,
 ) []common.Recommendation {
 	all := make([]common.Recommendation, 0)
 	for _, service := range servicesToProcess {
@@ -571,7 +634,7 @@ func fetchAllRecs(
 			continue
 		}
 		for i, region := range regions {
-			recs := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg)
+			recs := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg, coverageMap)
 			all = append(all, recs...)
 		}
 	}

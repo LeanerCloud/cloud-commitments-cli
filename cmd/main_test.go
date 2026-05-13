@@ -636,6 +636,30 @@ func TestGeneratePurchaseIDCoverageVariations(t *testing.T) {
 	}
 }
 
+// TestEffectiveSizingPct locks the rule that target-coverage wins over
+// coverage when both are configured. Without this, dry-run purchase IDs (and
+// any other audit label that calls effectiveSizingPct) print the unused
+// default Coverage=80 instead of the actual target value the user passed.
+// Regression guard for the Aurora-target / RDS-target CLI dry-run runs.
+func TestEffectiveSizingPct(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want float64
+	}{
+		{"target unset, coverage default", Config{Coverage: 80}, 80},
+		{"target unset, coverage custom", Config{Coverage: 50}, 50},
+		{"target set, coverage default ignored", Config{TargetCoverage: 70, Coverage: 80}, 70},
+		{"target set, coverage explicit ignored", Config{TargetCoverage: 95, Coverage: 30}, 95},
+		{"target zero falls back to coverage", Config{TargetCoverage: 0, Coverage: 60}, 60},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, effectiveSizingPct(tt.cfg))
+		})
+	}
+}
+
 func TestParseServicesWithEmptyAndNil(t *testing.T) {
 	// Empty slice
 	result := parseServices([]string{})

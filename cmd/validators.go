@@ -13,7 +13,7 @@ import (
 
 // validateFlags performs validation on command line flags before execution
 func validateFlags(cmd *cobra.Command, args []string) error {
-	if err := validateNumericRanges(); err != nil {
+	if err := validateNumericRanges(cmd); err != nil {
 		return err
 	}
 
@@ -32,11 +32,18 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// validateNumericRanges validates all numeric configuration values
-func validateNumericRanges() error {
+// validateNumericRanges validates all numeric configuration values.
+// cmd is used to detect explicitly-set flags via cobra's Changed(); pass
+// nil if no flag-source-detection is required (e.g. unit-test paths that
+// only need the numeric bounds checks).
+func validateNumericRanges(cmd *cobra.Command) error {
 	// Validate coverage percentage
 	if toolCfg.Coverage < 0 || toolCfg.Coverage > 100 {
 		return fmt.Errorf("coverage percentage must be between 0 and 100, got: %.2f", toolCfg.Coverage)
+	}
+
+	if err := validateTargetCoverage(cmd); err != nil {
+		return err
 	}
 
 	// Validate max instances
@@ -57,6 +64,26 @@ func validateNumericRanges() error {
 		return fmt.Errorf("override-count (%d) exceeds reasonable limit of %d", toolCfg.OverrideCount, MaxReasonableInstances)
 	}
 
+	return nil
+}
+
+// validateTargetCoverage validates the --target-coverage range and
+// emits an info-log when it is set alongside an explicitly-overridden
+// --coverage (target wins). Split out of validateNumericRanges to keep
+// the parent under gocyclo's complexity threshold.
+func validateTargetCoverage(cmd *cobra.Command) error {
+	if toolCfg.TargetCoverage < 0 || toolCfg.TargetCoverage > 100 {
+		return fmt.Errorf("target-coverage percentage must be between 0 and 100, got: %.2f", toolCfg.TargetCoverage)
+	}
+
+	// Info-log when both flags are explicitly set — target-coverage wins.
+	// Detect "user explicitly set --coverage" via cobra's Changed() rather than
+	// comparing to the default value, so a user who happens to set --coverage 80
+	// (which equals the default) still sees the notice.
+	if toolCfg.TargetCoverage > 0 && cmd != nil && cmd.Flags().Changed("coverage") {
+		log.Printf("--target-coverage=%.1f set; --coverage=%.1f is being ignored (target-coverage sizing supersedes coverage sizing)",
+			toolCfg.TargetCoverage, toolCfg.Coverage)
+	}
 	return nil
 }
 
