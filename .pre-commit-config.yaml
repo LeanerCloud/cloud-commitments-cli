@@ -152,6 +152,19 @@ repos:
         pass_filenames: false
         files: ^internal/database/postgres/migrations/
 
+  # Permissions codegen: regenerate frontend/src/permissions.generated.ts
+  # from internal/auth/types.go and fail if the committed copy is stale.
+  # Triggers on changes to the backend defaults or the generator itself,
+  # plus the generated file (in case a dev hand-edits it).
+  - repo: local
+    hooks:
+      - id: permissions-codegen
+        name: Regenerate frontend permissions from Go defaults
+        entry: bash -c 'go run ./cmd/gen-permissions && git diff --exit-code -- frontend/src/permissions.generated.ts || { echo "permissions.generated.ts is stale. Run go run ./cmd/gen-permissions and commit the result."; exit 1; }'
+        language: system
+        pass_filenames: false
+        files: ^(internal/auth/types\.go|cmd/gen-permissions/.*\.go|frontend/src/permissions\.generated\.ts)$
+
   # Heavy test execution: pre-push stage only.
   #
   # These three hooks rebuild + run the full Go and frontend test suites,
