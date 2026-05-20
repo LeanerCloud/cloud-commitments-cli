@@ -283,6 +283,34 @@ func effectiveSizingPct(cfg Config) float64 {
 	return cfg.Coverage
 }
 
+// extractEngineLabel returns the engine or platform string from the polymorphic
+// Details field, handling both value and pointer forms. The live parser and the
+// CSV loader store pointers (*DatabaseDetails is required by findOfferingID),
+// while some test callers construct values directly.
+func extractEngineLabel(details interface{}) string {
+	switch d := details.(type) {
+	case common.DatabaseDetails:
+		return d.Engine
+	case *common.DatabaseDetails:
+		if d != nil {
+			return d.Engine
+		}
+	case common.CacheDetails:
+		return d.Engine
+	case *common.CacheDetails:
+		if d != nil {
+			return d.Engine
+		}
+	case common.ComputeDetails:
+		return d.Platform
+	case *common.ComputeDetails:
+		if d != nil {
+			return d.Platform
+		}
+	}
+	return ""
+}
+
 // generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness.
 // sizingPct is the percentage that actually drove the sizing decision (see
 // effectiveSizingPct); it appears in the ID as e.g. "80pct" purely for human
@@ -299,20 +327,11 @@ func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRu
 	service := strings.ToLower(string(rec.Service))
 	instanceType := strings.ReplaceAll(rec.ResourceType, ".", "-")
 
-	// Extract engine information from service details
-	engine := ""
-	switch details := rec.Details.(type) {
-	case common.DatabaseDetails:
-		engine = strings.ToLower(details.Engine)
-		engine = strings.ReplaceAll(engine, " ", "-")
-		engine = strings.ReplaceAll(engine, "_", "-")
-	case common.CacheDetails:
-		engine = strings.ToLower(details.Engine)
-	case common.ComputeDetails:
-		engine = strings.ToLower(details.Platform)
-		engine = strings.ReplaceAll(engine, " ", "-")
-		engine = strings.ReplaceAll(engine, "/", "-")
-	}
+	raw := extractEngineLabel(rec.Details)
+	engine := strings.ToLower(raw)
+	engine = strings.ReplaceAll(engine, " ", "-")
+	engine = strings.ReplaceAll(engine, "_", "-")
+	engine = strings.ReplaceAll(engine, "/", "-")
 
 	// Add account name if available
 	accountName := sanitizeAccountName(rec.AccountName)

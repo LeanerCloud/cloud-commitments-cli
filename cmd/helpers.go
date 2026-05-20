@@ -504,7 +504,8 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 }
 
 // ConfirmPurchase asks the user for confirmation before proceeding.
-// totalSavings is the estimated annual savings from the purchase (not the purchase cost).
+// totalSavings is the estimated monthly savings from the purchase (not the purchase cost),
+// matching the EstimatedSavings column and the "Estimated monthly savings" summary.
 // Returns false without prompting if stdin is not a TTY and skipConfirmation is false.
 func ConfirmPurchase(totalInstances int, totalSavings float64, skipConfirmation bool) bool {
 	if skipConfirmation {
@@ -516,7 +517,7 @@ func ConfirmPurchase(totalInstances int, totalSavings float64, skipConfirmation 
 		return false
 	}
 
-	fmt.Printf("\n⚠️  About to purchase %d instances with estimated annual savings: $%.2f\n", totalInstances, totalSavings)
+	fmt.Printf("\n⚠️  About to purchase %d instances with estimated monthly savings: $%.2f\n", totalInstances, totalSavings)
 	fmt.Print("Do you want to proceed? (yes/no): ")
 
 	reader := bufio.NewReader(os.Stdin)

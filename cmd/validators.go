@@ -110,6 +110,13 @@ func validatePaymentAndTerm() error {
 
 // warnRDS3YearNoUpfront warns if RDS service is selected with 3-year no-upfront
 func warnRDS3YearNoUpfront() error {
+	// In CSV-input mode the payment option comes from each row, not the
+	// --payment flag (which keeps its no-upfront default), so this flag-based
+	// check would fire a false alarm on a CSV full of partial-upfront rows.
+	if toolCfg.CSVInput != "" {
+		return nil
+	}
+
 	if toolCfg.PaymentOption != "no-upfront" || toolCfg.TermYears != 3 {
 		return nil
 	}

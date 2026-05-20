@@ -367,13 +367,22 @@ func TestExecutePurchase(t *testing.T) {
 		Error:          nil,
 		Timestamp:      time.Now(),
 	}
-	mockClient.On("PurchaseCommitment", ctx, rec, common.PurchaseOptions{Source: common.PurchaseSourceCLI}).Return(expectedResult, nil)
+	var capturedOpts common.PurchaseOptions
+	mockClient.On("PurchaseCommitment", ctx, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool {
+		capturedOpts = o
+		return o.Source == common.PurchaseSourceCLI
+	})).Return(expectedResult, nil)
 
 	result := executePurchase(ctx, rec, "eu-west-1", 5, mockClient, toolCfg)
 
 	assert.True(t, result.Success)
 	assert.Equal(t, "test-purchase-id-123", result.CommitmentID)
 	assert.Nil(t, result.Error)
+
+	// #617: executePurchase hands the provider a descriptive reservation ID
+	// (account/service/region/size aware) rather than leaving it generic.
+	assert.NotEmpty(t, capturedOpts.ReservationID)
+	assert.Contains(t, capturedOpts.ReservationID, "t3-medium")
 
 	mockClient.AssertExpectations(t)
 }
