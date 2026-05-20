@@ -634,6 +634,64 @@ rds,us-east-1,db.t3.micro,2,`,
 			},
 		},
 		{
+			name: "Engine and Deployment reconstruct service Details",
+			csvContent: `Service,Region,ResourceType,Engine,Deployment,Count,Term,PaymentOption
+rds,us-east-1,db.t4g.medium,Aurora MySQL,single-az,3,3yr,partial-upfront
+rds,eu-west-2,db.r7g.large,MySQL,multi-az,2,3yr,partial-upfront
+elasticache,us-east-1,cache.r6g.large,redis,,4,1yr,no-upfront
+ec2,us-west-2,m5.large,Linux/UNIX,,5,1yr,all-upfront`,
+			wantErr: false,
+			validate: func(t *testing.T, recs []common.Recommendation) {
+				require.Len(t, recs, 4)
+
+				// RDS Aurora MySQL, single-az -> DatabaseDetails
+				rds0, ok := recs[0].Details.(*common.DatabaseDetails)
+				require.True(t, ok, "RDS rec should carry *DatabaseDetails")
+				assert.Equal(t, "Aurora MySQL", rds0.Engine)
+				assert.Equal(t, "single-az", rds0.AZConfig)
+				assert.Equal(t, "db.t4g.medium", rds0.InstanceClass)
+
+				// RDS MySQL, multi-az -> AZConfig carried through for offering lookup
+				rds1, ok := recs[1].Details.(*common.DatabaseDetails)
+				require.True(t, ok)
+				assert.Equal(t, "MySQL", rds1.Engine)
+				assert.Equal(t, "multi-az", rds1.AZConfig)
+
+				// ElastiCache -> CacheDetails (no Deployment column)
+				cache, ok := recs[2].Details.(*common.CacheDetails)
+				require.True(t, ok, "ElastiCache rec should carry *CacheDetails")
+				assert.Equal(t, "redis", cache.Engine)
+				assert.Equal(t, "cache.r6g.large", cache.NodeType)
+
+				// EC2 -> ComputeDetails, platform from the Engine column
+				ec2, ok := recs[3].Details.(*common.ComputeDetails)
+				require.True(t, ok, "EC2 rec should carry *ComputeDetails")
+				assert.Equal(t, "Linux/UNIX", ec2.Platform)
+				assert.Equal(t, "m5.large", ec2.InstanceType)
+			},
+		},
+		{
+			name: "No Engine column leaves Details nil (Savings Plans / minimal CSV)",
+			csvContent: `Service,Region,ResourceType,Count,Term,PaymentOption
+rds,us-east-1,db.t3.micro,2,3yr,partial-upfront`,
+			wantErr: false,
+			validate: func(t *testing.T, recs []common.Recommendation) {
+				require.Len(t, recs, 1)
+				assert.Nil(t, recs[0].Details, "Details must stay nil when Engine column is absent")
+			},
+		},
+		{
+			name: "TOTAL summary row is skipped",
+			csvContent: `Service,Region,ResourceType,Engine,Deployment,Count,Term,PaymentOption
+rds,us-east-1,db.t4g.medium,Aurora MySQL,single-az,3,3yr,partial-upfront
+TOTAL,,,,,3,,`,
+			wantErr: false,
+			validate: func(t *testing.T, recs []common.Recommendation) {
+				require.Len(t, recs, 1, "the trailing TOTAL row must not become a recommendation")
+				assert.Equal(t, common.ServiceRDS, recs[0].Service)
+			},
+		},
+		{
 			name: "CSV with different column order",
 			csvContent: `Count,Service,Region,ResourceType
 7,rds,ap-south-1,db.r5.large`,

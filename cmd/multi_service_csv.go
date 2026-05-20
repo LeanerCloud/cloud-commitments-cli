@@ -78,6 +78,14 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 			return nil, fmt.Errorf("failed to read CSV record: %w", err)
 		}
 
+		// Skip the trailing TOTAL summary row that writeMultiServiceCSVReport
+		// emits (label in the Service column). Without this, feeding the tool
+		// its own output parses TOTAL as a bogus recommendation with an
+		// unknown service type.
+		if getCSVField(record, colIdx, "Service") == "TOTAL" {
+			continue
+		}
+
 		rec, err := parseCSVRecord(record, colIdx)
 		if err != nil {
 			return nil, err
@@ -110,6 +118,37 @@ func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendati
 	// Parse float fields
 	if err := parseCSVFloat(record, colIdx, "EstimatedSavings", &rec.EstimatedSavings); err != nil {
 		return rec, err
+	}
+
+	// Reconstruct the service Details from the Engine/Deployment columns. The
+	// purchase path needs them: RDS findOfferingID rejects a rec with nil
+	// Details ("invalid service details for RDS"), and RI offerings are keyed
+	// by engine and Multi-AZ. This mirrors the writer side (extractEngine /
+	// extractDeployment emit DatabaseDetails / CacheDetails / ComputeDetails),
+	// so a CSV the tool wrote round-trips losslessly. Engine is stored in Cost
+	// Explorer format ("Aurora MySQL"); findOfferingID normalizes it. Guarded
+	// on a non-empty Engine so minimal CSVs and Savings Plans rows (no Engine
+	// column) keep their previous nil-Details behavior.
+	if engine := getCSVField(record, colIdx, "Engine"); engine != "" {
+		deployment := getCSVField(record, colIdx, "Deployment")
+		switch rec.Service {
+		case common.ServiceRDS, common.ServiceRelationalDB:
+			rec.Details = &common.DatabaseDetails{
+				Engine:        engine,
+				AZConfig:      deployment,
+				InstanceClass: rec.ResourceType,
+			}
+		case common.ServiceElastiCache, common.ServiceCache:
+			rec.Details = &common.CacheDetails{
+				Engine:   engine,
+				NodeType: rec.ResourceType,
+			}
+		case common.ServiceEC2, common.ServiceCompute:
+			rec.Details = &common.ComputeDetails{
+				InstanceType: rec.ResourceType,
+				Platform:     engine,
+			}
+		}
 	}
 
 	return rec, nil
