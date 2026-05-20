@@ -62,6 +62,8 @@ github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v2 v2.0.0 h1:PTFG
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v2 v2.0.0/go.mod h1:LRr2FzBTQlONPPa5HREE5+RjSCTXl7BwOvYOaWTqCaI=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/redis/armredis/v3 v3.0.0 h1:zp+znRAHKLSewbw+WWKIMgCaFNxEXt9AwjxmW5fCnck=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/redis/armredis/v3 v3.0.0/go.mod h1:nEvLUni7GO5ukfEYtmrUfz08Puqd2FP9d8sCZazm5W4=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/reservations/armreservations v1.1.0 h1:0OO/3K+SKt45gXiOU4gHRILOLeNOUZdqeNO47Mq6iN8=
+github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/reservations/armreservations v1.1.0/go.mod h1:2FDnHkGwh1BFK1ZQt+iDJU47Cg9Y28F0W3FSI389NOA=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0 h1:Dd+RhdJn0OTtVGaeDLZpcumkIVCtA/3/Fo42+eoYvVM=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0/go.mod h1:5kakwfW5CjC9KK+Q4wjXAg+ShuIm2mBMua0ZFj2C8PE=
 github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions v1.3.0 h1:wxQx2Bt4xzPIKvW59WQf1tJNx/ZZKPfN+EhPX3Z6CYY=
