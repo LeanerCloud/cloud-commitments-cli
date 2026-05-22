@@ -14,6 +14,7 @@ import (
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	awsrds "github.com/aws/aws-sdk-go-v2/service/rds"
+	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 )
 
 // InstanceEngineVersion stores engine version information for an instance
@@ -86,6 +87,16 @@ func getAWSRegions(ctx context.Context, awsCfg aws.Config) ([]ec2types.Region, e
 
 // maxConcurrentRegionQueries limits the number of concurrent AWS API calls across regions
 const maxConcurrentRegionQueries = 10
+
+// maxEngineVersionPages caps DescribeDBMajorEngineVersions pagination per engine.
+// 20 pages x ~100 records/page = ~2000 records, enough for any engine list (issue #692).
+const maxEngineVersionPages = 20
+
+// RDSMajorVersionsClient is the subset of the RDS API needed by
+// queryMajorEngineVersionsWithClient, extracted so tests can inject a mock.
+type RDSMajorVersionsClient interface {
+	DescribeDBMajorEngineVersions(ctx context.Context, params *awsrds.DescribeDBMajorEngineVersionsInput, optFns ...func(*awsrds.Options)) (*awsrds.DescribeDBMajorEngineVersionsOutput, error)
+}
 
 // queryRDSInstancesInRegions queries RDS instances in all regions concurrently
 func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (map[string][]InstanceEngineVersion, error) {
@@ -186,8 +197,12 @@ func queryMajorEngineVersions(ctx context.Context, cfg Config) (map[string]Major
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	rdsClient := awsrds.NewFromConfig(awsCfg)
+	return queryMajorEngineVersionsWithClient(ctx, awsrds.NewFromConfig(awsCfg))
+}
 
+// queryMajorEngineVersionsWithClient is the testable core of queryMajorEngineVersions.
+// It accepts a RDSMajorVersionsClient so tests can inject a mock without real AWS creds.
+func queryMajorEngineVersionsWithClient(ctx context.Context, rdsClient RDSMajorVersionsClient) (map[string]MajorEngineVersionInfo, error) {
 	// Map of "engine:majorVersion" -> MajorEngineVersionInfo
 	versionInfo := make(map[string]MajorEngineVersionInfo)
 
@@ -195,42 +210,80 @@ func queryMajorEngineVersions(ctx context.Context, cfg Config) (map[string]Major
 	engines := []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}
 
 	for _, engine := range engines {
-		output, err := rdsClient.DescribeDBMajorEngineVersions(ctx, &awsrds.DescribeDBMajorEngineVersionsInput{
-			Engine: aws.String(engine),
-		})
-		if err != nil {
-			log.Printf("⚠️  Warning: Failed to describe major engine versions for %s: %v", engine, err)
-			continue
-		}
-
-		for _, version := range output.DBMajorEngineVersions {
-			info := MajorEngineVersionInfo{
-				Engine:             aws.ToString(version.Engine),
-				MajorEngineVersion: aws.ToString(version.MajorEngineVersion),
-			}
-
-			// Parse lifecycle support dates
-			for _, lifecycle := range version.SupportedEngineLifecycles {
-				lifecycleInfo := EngineLifecycleInfo{
-					LifecycleSupportName: string(lifecycle.LifecycleSupportName),
-				}
-
-				if lifecycle.LifecycleSupportStartDate != nil {
-					lifecycleInfo.LifecycleSupportStartDate = *lifecycle.LifecycleSupportStartDate
-				}
-				if lifecycle.LifecycleSupportEndDate != nil {
-					lifecycleInfo.LifecycleSupportEndDate = *lifecycle.LifecycleSupportEndDate
-				}
-
-				info.SupportedEngineLifecycles = append(info.SupportedEngineLifecycles, lifecycleInfo)
-			}
-
-			key := fmt.Sprintf("%s:%s", info.Engine, info.MajorEngineVersion)
-			versionInfo[key] = info
+		if err := fetchMajorEngineVersionsForEngine(ctx, rdsClient, engine, versionInfo); err != nil {
+			log.Printf("Warning: Failed to describe major engine versions for %s: %v", engine, err)
 		}
 	}
 
 	return versionInfo, nil
+}
+
+// fetchMajorEngineVersionsForEngine fetches all pages of major engine version
+// info for a single engine and merges results into versionInfo. Returns an error
+// only on API failure or pagination cap exceeded (issue #692).
+func fetchMajorEngineVersionsForEngine(ctx context.Context, rdsClient RDSMajorVersionsClient, engine string, versionInfo map[string]MajorEngineVersionInfo) error {
+	var marker *string
+
+	for pageIdx := 0; ; pageIdx++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if pageIdx >= maxEngineVersionPages {
+			return fmt.Errorf(
+				"pagination cap reached after %d pages for engine %s (issue #692)",
+				maxEngineVersionPages, engine,
+			)
+		}
+
+		output, err := rdsClient.DescribeDBMajorEngineVersions(ctx, &awsrds.DescribeDBMajorEngineVersionsInput{
+			Engine: aws.String(engine),
+			Marker: marker,
+		})
+		if err != nil {
+			return err
+		}
+
+		for _, version := range output.DBMajorEngineVersions {
+			info := parseDBMajorEngineVersion(version)
+			key := fmt.Sprintf("%s:%s", info.Engine, info.MajorEngineVersion)
+			versionInfo[key] = info
+		}
+
+		if output.Marker == nil || aws.ToString(output.Marker) == "" {
+			break
+		}
+		marker = output.Marker
+	}
+
+	return nil
+}
+
+// parseDBMajorEngineVersion converts an RDS DBMajorEngineVersion into a
+// MajorEngineVersionInfo, extracting lifecycle support dates. Extracted from
+// fetchMajorEngineVersionsForEngine to keep its cyclomatic complexity below
+// the gocyclo cap.
+func parseDBMajorEngineVersion(version rdstypes.DBMajorEngineVersion) MajorEngineVersionInfo {
+	info := MajorEngineVersionInfo{
+		Engine:             aws.ToString(version.Engine),
+		MajorEngineVersion: aws.ToString(version.MajorEngineVersion),
+	}
+
+	for _, lifecycle := range version.SupportedEngineLifecycles {
+		lifecycleInfo := EngineLifecycleInfo{
+			LifecycleSupportName: string(lifecycle.LifecycleSupportName),
+		}
+
+		if lifecycle.LifecycleSupportStartDate != nil {
+			lifecycleInfo.LifecycleSupportStartDate = *lifecycle.LifecycleSupportStartDate
+		}
+		if lifecycle.LifecycleSupportEndDate != nil {
+			lifecycleInfo.LifecycleSupportEndDate = *lifecycle.LifecycleSupportEndDate
+		}
+
+		info.SupportedEngineLifecycles = append(info.SupportedEngineLifecycles, lifecycleInfo)
+	}
+
+	return info
 }
 
 // extractMajorVersion extracts the major version from a full engine version string
