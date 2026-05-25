@@ -13,7 +13,13 @@ jobs:
   pre-commit:
     name: Run pre-commit hooks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 35 minutes accommodates the 3-attempt retry wrapper on the
+    # `Run pre-commit` step below (3 attempts * 10 min per-attempt
+    # timeout + 2 * 90 s retry waits = 33 min worst case) plus a
+    # small margin for setup/install steps. Without the bump, the
+    # job-level cap killed any retry attempt before it could start,
+    # making the retry policy ineffective (CR finding on #697).
+    timeout-minutes: 35
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -180,6 +186,26 @@ jobs:
         # run and catch the syntax/style issues that terraform_validate
         # would catch; the deeper schema validation runs in
         # `terraform plan` during deploy workflows.
+        #
+        # GITHUB_TOKEN is passed so terraform_tflint's `tflint --init`
+        # step authenticates against the GitHub API (5000/hr per-token)
+        # when it downloads ruleset plugin releases. Without the token,
+        # tflint goes anonymous and hits the 60/hr per-IP limit shared
+        # across every workflow on the runner's NAT IP, which trips
+        # intermittently when PRs land in the same hour (issue #564).
+        #
+        # nick-fields/retry wraps the run with up to 3 attempts and a
+        # 90-second wait so transient flakes (GitHub Releases blips,
+        # tflint plugin download timeouts, etc.) do not require a
+        # manual rerun. The GITHUB_TOKEN fix above is the primary fix;
+        # the retry wrapper is the cheap defense-in-depth for the
+        # residual flakes that token alone cannot eliminate.
+        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
         env:
           SKIP: terraform_validate
-        run: pre-commit run --all-files
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: pre-commit run --all-files
