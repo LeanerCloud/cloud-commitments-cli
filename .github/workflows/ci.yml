@@ -451,6 +451,25 @@ jobs:
             --pull-request=${{ github.event.pull_request.number }} \
             --behavior=update
 
+  # Assert that the Azure custom-role actions list is identical in the TF module
+  # and the ARM onboarding template.  Fast (shell + jq only), so it always runs.
+  # Path changes that trigger drift will be caught regardless of PR context.
+  azure-role-parity:
+    name: Azure role actions parity (ARM vs TF)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert ARM/TF actions parity
+        run: bash scripts/check-azure-role-parity.sh
+
+      - name: Run parity script self-tests
+        run: bash scripts/test-azure-role-parity.sh
+
   # Summary job - all checks must pass
   ci-success:
     name: CI Success
@@ -463,6 +482,7 @@ jobs:
       - terraform-validate
       - security-scan
       - e2e-tests
+      - azure-role-parity
     if: always()
 
     steps:
