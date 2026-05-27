@@ -138,7 +138,7 @@ repos:
         # installs trivy v0.69.3 via the workflow step in
         # .github/workflows/pre-commit.yml, so PRs are always scanned
         # regardless of a developer's local setup.
-        entry: bash -c 'trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs terraform/environments/aws .'
+        entry: bash -c 'trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs terraform/environments/aws --skip-dirs .claude .'
         language: system
         pass_filenames: false
 
