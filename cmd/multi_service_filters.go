@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"slices"
 	"strings"
 
@@ -11,12 +13,25 @@ import (
 // currentRegion is the region being processed in the current loop iteration - if non-empty, only recommendations for that region are included.
 func applyFilters(recs []common.Recommendation, cfg *Config, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo, currentRegion string) []common.Recommendation {
 	var filtered []common.Recommendation
+	var poolDrops []string
+	var poolDropInstances float64
 
 	for i := range recs {
+		if cfg.MinPoolSize > 0 && !shouldIncludePoolSize(&recs[i], cfg) {
+			poolDropInstances += recs[i].AverageInstancesUsedPerHour
+			label := fmt.Sprintf("%s/%s/%s", recs[i].Service, recs[i].Region, recs[i].ResourceType)
+			log.Printf("INFO: --min-pool-size=%.1f dropped %s (avg=%.2f < threshold)", cfg.MinPoolSize, label, recs[i].AverageInstancesUsedPerHour)
+			poolDrops = append(poolDrops, label)
+			continue
+		}
 		adjusted, include := processRecommendation(&recs[i], cfg, instanceVersions, versionInfo, currentRegion)
 		if include {
 			filtered = append(filtered, adjusted)
 		}
+	}
+
+	if len(poolDrops) > 0 {
+		log.Printf("INFO: --min-pool-size dropped %d recommendation(s) (%.2f avg instances/hr total)", len(poolDrops), poolDropInstances)
 	}
 
 	return filtered
