@@ -46,6 +46,11 @@ func validateNumericRanges(cmd *cobra.Command) error {
 		return err
 	}
 
+	// Validate coverage lookback days
+	if toolCfg.CoverageLookbackDays < 1 {
+		return fmt.Errorf("coverage-lookback-days must be >= 1, got: %d", toolCfg.CoverageLookbackDays)
+	}
+
 	// Validate max instances
 	if toolCfg.MaxInstances < 0 {
 		return fmt.Errorf("max-instances must be 0 (no limit) or a positive number, got: %d", toolCfg.MaxInstances)

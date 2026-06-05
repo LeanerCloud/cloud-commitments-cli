@@ -74,6 +74,13 @@ type Config struct {
 	MinSavingsPct      float64
 	MaxBreakEvenMonths int
 	MinCount           int
+	// CoverageLookbackDays is the number of calendar days of historical
+	// demand fed to GetReservationCoverage when computing the existing-RI
+	// coverage map for --target-coverage sizing. A longer window smooths
+	// seasonal spikes; a shorter one matches a narrow billing-period export
+	// from the AWS console coverage report. Default 30, matching the CE
+	// UI default.
+	CoverageLookbackDays int
 	// RebuyWindowDays, when > 0, treats existing RIs whose remaining term
 	// is at most this many days as already uncovered, so --target-coverage
 	// recommends replacements before they expire. Zero (default) keeps the
@@ -150,6 +157,11 @@ func init() {
 	rootCmd.Flags().Float64Var(&toolCfg.MinSavingsPct, "min-savings-pct", 0, "Minimum savings percentage to include a recommendation (0 = no filter)")
 	rootCmd.Flags().IntVar(&toolCfg.MaxBreakEvenMonths, "max-break-even-months", 0, "Maximum break-even period in months (0 = no filter)")
 	rootCmd.Flags().IntVar(&toolCfg.MinCount, "min-count", 0, "Minimum instance count to include a recommendation (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.CoverageLookbackDays, "coverage-lookback-days", 30,
+		"Number of calendar days of historical demand fed to GetReservationCoverage "+
+			"when computing the existing-RI coverage map for --target-coverage sizing. "+
+			"Match this to your AWS console coverage report window to reconcile "+
+			"CUDly's ExistingCoverage column against the console export. Default 30.")
 	rootCmd.Flags().IntVar(&toolCfg.RebuyWindowDays, "rebuy-window-days", 0,
 		"When >0, treat existing RIs expiring within this many days as already "+
 			"uncovered, so --target-coverage sizes recommendations to replace them "+

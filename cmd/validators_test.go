@@ -23,6 +23,7 @@ func TestValidateNumericRanges(t *testing.T) {
 				toolCfg.Coverage = 80.0
 				toolCfg.MaxInstances = 100
 				toolCfg.OverrideCount = 10
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: false,
 		},
@@ -30,6 +31,7 @@ func TestValidateNumericRanges(t *testing.T) {
 			name: "coverage below zero",
 			setupFunc: func() {
 				toolCfg.Coverage = -1.0
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: true,
 			errMsg:  "coverage percentage must be between 0 and 100",
@@ -38,6 +40,7 @@ func TestValidateNumericRanges(t *testing.T) {
 			name: "coverage above 100",
 			setupFunc: func() {
 				toolCfg.Coverage = 101.0
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: true,
 			errMsg:  "coverage percentage must be between 0 and 100",
@@ -47,6 +50,7 @@ func TestValidateNumericRanges(t *testing.T) {
 			setupFunc: func() {
 				toolCfg.Coverage = 80.0
 				toolCfg.MaxInstances = -1
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: true,
 			errMsg:  "max-instances must be 0",
@@ -56,6 +60,7 @@ func TestValidateNumericRanges(t *testing.T) {
 			setupFunc: func() {
 				toolCfg.Coverage = 80.0
 				toolCfg.MaxInstances = MaxReasonableInstances + 1
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: true,
 			errMsg:  "max-instances",
@@ -66,6 +71,7 @@ func TestValidateNumericRanges(t *testing.T) {
 				toolCfg.Coverage = 80.0
 				toolCfg.MaxInstances = 100
 				toolCfg.OverrideCount = -1
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: true,
 			errMsg:  "override-count must be 0",
@@ -76,6 +82,7 @@ func TestValidateNumericRanges(t *testing.T) {
 				toolCfg.Coverage = 80.0
 				toolCfg.MaxInstances = 100
 				toolCfg.OverrideCount = MaxReasonableInstances + 1
+				toolCfg.CoverageLookbackDays = 30
 			},
 			wantErr: true,
 			errMsg:  "override-count",
@@ -461,7 +468,7 @@ func TestValidateTargetCoverage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			toolCfg = Config{Coverage: tt.coverage, TargetCoverage: tt.target}
+			toolCfg = Config{Coverage: tt.coverage, TargetCoverage: tt.target, CoverageLookbackDays: 30}
 			var cmd *cobra.Command
 			if tt.useCobraCmd {
 				cmd = &cobra.Command{Use: "test"}
@@ -473,6 +480,54 @@ func TestValidateTargetCoverage(t *testing.T) {
 				}
 			}
 			err := validateNumericRanges(cmd)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("validateNumericRanges() expected error containing %q, got nil", tt.errSubstr)
+				} else if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("validateNumericRanges() error = %v, want substring %q", err, tt.errSubstr)
+				}
+			} else if err != nil {
+				t.Errorf("validateNumericRanges() unexpected error = %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateCoverageLookbackDays verifies that validateNumericRanges rejects
+// non-positive --coverage-lookback-days and accepts positive values.
+func TestValidateCoverageLookbackDays(t *testing.T) {
+	tests := []struct {
+		name      string
+		days      int
+		wantErr   bool
+		errSubstr string
+	}{
+		{name: "default 30 is valid", days: 30, wantErr: false},
+		{name: "1 day is valid", days: 1, wantErr: false},
+		{name: "90 days is valid", days: 90, wantErr: false},
+		{
+			name:      "zero rejected",
+			days:      0,
+			wantErr:   true,
+			errSubstr: "coverage-lookback-days must be >= 1",
+		},
+		{
+			name:      "negative rejected",
+			days:      -1,
+			wantErr:   true,
+			errSubstr: "coverage-lookback-days must be >= 1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origCfg := toolCfg
+			defer func() { toolCfg = origCfg }()
+			toolCfg = Config{
+				Coverage:             80,
+				CoverageLookbackDays: tt.days,
+			}
+			err := validateNumericRanges(nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("validateNumericRanges() expected error containing %q, got nil", tt.errSubstr)

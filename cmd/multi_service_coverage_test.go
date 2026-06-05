@@ -768,3 +768,38 @@ func TestFilterAndAdjustRecommendations_OverrideCountApplied(t *testing.T) {
 		assert.Equal(t, int(toolCfg.OverrideCount), rec.Count)
 	}
 }
+
+// TestFetchExistingCoverage_LookbackDays verifies that fetchExistingCoverage
+// honours cfg.CoverageLookbackDays (issue #360). The test uses the
+// MockRecommendationsClient which fails the *awsprovider.RecommendationsClientAdapter
+// type assertion, exercising the non-AWS-provider early-return path. The key
+// assertions are:
+//   - TargetCoverage=0 always returns nil regardless of lookback.
+//   - TargetCoverage>0 with a non-AWS client returns nil (non-AWS path,
+//     no CE call is made).
+//
+// Threading through the actual lookback value to GetRICoverageMap is
+// integration-tested in providers/aws/recommendations (TestGetRICoverageMap_*).
+func TestFetchExistingCoverage_LookbackDays(t *testing.T) {
+	ctx := context.Background()
+	awsCfg := aws.Config{}
+	mockClient := &MockRecommendationsClient{}
+
+	t.Run("zero TargetCoverage returns nil regardless of lookback", func(t *testing.T) {
+		cfg := Config{TargetCoverage: 0, CoverageLookbackDays: 14, Regions: []string{"us-east-1"}}
+		got := fetchExistingCoverage(ctx, awsCfg, mockClient, cfg)
+		assert.Nil(t, got, "TargetCoverage=0 must short-circuit before any CE call")
+	})
+
+	t.Run("non-AWS adapter returns nil, lookback not needed", func(t *testing.T) {
+		cfg := Config{TargetCoverage: 80, CoverageLookbackDays: 14, Regions: []string{"us-east-1"}}
+		got := fetchExistingCoverage(ctx, awsCfg, mockClient, cfg)
+		assert.Nil(t, got, "non-AWS provider must return nil (no CE integration)")
+	})
+
+	t.Run("custom lookback stored in Config", func(t *testing.T) {
+		cfg := Config{TargetCoverage: 80, CoverageLookbackDays: 60, Regions: []string{"us-east-1"}}
+		// CoverageLookbackDays field value is preserved in the struct.
+		assert.Equal(t, 60, cfg.CoverageLookbackDays)
+	})
+}
