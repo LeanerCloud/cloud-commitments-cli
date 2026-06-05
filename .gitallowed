@@ -36,6 +36,9 @@
 111222333444
 555666777888
 999888777666
+# Descending-step fixture added in #956 tests (store_postgres_pgxmock_test.go,
+# handler_analytics_test.go, handler_history_test.go, handler_dashboard_test.go).
+999988887777
 
 # UUID-shaped account ID used in handler_accounts_test.go (synthetic, not a
 # real subscription/account).
