@@ -797,9 +797,11 @@ func TestFetchExistingCoverage_LookbackDays(t *testing.T) {
 		assert.Nil(t, got, "non-AWS provider must return nil (no CE integration)")
 	})
 
-	t.Run("custom lookback stored in Config", func(t *testing.T) {
-		cfg := Config{TargetCoverage: 80, CoverageLookbackDays: 60, Regions: []string{"us-east-1"}}
-		// CoverageLookbackDays field value is preserved in the struct.
-		assert.Equal(t, 60, cfg.CoverageLookbackDays)
-	})
+	// The previous "custom lookback stored in Config" subcase asserted only that
+	// a struct field equals what was just assigned -- a tautology that passes even
+	// if CoverageLookbackDays is never forwarded to GetRICoverageMap.  The real
+	// assertion -- that the lookback value reaches the CE TimePeriod -- is covered
+	// by TestGetRICoverageMap_LookbackWindowWidth in
+	// providers/aws/recommendations/coverage_test.go, which directly verifies
+	// end-start == lookbackDays on the actual CE input.  No redundant subcase here.
 }

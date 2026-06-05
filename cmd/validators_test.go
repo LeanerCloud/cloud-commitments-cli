@@ -537,3 +537,39 @@ func TestValidateCoverageLookbackDays(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateRecLookbackPeriod verifies that validateRecLookbackPeriod accepts
+// the three valid values and rejects anything else, including empty string.
+func TestValidateRecLookbackPeriod(t *testing.T) {
+	tests := []struct {
+		name      string
+		period    string
+		wantErr   bool
+		errSubstr string
+	}{
+		{name: "7d valid", period: "7d", wantErr: false},
+		{name: "30d valid", period: "30d", wantErr: false},
+		{name: "60d valid", period: "60d", wantErr: false},
+		{name: "empty rejected", period: "", wantErr: true, errSubstr: "invalid rec-lookback-period"},
+		{name: "14d rejected", period: "14d", wantErr: true, errSubstr: "invalid rec-lookback-period"},
+		{name: "90d rejected", period: "90d", wantErr: true, errSubstr: "invalid rec-lookback-period"},
+		{name: "SEVEN_DAYS rejected", period: "SEVEN_DAYS", wantErr: true, errSubstr: "invalid rec-lookback-period"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origCfg := toolCfg
+			defer func() { toolCfg = origCfg }()
+			toolCfg.RecLookbackPeriod = tt.period
+			err := validateRecLookbackPeriod()
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("validateRecLookbackPeriod() expected error containing %q, got nil", tt.errSubstr)
+				} else if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("validateRecLookbackPeriod() error = %v, want substring %q", err, tt.errSubstr)
+				}
+			} else if err != nil {
+				t.Errorf("validateRecLookbackPeriod() unexpected error = %v", err)
+			}
+		})
+	}
+}

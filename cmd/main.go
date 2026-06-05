@@ -69,6 +69,11 @@ type Config struct {
 	ActualPurchase         bool
 	DryRun                 bool
 	SkipConfirmation       bool
+	// RecLookbackPeriod controls the LookbackPeriodInDays passed to
+	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d".
+	// A longer window smooths seasonal spikes; a shorter window weights
+	// recent demand more heavily. Default "7d" matches the CE console default.
+	RecLookbackPeriod string
 }
 
 func main() {
@@ -146,6 +151,10 @@ func init() {
 			"below this threshold. Useful with --target-coverage to skip tiny pools "+
 			"that integer arithmetic forces above target (e.g. avg=1 cannot hit 80%%). "+
 			"Default 0 = no filter.")
+	rootCmd.Flags().StringVar(&toolCfg.RecLookbackPeriod, "rec-lookback-period", "7d",
+		"Historical window for GetReservationPurchaseRecommendation. "+
+			"Valid values: 7d, 30d, 60d. A longer window smooths seasonal spikes; "+
+			"a shorter window weights recent demand more heavily. Default 7d.")
 }
 
 // Package-level Config that cobra flags bind to.

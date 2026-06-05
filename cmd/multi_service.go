@@ -117,6 +117,9 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 
 	accountCache := NewAccountAliasCache(awsCfg)
 	recClient := awsprovider.NewRecommendationsClient(awsCfg)
+	if adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter); ok && cfg.RecLookbackPeriod != "" {
+		adapter.SetRecLookbackPeriod(cfg.RecLookbackPeriod)
+	}
 	engineData := fetchEngineVersionData(ctx, cfg)
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
