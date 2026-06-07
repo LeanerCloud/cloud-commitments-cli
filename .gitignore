@@ -104,7 +104,9 @@ backend.hcl
 
 # Terraform plan files
 tfplan
+tfplan.*
 *.tfplan
+*.tfplan.*
 
 # Terraform state and outputs
 terraform-apply-*.txt
