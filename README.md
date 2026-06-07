@@ -10,6 +10,7 @@ CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS
 Full flag documentation, examples, and subcommand reference: [docs/cli/README.md](docs/cli/README.md)
 
 Topic pages:
+
 - [Filtering](docs/cli/filtering.md) - account, region, engine, instance-type, SP-type, and threshold filters
 - [Purchase Safety](docs/cli/purchase-safety.md) - dry-run, audit log, idempotency window, and guardrails
 - [Cloud Setup](docs/cli/cloud-setup.md) - `configure-azure` and `configure-gcp` self-hosted credential bootstrap

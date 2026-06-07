@@ -4,14 +4,14 @@ CUDly is designed to be safe by default. Real purchases require multiple explici
 
 ## The purchase decision: --dry-run and --purchase
 
-```
+```text
 --dry-run   bool   default: true
 --purchase  bool   default: false
 ```
 
 The actual purchase decision is computed as:
 
-```
+```text
 isDryRun = !ActualPurchase || DryRun
 ```
 
@@ -36,7 +36,7 @@ cudly --services rds --purchase
 
 ## Confirmation prompt: --yes
 
-```
+```text
 --yes   bool   default: false
 ```
 
@@ -49,7 +49,7 @@ cudly --services rds --purchase --dry-run=false --yes
 
 ## Audit log: --audit-log
 
-```
+```text
 --audit-log   string   default: ./cudly-audit.jsonl
 ```
 
@@ -74,7 +74,7 @@ The default path (`./cudly-audit.jsonl`) writes to the current working directory
 
 ## Duplicate purchase prevention: --idempotency-window
 
-```
+```text
 --idempotency-window   string   default: 24h
 ```
 
@@ -92,7 +92,7 @@ cudly --services rds --idempotency-window 72h
 
 ## Pre-expiry rebuy: --rebuy-window-days
 
-```
+```text
 --rebuy-window-days   int   default: 0 (disabled)
 ```
 
@@ -115,7 +115,7 @@ cudly inserts a short delay between consecutive purchases to respect AWS API rat
 
 ### DISABLE_PURCHASE_DELAY (internal/test only)
 
-```
+```text
 DISABLE_PURCHASE_DELAY=true  env var   default: unset
 ```
 

@@ -15,7 +15,7 @@ Scoping filters operate on include/exclude list pairs. An item that appears in b
 
 ### Account filters
 
-```
+```text
 --include-accounts  Only include recommendations for these account names (comma-separated)
 --exclude-accounts  Exclude recommendations for these account names (comma-separated)
 ```
@@ -32,7 +32,7 @@ cudly --services rds --exclude-accounts sandbox
 
 ### Region filters
 
-```
+```text
 --include-regions  Only include recommendations for these AWS regions (comma-separated)
 --exclude-regions  Exclude recommendations for these AWS regions (comma-separated)
 ```
@@ -49,7 +49,7 @@ cudly --services rds --exclude-regions ap-southeast-1
 
 ### Engine filters
 
-```
+```text
 --include-engines  Only include these database engines (comma-separated)
 --exclude-engines  Exclude these database engines (comma-separated)
 ```
@@ -66,7 +66,7 @@ cudly --services rds --exclude-engines mysql
 
 ### Instance-type filters
 
-```
+```text
 --include-instance-types  Only include these instance types (comma-separated)
 --exclude-instance-types  Exclude these instance types (comma-separated)
 ```
@@ -83,7 +83,7 @@ cudly --services rds,elasticache --exclude-instance-types db.t2.micro,db.t2.smal
 
 ### Savings Plan type filters
 
-```
+```text
 --include-sp-types  Only include these Savings Plan types (comma-separated)
 --exclude-sp-types  Exclude these Savings Plan types (comma-separated)
 ```
@@ -102,7 +102,7 @@ cudly --services savingsplans --exclude-sp-types SageMaker
 
 ### Extended support filter
 
-```
+```text
 --include-extended-support  Include instances on Extended Support engine versions (default: excluded)
 ```
 
@@ -126,7 +126,7 @@ Threshold filters drop individual recommendations that fall below a quality or s
 
 ### --min-count
 
-```
+```text
 --min-count <int>   Minimum instance count (0 = no filter)
 ```
 
@@ -139,7 +139,7 @@ cudly --services rds --min-count 3
 
 ### --min-savings-pct
 
-```
+```text
 --min-savings-pct <float>   Minimum savings percentage (0 = no filter)
 ```
 
@@ -154,7 +154,7 @@ cudly --services rds,elasticache --min-savings-pct 20
 
 ### --max-break-even-months
 
-```
+```text
 --max-break-even-months <int>   Maximum break-even period in months (0 = no filter)
 ```
 
@@ -167,7 +167,7 @@ cudly --services ec2 --max-break-even-months 18
 
 ### --max-instances
 
-```
+```text
 --max-instances <int>   Hard cap on total instances purchased (0 = no limit)
 ```
 
@@ -180,7 +180,7 @@ cudly --services rds --max-instances 100
 
 ### --min-pool-size
 
-```
+```text
 --min-pool-size <float>   Minimum pool AverageInstancesUsedPerHour (0 = no filter)
 ```
 

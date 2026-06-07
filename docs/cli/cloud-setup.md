@@ -13,7 +13,7 @@ These are one-time setup operations, not part of the regular analysis/purchase w
 
 Store Azure Service Principal credentials in Secrets Manager.
 
-```
+```text
 cudly configure-azure [flags]
 ```
 
@@ -78,7 +78,7 @@ az role assignment create \
 
 Store GCP Service Account credentials in Secrets Manager.
 
-```
+```text
 cudly configure-gcp [flags]
 ```
 
@@ -143,7 +143,7 @@ The command expects a standard GCP Service Account JSON key file (type `service_
   "type": "service_account",
   "project_id": "your-project-id",
   "client_email": "cudly-service-account@your-project-id.iam.gserviceaccount.com",
-  "private_key": "-----BEGIN RSA PRIVATE KEY-----\n..."
+  "private_key": "<YOUR_SERVICE_ACCOUNT_PRIVATE_KEY>"
 }
 ```
 
