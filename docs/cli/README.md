@@ -26,6 +26,7 @@ All flags belong to the root command unless noted otherwise.
 |------|-------|---------|-------------|
 | `--services` | `-s` | `rds` | Comma-separated list of services to process. Valid values: `rds`, `elasticache`, `ec2`, `opensearch`, `redshift`, `memorydb`, `savingsplans` (fans out to all four SP types), `savingsplans-compute`, `savingsplans-ec2instance`, `savingsplans-sagemaker`, `savingsplans-database`. The legacy alias `elasticsearch` maps to `opensearch`. |
 | `--all-services` | | `false` | Process all supported services; equivalent to listing every service in `--services`. |
+| `--regions` | `-r` | (auto-discover) | AWS regions to process (comma-separated or repeated). When empty, cudly auto-discovers regions from Cost Explorer recommendations. The `--include-regions` / `--exclude-regions` scoping filters are applied on top of the resulting set (see [filtering.md](filtering.md)). |
 
 ### Coverage and sizing
 
@@ -33,6 +34,7 @@ All flags belong to the root command unless noted otherwise.
 |------|-------|---------|-------------|
 | `--coverage` | `-c` | `80` | Percentage (0-100) of each recommendation's instance count to purchase (`rec.Count * coverage/100`). Ignored when `--target-coverage` is also set. |
 | `--target-coverage` | `-u` | `0` (disabled) | Target percentage (0-100) of historical average hourly usage to cover with commitments. Sizes each recommendation to `floor(avg * target/100)`, leaving the remainder on-demand. Overrides `--coverage` when non-zero. Pairs with `--rebuy-window-days` and `--min-pool-size` (see [filtering.md](filtering.md)). |
+| `--coverage-lookback-days` | | `30` | Calendar days of historical demand fed to `GetReservationCoverage` when computing the existing-RI coverage map for `--target-coverage` sizing. Match this to your AWS console coverage report window to reconcile cudly's `ExistingCoverage` column against the console export. Only affects `--target-coverage`. |
 | `--override-count` | | `0` (disabled) | Replace every recommendation's count with this fixed number. Useful when testing a specific purchase size. |
 | `--max-instances` | | `0` (no limit) | Hard cap on the total number of instances purchased across all recommendations. Applied after coverage scaling. See [filtering.md](filtering.md). |
 
