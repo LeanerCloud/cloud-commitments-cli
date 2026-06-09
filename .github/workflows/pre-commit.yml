@@ -2,9 +2,9 @@ name: pre-commit
 
 on:
   pull_request:
-    branches: [main, feat/multicloud-web-frontend]
+    branches: [main]
   push:
-    branches: [main, feat/multicloud-web-frontend]
+    branches: [main]
 
 permissions:
   contents: read
