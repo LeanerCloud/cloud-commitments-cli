@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -112,6 +113,13 @@ func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions 
 		go func(regionName string) {
 			defer wg.Done()
 			defer func() { <-sem }() // release semaphore
+			defer func() {
+				if r := recover(); r != nil {
+					buf := make([]byte, 4096)
+					n := runtime.Stack(buf, false)
+					log.Printf("ERROR: panic in region worker (region=%s): %v\n%s", regionName, r, buf[:n])
+				}
+			}()
 			queryRDSInstancesInRegion(ctx, awsCfg, regionName, instanceVersions, &mu)
 		}(aws.ToString(region.RegionName))
 	}
