@@ -6,13 +6,7 @@ These are one-time setup operations, not part of the regular analysis/purchase w
 
 ## Deployment overview
 
-CUDly is deployed via Terraform into your own cloud account. Three target platforms are supported:
-
-| Cloud | Compute | Terraform environment |
-|-------|---------|----------------------|
-| AWS | Lambda (Function URL) | `terraform/environments/aws/` |
-| GCP | Cloud Run | `terraform/environments/gcp/` |
-| Azure | Container Apps | `terraform/environments/azure/` |
+For the full Terraform deployment guide (supported runtimes, quick-deploy script, manual steps, `tfvars` reference, accessing the dashboard after deploy), see the [Deployment (self-hosted via Terraform)](../../README.md#deployment-self-hosted-via-terraform) section in the README.
 
 The `ci-cd-permissions/` module within each environment provisions the CI/CD deploy identity and is applied once, manually, by a privileged operator. The main deploy workflow (`.github/workflows/deploy-*.yml`) then runs `terraform init / plan / apply` against the environment directory using OIDC keyless authentication.
 
