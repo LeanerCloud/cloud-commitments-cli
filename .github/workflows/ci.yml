@@ -399,58 +399,6 @@ jobs:
         run: |
           docker-compose -f docker-compose.test.yml down -v
 
-  # Cost estimation with Infracost
-  cost-estimate:
-    name: Cost Estimation
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Infracost
-        uses: infracost/actions/setup@d51fc54d23c9ad90f984b884257bd96dc2625067 # v4.1.0
-        with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
-
-      - name: Checkout base branch
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-          ref: '${{ github.event.pull_request.base.ref }}'
-
-      - name: Generate Infracost cost estimate baseline
-        run: |
-          infracost breakdown --path=terraform/environments \
-            --format=json \
-            --out-file=/tmp/infracost-base.json
-
-      - name: Checkout PR branch
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Generate Infracost diff
-        run: |
-          infracost diff --path=terraform/environments \
-            --format=json \
-            --compare-to=/tmp/infracost-base.json \
-            --out-file=/tmp/infracost.json
-
-      - name: Post Infracost comment
-        run: |
-          infracost comment github --path=/tmp/infracost.json \
-            --repo=$GITHUB_REPOSITORY \
-            --github-token=${{ github.token }} \
-            --pull-request=${{ github.event.pull_request.number }} \
-            --behavior=update
-
   # Assert that the Azure custom-role actions list is identical in the TF module
   # and the ARM onboarding template.  Fast (shell + jq only), so it always runs.
   # Path changes that trigger drift will be caught regardless of PR context.
