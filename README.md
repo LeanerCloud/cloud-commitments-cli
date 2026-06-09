@@ -17,7 +17,7 @@ CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS
 
 ## Supported Cloud Providers & Services
 
-### AWS Services (Production Ready)
+### AWS Services
 
 | Service | Commitment Type | Description |
 |---------|----------------|-------------|
@@ -47,6 +47,23 @@ CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS
 | Cloud SQL | Committed Use Discounts |
 | Memorystore | Committed Use Discounts |
 | Cloud Storage | Committed Use Discounts |
+
+### AWS CLI Support Matrix
+
+**Tested** means the service has been exercised end-to-end with real AWS
+accounts and validated in production workloads. **Experimental** means the
+implementation exists and is functional, but needs real-world validation --
+contributions and testers are very welcome.
+
+| AWS Service | CLI Flag | Status |
+| ----------- | -------- | ------ |
+| Amazon RDS | `rds` | **Tested** |
+| Amazon ElastiCache | `elasticache` | **Tested** |
+| Amazon EC2 (Reserved Instances) | `ec2` | Experimental (seeking testers) |
+| Amazon OpenSearch | `opensearch` | Experimental (seeking testers) |
+| Amazon Redshift | `redshift` | Experimental (seeking testers) |
+| Amazon MemoryDB | `memorydb` | Experimental (seeking testers) |
+| Savings Plans (Compute, EC2 Instance, SageMaker, Database) | `savingsplans` | Experimental (seeking testers) |
 
 ## Installation
 
@@ -426,6 +443,144 @@ CUDly/
 - **Multi-cloud abstraction** - Unified types and behaviors across providers
 - **Plugin architecture** - Services registered and discovered at runtime
 - **Safety-first** - Multiple layers of protection against unintended purchases
+
+## Web Interface (Experimental)
+
+> **Note: The web GUI is experimental.** It is under active development and
+> has not been validated at scale. Use the CLI for production workloads.
+
+In addition to the CLI, this branch ships a browser-based dashboard. The same
+Go binary that runs the CLI also acts as the application server: it serves the
+pre-built TypeScript/Webpack frontend as static files (controlled by the
+`STATIC_DIR` environment variable) and exposes a REST API at `/api/`. There is
+no separate web server process.
+
+### What the dashboard provides
+
+| Area | What you can do |
+| ---- | --------------- |
+| **Dashboard** | Summary of active commitments, upcoming expirations, and savings trends |
+| **Recommendations** | Browse and refresh commitment recommendations; trigger purchases from the UI |
+| **Purchase plans** | Create, approve, pause, resume, and delete planned-purchase workflows; view execution history |
+| **History** | Full purchase history with analytics and cost-breakdown views |
+| **Inventory & Coverage** | List active commitments across accounts; view per-provider, per-service coverage breakdown |
+| **RI Exchange** | AWS Convertible RI exchange: reshape recommendations, quote, and execute exchanges |
+| **Settings** | Application configuration, cloud account credentials, user/group management, API keys |
+
+### Capabilities and limitations
+
+The web interface is part of the `feat/multicloud-web-frontend` branch and is
+not yet merged to `main`. The dashboard is operational for AWS workloads; Azure
+and GCP support in the web UI follows the same maturity as the CLI providers
+(both are experimental). Specifically:
+
+- **AWS**: recommendations, purchases, RI exchange, inventory, and coverage
+  views are all wired and backed by real AWS APIs (Cost Explorer, EC2, RDS,
+  etc.). This is the primary tested path.
+- **Azure**: reservation recommendations and purchases are implemented in the
+  API handlers (see `internal/api/handler_recommendations.go`,
+  `providers/azure/`), but Azure support is experimental. The RI Exchange
+  feature covers Azure Convertible RIs as a distinct code path.
+- **GCP**: GCP commitment recommendations and purchases are experimental. The
+  handler routing exists, but end-to-end coverage is limited compared to AWS.
+- The RI Exchange feature currently targets AWS Convertible EC2 Reserved
+  Instances only.
+- Multi-account support (AWS Organizations) is implemented; Azure/GCP
+  multi-account federation is in progress.
+
+### Deployment (self-hosted via Terraform)
+
+CUDly is **self-hosted only**. You deploy it into your own cloud account using
+the Terraform configurations under `terraform/environments/`. The Terraform
+modules build and push a Docker container image, provision the database,
+secrets, and networking, and deploy the application to one of the supported
+runtimes.
+
+| Cloud | Runtime | Terraform environment |
+| ----- | ------- | --------------------- |
+| AWS | Lambda (default) or Fargate (ECS) | `terraform/environments/aws/` |
+| GCP | Cloud Run | `terraform/environments/gcp/` |
+| Azure | Container Apps | `terraform/environments/azure/` |
+
+#### Prerequisites
+
+- Terraform >= 1.6.0
+- Docker with buildx
+- Go 1.25+
+- Cloud CLI authenticated: `aws`, `gcloud`, or `az`
+
+#### Quick deploy (using the helper script)
+
+```bash
+# AWS dev
+./scripts/tf-deploy.sh aws dev
+
+# GCP dev
+./scripts/tf-deploy.sh gcp dev
+
+# Azure dev
+./scripts/tf-deploy.sh azure dev
+```
+
+#### Manual Terraform (AWS example)
+
+```bash
+cd terraform/environments/aws
+cp dev.tfvars.example dev.tfvars   # edit with your values
+terraform init -backend-config=backends/dev.tfbackend
+terraform plan -var-file=dev.tfvars
+terraform apply -var-file=dev.tfvars
+```
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full deployment guide,
+including Azure and GCP details, CDN/CloudFront configuration, remote state
+backends, and CI/CD integration.
+
+**Key `tfvars` fields**
+
+| Variable | Purpose |
+| -------- | ------- |
+| `admin_email` | Email address for the initial administrator account |
+| `admin_password` | Initial admin password (leave unset to auto-generate and store in Secrets Manager) |
+| `compute_platform` | AWS only: `"lambda"` (default, scale-to-zero) or `"fargate"` (always-warm ECS) |
+
+The Terraform apply also handles Docker image build/push and database
+migrations automatically on each apply.
+
+### Accessing the dashboard
+
+After `terraform apply` completes, retrieve the application URL from the
+Terraform outputs:
+
+```bash
+# AWS Lambda
+terraform -chdir=terraform/environments/aws output lambda_function_url
+
+# AWS Fargate (ALB)
+terraform -chdir=terraform/environments/aws output fargate_api_url
+
+# GCP Cloud Run
+terraform -chdir=terraform/environments/gcp output cloud_run_service_url
+
+# Azure Container Apps
+terraform -chdir=terraform/environments/azure output container_app_url
+```
+
+Open that URL in your browser. On a fresh deployment the login page includes a
+one-time **"Set up admin"** step. Provide the `admin_email` you configured in
+`tfvars` and either the password you set or the one retrieved from Secrets
+Manager:
+
+```bash
+# Retrieve the auto-generated admin password (AWS)
+aws secretsmanager get-secret-value \
+  --secret-id "$(terraform -chdir=terraform/environments/aws output -raw admin_password_secret_name)" \
+  --query SecretString --output text
+```
+
+After the admin account is created, log in with that email and password. You
+can then add more users, configure cloud account credentials, and begin using
+the dashboard.
 
 ## Development
 
