@@ -229,8 +229,8 @@ cost-estimate:
 # Docker Compose E2E tests
 docker-compose-test:
 	@echo "Running E2E tests with docker-compose..."
-	docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
-	docker-compose -f docker-compose.test.yml down -v
+	docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
+	docker compose -f docker-compose.test.yml down -v
 
 # Install development dependencies
 install-dev-tools:

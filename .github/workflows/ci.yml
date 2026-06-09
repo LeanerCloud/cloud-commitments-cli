@@ -390,14 +390,14 @@ jobs:
 
       - name: Run E2E tests with docker-compose
         run: |
-          docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
+          docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
 
       - name: Cleanup
         if: always()
         run: |
-          docker-compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml down -v
 
   # Assert that the Azure custom-role actions list is identical in the TF module
   # and the ARM onboarding template.  Fast (shell + jq only), so it always runs.
