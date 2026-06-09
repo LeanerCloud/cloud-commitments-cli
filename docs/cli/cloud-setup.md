@@ -1,13 +1,25 @@
 # Cloud Setup (Self-Hosted)
 
-CUDly's SaaS offering provides a guided onboarding UI for connecting Azure and GCP accounts. If you are running a self-hosted deployment, two CLI subcommands perform the same bootstrap: `configure-azure` and `configure-gcp`. Both store credentials in AWS Secrets Manager, where the CUDly server reads them at runtime.
+CUDly is a self-hosted tool. Two CLI subcommands handle the one-time credential bootstrap for Azure and GCP: `configure-azure` and `configure-gcp`. Both write credentials to AWS Secrets Manager, where the CUDly server reads them at runtime.
 
 These are one-time setup operations, not part of the regular analysis/purchase workflow.
 
+## Deployment overview
+
+CUDly is deployed via Terraform into your own cloud account. Three target platforms are supported:
+
+| Cloud | Compute | Terraform environment |
+|-------|---------|----------------------|
+| AWS | Lambda (Function URL) | `terraform/environments/aws/` |
+| GCP | Cloud Run | `terraform/environments/gcp/` |
+| Azure | Container Apps | `terraform/environments/azure/` |
+
+The `ci-cd-permissions/` module within each environment provisions the CI/CD deploy identity and is applied once, manually, by a privileged operator. The main deploy workflow (`.github/workflows/deploy-*.yml`) then runs `terraform init / plan / apply` against the environment directory using OIDC keyless authentication.
+
 ## Prerequisites
 
-- An AWS profile with `secretsmanager:ListSecrets` and `secretsmanager:UpdateSecret` permissions on the secrets created by the CUDly CloudFormation stack.
-- The target Secrets Manager secret must already exist (created by the CloudFormation stack). Both commands locate the secret by listing secrets with a name prefix (`<stack-name>-AzureCredentials` or `<stack-name>-GCPCredentials`) and updating the first match.
+- An AWS profile with `secretsmanager:ListSecrets` and `secretsmanager:UpdateSecret` permissions on the secrets created by the Terraform deployment.
+- The target Secrets Manager secret must already exist (created by the Terraform deployment). Both commands locate the secret by listing secrets with a name prefix (`<stack-name>-AzureCredentials` or `<stack-name>-GCPCredentials`) and updating the first match.
 
 ## configure-azure
 
@@ -21,7 +33,7 @@ cudly configure-azure [flags]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--stack-name` | `cudly` | CloudFormation stack name. Used to locate the Secrets Manager secret (`<stack-name>-AzureCredentials`). |
+| `--stack-name` | `cudly` | Deployment stack name prefix. Used to locate the Secrets Manager secret (`<stack-name>-AzureCredentials`). Must match the name used when the Terraform deployment created the secret. |
 | `--profile` | (AWS default chain) | AWS profile to use when writing to Secrets Manager. |
 | `--tenant-id` | | Azure AD Tenant ID (UUID format). |
 | `--client-id` | | Azure Service Principal Client ID (UUID format). |
@@ -86,7 +98,7 @@ cudly configure-gcp [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--stack-name` | | `cudly` | CloudFormation stack name. Used to locate the secret (`<stack-name>-GCPCredentials`). |
+| `--stack-name` | | `cudly` | Deployment stack name prefix. Used to locate the secret (`<stack-name>-GCPCredentials`). Must match the name used when the Terraform deployment created the secret. |
 | `--profile` | | (AWS default chain) | AWS profile to use when writing to Secrets Manager. |
 | `--credentials-file` | `-f` | | Path to a GCP Service Account JSON key file. Supports `~` expansion. |
 | `--project-id` | | | GCP Project ID. Overrides the value embedded in the credentials file if set. |
@@ -149,10 +161,9 @@ The command expects a standard GCP Service Account JSON key file (type `service_
 
 Any missing required field causes the command to exit with an error before writing to Secrets Manager.
 
-## When to use vs. SaaS onboarding
+## Usage notes
 
-| Scenario | Recommendation |
-|----------|---------------|
-| SaaS tenant | Use the Settings UI in the CUDly web app. It provides guided onboarding with validation and does not require local AWS credentials. |
-| Self-hosted deployment | Use `configure-azure` / `configure-gcp` CLI commands. The CloudFormation stack must be deployed first; these commands only update existing secrets. |
-| Rotating credentials | Both commands update (not create) the secret, so they can also be used to rotate credentials without redeploying the stack. |
+| Scenario | Notes |
+|----------|-------|
+| First-time setup | Deploy with Terraform first (`terraform/environments/<cloud>/`). The secrets are created as part of that deployment; these commands only update them. |
+| Rotating credentials | Both commands update (not create) the secret, so they can be run again to rotate credentials without redeploying. |
