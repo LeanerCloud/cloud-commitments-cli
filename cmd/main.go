@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/LeanerCloud/CUDly/pkg/provider"
+	_ "github.com/LeanerCloud/CUDly/providers/aws"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/ec2"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/elasticache"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/memorydb"
@@ -18,7 +18,6 @@ import (
 	"github.com/LeanerCloud/CUDly/providers/aws/services/rds"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/redshift"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/savingsplans"
-	_ "github.com/LeanerCloud/CUDly/providers/aws"
 	_ "github.com/LeanerCloud/CUDly/providers/azure"
 	_ "github.com/LeanerCloud/CUDly/providers/gcp"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -34,22 +33,29 @@ const (
 
 // Config holds all configuration for the RI helper tool
 type Config struct {
-	Providers            []string
-	Regions              []string
-	Services             []string
-	Coverage             float64
-	ActualPurchase       bool
-	CSVOutput            string
-	CSVInput             string
-	AllServices          bool
-	PaymentOption        string
-	TermYears            int
-	IncludeRegions       []string
-	ExcludeRegions       []string
-	IncludeInstanceTypes []string
-	ExcludeInstanceTypes []string
-	IncludeEngines       []string
-	ExcludeEngines       []string
+	Providers []string
+	Regions   []string
+	Services  []string
+	Coverage  float64
+	// TargetCoverage, when > 0, switches sizing from --coverage's
+	// rec.Count-scaling to under-buy against historical hourly usage:
+	// each rec is sized to floor(avg * TargetCoverage/100), leaving
+	// (100-TargetCoverage)% of historical demand on-demand. Mutually
+	// exclusive with --coverage (target wins, with an info log). See
+	// cmd/helpers.go: ApplyTargetCoverage.
+	TargetCoverage         float64
+	ActualPurchase         bool
+	CSVOutput              string
+	CSVInput               string
+	AllServices            bool
+	PaymentOption          string
+	TermYears              int
+	IncludeRegions         []string
+	ExcludeRegions         []string
+	IncludeInstanceTypes   []string
+	ExcludeInstanceTypes   []string
+	IncludeEngines         []string
+	ExcludeEngines         []string
 	IncludeAccounts        []string
 	ExcludeAccounts        []string
 	SkipConfirmation       bool
@@ -61,6 +67,33 @@ type Config struct {
 	// Savings Plans specific filters
 	IncludeSPTypes []string
 	ExcludeSPTypes []string
+	// Purchase pipeline settings
+	AuditLog           string
+	DryRun             bool
+	IdempotencyWindow  string
+	MinSavingsPct      float64
+	MaxBreakEvenMonths int
+	MinCount           int
+	// CoverageLookbackDays is the number of calendar days of historical
+	// demand fed to GetReservationCoverage when computing the existing-RI
+	// coverage map for --target-coverage sizing. A longer window smooths
+	// seasonal spikes; a shorter one matches a narrow billing-period export
+	// from the AWS console coverage report. Default 30, matching the CE
+	// UI default.
+	CoverageLookbackDays int
+	// RebuyWindowDays, when > 0, treats existing RIs whose remaining term
+	// is at most this many days as already uncovered, so --target-coverage
+	// recommends replacements before they expire. Zero (default) keeps the
+	// strict per-pool subtraction — existing coverage is fully trusted
+	// regardless of when it expires.
+	RebuyWindowDays int
+	// MinPoolSize, when > 0, drops RI recommendations for pools whose
+	// AverageInstancesUsedPerHour is below this threshold. Used to avoid
+	// the integer-arithmetic over-cover problem on tiny pools (avg < 5
+	// can't approximate target=80% without buying enough RIs to hit
+	// 100% coverage). Zero (default) keeps all pools. SPs and recs
+	// without a per-hour signal pass through unfiltered.
+	MinPoolSize float64
 }
 
 func main() {
@@ -86,6 +119,11 @@ func init() {
 	rootCmd.Flags().StringSliceVarP(&toolCfg.Services, "services", "s", []string{"rds"}, "Services to process (rds, elasticache, ec2, opensearch, redshift, memorydb, savingsplans)")
 	rootCmd.Flags().BoolVar(&toolCfg.AllServices, "all-services", false, "Process all supported services")
 	rootCmd.Flags().Float64VarP(&toolCfg.Coverage, "coverage", "c", 80.0, "Percentage of recommendations to purchase (0-100)")
+	rootCmd.Flags().Float64VarP(&toolCfg.TargetCoverage, "target-coverage", "u", 0,
+		"Target % (0-100) of historical avg-hourly usage to cover with commitments. "+
+			"When >0, sizes each rec to floor(avg * target/100) so projected coverage "+
+			"approximates target and projected utilization stays near 100%, leaving "+
+			"(100-target)% on-demand headroom. Overrides --coverage. Default 0 = disabled.")
 	rootCmd.Flags().BoolVar(&toolCfg.ActualPurchase, "purchase", false, "Actually purchase RIs instead of just printing the data")
 	rootCmd.Flags().StringVarP(&toolCfg.CSVOutput, "output", "o", "", "Output CSV file path (if not specified, auto-generates filename)")
 	rootCmd.Flags().StringVarP(&toolCfg.CSVInput, "input-csv", "i", "", "Input CSV file with recommendations to purchase")
@@ -111,171 +149,88 @@ func init() {
 	// Savings Plans specific filters
 	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeSPTypes, "include-sp-types", []string{}, "Only include these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeSPTypes, "exclude-sp-types", []string{}, "Exclude these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
+
+	// Purchase pipeline flags
+	rootCmd.Flags().StringVar(&toolCfg.AuditLog, "audit-log", "./cudly-audit.jsonl", "Path to JSONL audit log file")
+	rootCmd.Flags().BoolVar(&toolCfg.DryRun, "dry-run", true, "Dry-run mode: show what would be purchased without actually buying")
+	rootCmd.Flags().StringVar(&toolCfg.IdempotencyWindow, "idempotency-window", "24h", "Lookback window for duplicate purchase detection")
+	rootCmd.Flags().Float64Var(&toolCfg.MinSavingsPct, "min-savings-pct", 0, "Minimum savings percentage to include a recommendation (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.MaxBreakEvenMonths, "max-break-even-months", 0, "Maximum break-even period in months (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.MinCount, "min-count", 0, "Minimum instance count to include a recommendation (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.CoverageLookbackDays, "coverage-lookback-days", 30,
+		"Number of calendar days of historical demand fed to GetReservationCoverage "+
+			"when computing the existing-RI coverage map for --target-coverage sizing. "+
+			"Match this to your AWS console coverage report window to reconcile "+
+			"CUDly's ExistingCoverage column against the console export. Default 30.")
+	rootCmd.Flags().IntVar(&toolCfg.RebuyWindowDays, "rebuy-window-days", 0,
+		"When >0, treat existing RIs expiring within this many days as already "+
+			"uncovered, so --target-coverage sizes recommendations to replace them "+
+			"before they expire. Default 0 = trust existing coverage fully.")
+	rootCmd.Flags().Float64Var(&toolCfg.MinPoolSize, "min-pool-size", 0,
+		"When >0, drop RI recommendations for pools with AverageInstancesUsedPerHour "+
+			"below this threshold. Useful with --target-coverage to skip tiny pools "+
+			"that integer arithmetic forces above target (e.g. avg=1 cannot hit 80%%). "+
+			"Default 0 = no filter.")
 }
 
 // Package-level Config that cobra flags bind to
 var toolCfg = Config{}
 
-// validateFlags performs validation on command line flags before execution
-func validateFlags(cmd *cobra.Command, args []string) error {
-	// Validate coverage percentage
-	if toolCfg.Coverage < 0 || toolCfg.Coverage > 100 {
-		return fmt.Errorf("coverage percentage must be between 0 and 100, got: %.2f", toolCfg.Coverage)
-	}
+// validateFlags is now defined in validators.go
 
-	// Validate max instances
-	if toolCfg.MaxInstances < 0 {
-		return fmt.Errorf("max-instances must be 0 (no limit) or a positive number, got: %d", toolCfg.MaxInstances)
-	}
-
-	// Validate max instances doesn't exceed reasonable limit
-	if toolCfg.MaxInstances > MaxReasonableInstances {
-		return fmt.Errorf("max-instances (%d) exceeds reasonable limit of %d", toolCfg.MaxInstances, MaxReasonableInstances)
-	}
-
-	// Validate override count
-	if toolCfg.OverrideCount < 0 {
-		return fmt.Errorf("override-count must be 0 (disabled) or a positive number, got: %d", toolCfg.OverrideCount)
-	}
-
-	// Validate override count doesn't exceed reasonable limit
-	if toolCfg.OverrideCount > MaxReasonableInstances {
-		return fmt.Errorf("override-count (%d) exceeds reasonable limit of %d", toolCfg.OverrideCount, MaxReasonableInstances)
-	}
-
-	// Validate payment option
-	validPaymentOptions := map[string]bool{
-		"all-upfront":     true,
-		"partial-upfront": true,
-		"no-upfront":      true,
-	}
-	if !validPaymentOptions[toolCfg.PaymentOption] {
-		return fmt.Errorf("invalid payment option: %s. Must be one of: all-upfront, partial-upfront, no-upfront", toolCfg.PaymentOption)
-	}
-
-	// Validate term years
-	if toolCfg.TermYears != 1 && toolCfg.TermYears != 3 {
-		return fmt.Errorf("invalid term: %d years. Must be 1 or 3", toolCfg.TermYears)
-	}
-
-	// Warn about RDS 3-year no-upfront limitation
-	if toolCfg.PaymentOption == "no-upfront" && toolCfg.TermYears == 3 {
-		services := determineServicesToProcess(toolCfg)
-		hasRDS := false
-		for _, svc := range services {
-			if svc == common.ServiceRDS {
-				hasRDS = true
-				break
-			}
-		}
-		if hasRDS || toolCfg.AllServices {
-			log.Println("⚠️  WARNING: AWS does not offer 3-year no-upfront Reserved Instances for RDS.")
-			log.Println("    RDS 3-year RIs only support: all-upfront, partial-upfront")
-			log.Println("    No RDS recommendations will be found with this combination.")
-		}
-	}
-
-	// Validate CSV output path if provided
-	if toolCfg.CSVOutput != "" {
-		// Check if the directory exists
-		dir := filepath.Dir(toolCfg.CSVOutput)
-		if dir != "." && dir != "" {
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				return fmt.Errorf("output directory does not exist: %s", dir)
-			}
-		}
-	}
-
-	// Validate CSV input path if provided
-	if toolCfg.CSVInput != "" {
-		if _, err := os.Stat(toolCfg.CSVInput); os.IsNotExist(err) {
-			return fmt.Errorf("input CSV file does not exist: %s", toolCfg.CSVInput)
-		}
-		if !strings.HasSuffix(strings.ToLower(toolCfg.CSVInput), ".csv") {
-			return fmt.Errorf("input file must have .csv extension: %s", toolCfg.CSVInput)
-		}
-	}
-
-	// Validate filter flags
-	if len(toolCfg.IncludeRegions) > 0 && len(toolCfg.ExcludeRegions) > 0 {
-		// Check for conflicts
-		for _, inc := range toolCfg.IncludeRegions {
-			for _, exc := range toolCfg.ExcludeRegions {
-				if inc == exc {
-					return fmt.Errorf("region '%s' cannot be both included and excluded", inc)
-				}
-			}
-		}
-	}
-
-	if len(toolCfg.IncludeInstanceTypes) > 0 && len(toolCfg.ExcludeInstanceTypes) > 0 {
-		// Check for conflicts
-		for _, inc := range toolCfg.IncludeInstanceTypes {
-			for _, exc := range toolCfg.ExcludeInstanceTypes {
-				if inc == exc {
-					return fmt.Errorf("instance type '%s' cannot be both included and excluded", inc)
-				}
-			}
-		}
-	}
-
-	if len(toolCfg.IncludeEngines) > 0 && len(toolCfg.ExcludeEngines) > 0 {
-		// Check for conflicts
-		for _, inc := range toolCfg.IncludeEngines {
-			for _, exc := range toolCfg.ExcludeEngines {
-				if inc == exc {
-					return fmt.Errorf("engine '%s' cannot be both included and excluded", inc)
-				}
-			}
-		}
-	}
-
-	// Validate instance types format (basic validation)
-	if err := validateInstanceTypes(toolCfg.IncludeInstanceTypes); err != nil {
-		return fmt.Errorf("invalid include-instance-types: %w", err)
-	}
-	if err := validateInstanceTypes(toolCfg.ExcludeInstanceTypes); err != nil {
-		return fmt.Errorf("invalid exclude-instance-types: %w", err)
-	}
-
-	return nil
-}
-
-// validateInstanceTypes performs basic validation on instance type names
-func validateInstanceTypes(instanceTypes []string) error {
-	if len(instanceTypes) == 0 {
-		return nil
-	}
-	for _, t := range instanceTypes {
-		// Basic format validation: should contain at least one dot
-		if t == "" {
-			return fmt.Errorf("empty instance type")
-		}
-		if !strings.Contains(t, ".") {
-			return fmt.Errorf("invalid instance type format '%s': expected format like 'db.t3.micro'", t)
-		}
-	}
-	return nil
-}
-
-// parseServices converts service names to ServiceType
+// parseServices converts service names to ServiceType. The legacy
+// "savingsplans" / "sp" aliases fan out to all four per-plan-type SP slugs so
+// existing CLI scripts that pass --services savingsplans keep covering every
+// plan type. Specific slugs (savingsplans-compute, etc.) are also accepted for
+// targeted runs.
+//
+// Duplicates are silently dropped via a `seen` set so combinations like
+// `--services savingsplans,savingsplans-compute` don't double-process Compute
+// SP through both the fan-out path and the explicit-slug path.
 func parseServices(serviceNames []string) []common.ServiceType {
 	var result []common.ServiceType
+	seen := make(map[common.ServiceType]struct{})
+	add := func(service common.ServiceType) {
+		if _, ok := seen[service]; ok {
+			return
+		}
+		seen[service] = struct{}{}
+		result = append(result, service)
+	}
+	allSPSlugs := []common.ServiceType{
+		common.ServiceSavingsPlansCompute,
+		common.ServiceSavingsPlansEC2Instance,
+		common.ServiceSavingsPlansSageMaker,
+		common.ServiceSavingsPlansDatabase,
+	}
 	serviceMap := map[string]common.ServiceType{
-		"rds":           common.ServiceRDS,
-		"elasticache":   common.ServiceElastiCache,
-		"ec2":           common.ServiceEC2,
-		"opensearch":    common.ServiceOpenSearch,
-		"elasticsearch": common.ServiceOpenSearch, // Legacy alias maps to OpenSearch
-		"redshift":      common.ServiceRedshift,
-		"memorydb":      common.ServiceMemoryDB,
-		"savingsplans":  common.ServiceSavingsPlans,
-		"sp":            common.ServiceSavingsPlans, // Short alias
+		"rds":                       common.ServiceRDS,
+		"elasticache":               common.ServiceElastiCache,
+		"ec2":                       common.ServiceEC2,
+		"opensearch":                common.ServiceOpenSearch,
+		"elasticsearch":             common.ServiceOpenSearch, // Legacy alias maps to OpenSearch
+		"redshift":                  common.ServiceRedshift,
+		"memorydb":                  common.ServiceMemoryDB,
+		"savingsplans-compute":      common.ServiceSavingsPlansCompute,
+		"savingsplans-ec2instance":  common.ServiceSavingsPlansEC2Instance,
+		"savingsplans-sagemaker":    common.ServiceSavingsPlansSageMaker,
+		"savingsplans-database":     common.ServiceSavingsPlansDatabase,
+		"savings-plans-compute":     common.ServiceSavingsPlansCompute,
+		"savings-plans-ec2instance": common.ServiceSavingsPlansEC2Instance,
+		"savings-plans-sagemaker":   common.ServiceSavingsPlansSageMaker,
+		"savings-plans-database":    common.ServiceSavingsPlansDatabase,
 	}
 
 	for _, name := range serviceNames {
-		if service, ok := serviceMap[strings.ToLower(name)]; ok {
-			result = append(result, service)
+		key := strings.ToLower(name)
+		if key == "savingsplans" || key == "savings-plans" || key == "sp" {
+			for _, service := range allSPSlugs {
+				add(service)
+			}
+			continue
+		}
+		if service, ok := serviceMap[key]; ok {
+			add(service)
 		} else {
 			log.Printf("Warning: Unknown service '%s', skipping", name)
 		}
@@ -293,7 +248,10 @@ func getAllServices() []common.ServiceType {
 		common.ServiceOpenSearch,
 		common.ServiceRedshift,
 		common.ServiceMemoryDB,
-		common.ServiceSavingsPlans,
+		common.ServiceSavingsPlansCompute,
+		common.ServiceSavingsPlansEC2Instance,
+		common.ServiceSavingsPlansSageMaker,
+		common.ServiceSavingsPlansDatabase,
 	}
 }
 
@@ -312,16 +270,64 @@ func createServiceClient(service common.ServiceType, cfg aws.Config) provider.Se
 		return redshift.NewClient(cfg)
 	case common.ServiceMemoryDB:
 		return memorydb.NewClient(cfg)
-	case common.ServiceSavingsPlans:
-		return savingsplans.NewClient(cfg)
+	case common.ServiceSavingsPlansCompute,
+		common.ServiceSavingsPlansEC2Instance,
+		common.ServiceSavingsPlansSageMaker,
+		common.ServiceSavingsPlansDatabase:
+		pt, ok := savingsplans.PlanTypeForServiceType(service)
+		if !ok {
+			return nil
+		}
+		return savingsplans.NewClient(cfg, pt)
 	default:
 		return nil
 	}
 }
 
+// effectiveSizingPct returns the sizing % actually applied to recommendations:
+// cfg.TargetCoverage when set (>0), else cfg.Coverage. Use this when
+// emitting human-facing labels (purchase IDs, audit-log fields) so the label
+// reflects the value that drove the sizing, not the unused default.
+func effectiveSizingPct(cfg Config) float64 {
+	if cfg.TargetCoverage > 0 {
+		return cfg.TargetCoverage
+	}
+	return cfg.Coverage
+}
 
-// generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness
-func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, coverage float64) string {
+// extractEngineLabel returns the engine or platform string from the polymorphic
+// Details field, handling both value and pointer forms. The live parser and the
+// CSV loader store pointers (*DatabaseDetails is required by findOfferingID),
+// while some test callers construct values directly.
+func extractEngineLabel(details interface{}) string {
+	switch d := details.(type) {
+	case common.DatabaseDetails:
+		return d.Engine
+	case *common.DatabaseDetails:
+		if d != nil {
+			return d.Engine
+		}
+	case common.CacheDetails:
+		return d.Engine
+	case *common.CacheDetails:
+		if d != nil {
+			return d.Engine
+		}
+	case common.ComputeDetails:
+		return d.Platform
+	case *common.ComputeDetails:
+		if d != nil {
+			return d.Platform
+		}
+	}
+	return ""
+}
+
+// generatePurchaseID creates a descriptive purchase ID with UUID for uniqueness.
+// sizingPct is the percentage that actually drove the sizing decision (see
+// effectiveSizingPct); it appears in the ID as e.g. "80pct" purely for human
+// readability and audit traceability.
+func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, sizingPct float64) string {
 	// Generate a short UUID suffix (first 8 characters) for uniqueness
 	uuidSuffix := uuid.New().String()[:8]
 	timestamp := time.Now().Format("20060102-150405")
@@ -333,24 +339,15 @@ func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRu
 	service := strings.ToLower(string(rec.Service))
 	instanceType := strings.ReplaceAll(rec.ResourceType, ".", "-")
 
-	// Extract engine information from service details
-	engine := ""
-	switch details := rec.Details.(type) {
-	case common.DatabaseDetails:
-		engine = strings.ToLower(details.Engine)
-		engine = strings.ReplaceAll(engine, " ", "-")
-		engine = strings.ReplaceAll(engine, "_", "-")
-	case common.CacheDetails:
-		engine = strings.ToLower(details.Engine)
-	case common.ComputeDetails:
-		engine = strings.ToLower(details.Platform)
-		engine = strings.ReplaceAll(engine, " ", "-")
-		engine = strings.ReplaceAll(engine, "/", "-")
-	}
+	raw := extractEngineLabel(rec.Details)
+	engine := strings.ToLower(raw)
+	engine = strings.ReplaceAll(engine, " ", "-")
+	engine = strings.ReplaceAll(engine, "_", "-")
+	engine = strings.ReplaceAll(engine, "/", "-")
 
 	// Add account name if available
 	accountName := sanitizeAccountName(rec.AccountName)
-	coveragePct := fmt.Sprintf("%.0fpct", coverage)
+	coveragePct := fmt.Sprintf("%.0fpct", sizingPct)
 	if accountName != "" {
 		if engine != "" {
 			return fmt.Sprintf("%s-%s-%s-%s-%s-%s-%dx-%s-%s-%s",
@@ -384,18 +381,17 @@ func sanitizeAccountName(accountName string) string {
 	clean = strings.ReplaceAll(clean, ".", "-")
 
 	// Remove any characters that aren't alphanumeric or hyphens
-	result := ""
+	var b strings.Builder
 	for _, r := range clean {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			result += string(r)
+			b.WriteRune(r)
 		}
 	}
+	result := b.String()
 
 	// Remove leading/trailing hyphens and collapse multiple hyphens
 	result = strings.Trim(result, "-")
-	for strings.Contains(result, "--") {
-		result = strings.ReplaceAll(result, "--", "-")
-	}
+	result = regexp.MustCompile("-{2,}").ReplaceAllString(result, "-")
 
 	return result
 }

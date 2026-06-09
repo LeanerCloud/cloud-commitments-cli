@@ -8,6 +8,11 @@ cudly
 cmd/cmd
 cmd.test
 
+# Local build output directory at repo root (e.g. `bin/cudly-server` from
+# `go build -o bin/...` in Makefile:45). Anchored with a leading slash so
+# nested bin/ directories elsewhere in the tree are not affected.
+/bin/
+
 # Go build artifacts
 *.exe
 *.exe~
@@ -31,12 +36,20 @@ go.work.sum
 # Dependency directories
 vendor/
 
+# Legacy/dev-notes (local exploration, not for commit)
+.legacy/
+.dev-notes/
+
 # IDE files
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+
+# Environment files
+.env*
+!.env.example
 
 # OS files
 .DS_Store
@@ -56,13 +69,72 @@ MYSQL*.md
 *_SUMMARY.md
 *_INDEX.md
 
-#build artifacts (root-level binaries only)
+#build artifacts (binaries)
 /sanity
 /azure-sanity
 /ri-exchange
+ci_cd_sanity_tests/ri-exchange
 
 #sanity reports / artifacts
 *sanity_report.json
 azure_sanity_report.json
 ri-exchange_*.json
 sanity_report*.json
+
+# Compiled binaries
+cudly-final
+cudly-test
+cleanup-lambda
+/server
+/lambda
+
+# Frontend build artifacts
+frontend/dist/
+frontend/coverage/
+frontend/node_modules/
+
+# Temporary files
+tmp/
+
+# Terraform local config (contain environment-specific settings)
+*.tfvars
+!*.tfvars.example
+*.tfbackend
+backend.hcl
+
+# Terraform plan files
+tfplan
+tfplan.*
+*.tfplan
+*.tfplan.*
+
+# Terraform state and outputs
+terraform-apply-*.txt
+terraform-plan-*.txt
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# PR review swarm output
+PR_review/
+
+# Claude Code / claude-flow framework runtime files (not project source)
+.claude-flow/
+.swarm/
+.mcp.json
+clear-rate-limit
+security-audit-swarm.zip
+security-audit-swarm/
+
+# Per-session Claude Code artefacts under .claude/: commit-message
+# drafts, one-off tmp scripts, project-local memory, known-issues
+# scratch space. Session tooling, not committed code. See
+# ~/.claude/CLAUDE.md §2a (Tool Selection) for the full rationale.
+.claude/
+
+# Generated docs (security runbooks etc.)
+docs/
+
+# Graphify knowledge graph output — regenerated locally, not committed
+graphify-out/

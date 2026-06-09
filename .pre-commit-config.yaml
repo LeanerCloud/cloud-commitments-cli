@@ -1,0 +1,222 @@
+# Pre-commit hooks configuration
+# Install: pip install pre-commit
+# Setup: pre-commit install
+
+repos:
+  # Go formatting and linting
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        name: Run gofmt
+      - id: go-mod-tidy
+        name: Run go mod tidy
+
+  - repo: local
+    hooks:
+      - id: go-vet
+        name: Run go vet
+        entry: bash -c 'go vet ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+  # Terraform formatting
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.105.0
+    hooks:
+      - id: terraform_fmt
+        name: Terraform format
+      - id: terraform_validate
+        name: Terraform validate
+        # Excluded: two orphan modules (not instantiated by any
+        # environment) whose resource bodies use `dynamic` blocks
+        # around scalar attributes — invalid HCL in any azurerm
+        # version. They were silently broken until terraform_validate
+        # started running in CI. Tracked separately; remove the
+        # exclusion as part of that cleanup.
+        exclude: |
+          (?x)^(
+            terraform/modules/compute/azure/cleanup-function/|
+            terraform/modules/registry/azure/
+          )
+      - id: terraform_tflint
+        name: Terraform lint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+      - id: end-of-file-fixer
+        name: Fix end of files
+      - id: check-yaml
+        name: Check YAML syntax
+        exclude: '^(docker-compose.*\.yml|\.github/workflows/.*|cloudformation/.*|iac/.*/cloudformation/.*)$'
+      - id: check-json
+        name: Check JSON syntax
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1024']
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: detect-private-key
+        name: Detect private keys
+        # Audit (PR5): internal/credentials/resolver.go contains zero
+        # private-key-shaped patterns (verified by grep). The exclusion
+        # was a historical artifact; removing it tightens the gate
+        # without breaking any legitimate code.
+        exclude: '(_test\.go|frontend/src/index\.html)$'
+      - id: check-case-conflict
+        name: Check for case conflicts
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.14.0
+    hooks:
+      - id: hadolint-docker
+        name: Lint Dockerfiles
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.47.0
+    hooks:
+      - id: markdownlint
+        name: Lint Markdown files
+        args: ['--fix']
+
+  # Code quality checks
+  - repo: local
+    hooks:
+      - id: gocyclo
+        name: Check cyclomatic complexity
+        entry: bash -c 'gocyclo -over 10 $(git ls-files "*.go" | grep -v _test.go | grep -v vendor/) || (echo "⚠️  Functions with cyclomatic complexity over 10 detected. Please refactor." && exit 1)'
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+  # Security scanning
+  - repo: local
+    hooks:
+      - id: git-secrets
+        name: Scan for AWS secrets
+        entry: git-secrets --scan
+        language: system
+        types: [file]
+
+      - id: gosec
+        name: Go security scanner
+        # Exclusion rationale:
+        # G101: False positives on variable names containing "password/secret/token"
+        # G104: Unchecked errors — covered by go vet and golangci-lint errcheck
+        # G115: Integer overflow — false positives on safe conversions (e.g. int to int32)
+        # G117: Use of unsafe pointer arithmetic — pre-existing in vendor/generated code
+        # G118: net/http serve without timeout — pre-existing; timeouts set at handler level
+        # G122: Use of unsafe operations — pre-existing in low-level helpers
+        # G204: Subprocess launched with variable — CLI tool needs dynamic commands
+        # G301: Directory created with permissions > 0750 — acceptable for dev tooling
+        # G304: File path from variable — CLI tool reads user-specified file paths
+        # G402: TLS MinVersion not set — handled by cloud SDK defaults
+        # G505: Import of crypto/sha1 — not used for security, only checksums
+        # G702: TLS InsecureSkipVerify — pre-existing in test helpers only
+        # G703: Errors unhandled in defer — pre-existing; deferred close errors logged separately
+        # G705: Errors unhandled in goroutine — pre-existing pattern
+        # G706: Errors ignored — pre-existing; covered by go vet errcheck
+        entry: bash -c 'gosec -quiet -exclude-dir=.legacy -exclude-dir=.dev-notes -exclude-dir=vendor -exclude=G101,G104,G115,G117,G118,G122,G204,G301,G304,G402,G505,G702,G703,G705,G706 ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
+
+      - id: trivy-config
+        name: Trivy config scanner
+        # Trivy is a required tool: the previous fallback `|| echo
+        # "skipping"` masked an absent gate, which is worse than no gate.
+        # Install via `brew install trivy` or `apt install trivy`. CI
+        # installs trivy v0.69.3 via the workflow step in
+        # .github/workflows/pre-commit.yml, so PRs are always scanned
+        # regardless of a developer's local setup.
+        entry: bash -c 'trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs terraform/environments/aws --skip-dirs .claude .'
+        language: system
+        pass_filenames: false
+
+  # Migration checks
+  - repo: local
+    hooks:
+      - id: check-migration-conflicts
+        name: Check for conflicting migration numbers
+        entry: bash -c 'dups=$(ls internal/database/postgres/migrations/*.up.sql 2>/dev/null | sed "s/.*\///" | cut -c1-6 | sort | uniq -d); if [ -n "$dups" ]; then echo "Duplicate migration number(s) found:"; echo "$dups"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        files: ^internal/database/postgres/migrations/
+
+  # Permissions codegen: regenerate frontend/src/permissions.generated.ts
+  # from internal/auth/types.go and fail if the committed copy is stale.
+  # Triggers on changes to the backend defaults or the generator itself,
+  # plus the generated file (in case a dev hand-edits it).
+  - repo: local
+    hooks:
+      - id: permissions-codegen
+        name: Regenerate frontend permissions from Go defaults
+        entry: bash -c 'go run ./cmd/gen-permissions && git diff --exit-code -- frontend/src/permissions.generated.ts || { echo "permissions.generated.ts is stale. Run go run ./cmd/gen-permissions and commit the result."; exit 1; }'
+        language: system
+        pass_filenames: false
+        files: ^(internal/auth/types\.go|cmd/gen-permissions/.*\.go|frontend/src/permissions\.generated\.ts)$
+
+  # Heavy test execution: pre-push stage only.
+  #
+  # These three hooks rebuild + run the full Go and frontend test suites,
+  # which is ~6-7 min of work and the bulk of the CI pre-commit job's
+  # runtime. They are *redundant in CI* — the same suites are run by
+  # dedicated workflows that PRs and pushes already trigger:
+  #
+  #   - go-test (-short -race ./...)  : ci.yml `unit-tests` runs the same
+  #                                     suite with -race AND an integration
+  #                                     pass with -tags=integration.
+  #   - frontend-build (npm run build): frontend-build.yml runs npm run
+  #                                     typecheck + npm run build on PRs;
+  #                                     frontend-build-sentinel.yml runs
+  #                                     the build on every push to main /
+  #                                     feat/**.
+  #   - frontend-test (jest)          : frontend-build-sentinel.yml runs
+  #                                     `npx jest --no-coverage --silent`
+  #                                     on every push to feat/** (which
+  #                                     fires on every PR-branch update).
+  #
+  # Moving them to the pre-push stage keeps the local safety net (devs
+  # who run `pre-commit install --hook-type pre-push` still get these
+  # tests on `git push`) while letting the CI pre-commit workflow stay
+  # focused on style/security/syntax. Pre-commit's default stage filter
+  # is `pre-commit`, so the CI workflow's `pre-commit run --all-files`
+  # skips these hooks automatically.
+  - repo: local
+    hooks:
+      - id: go-test
+        name: Run Go tests (pre-push only; CI covers via ci.yml)
+        entry: bash -c 'go test -short -race ./...'
+        language: system
+        pass_filenames: false
+        files: \.go$
+        stages: [pre-push]
+
+      - id: frontend-build
+        name: Build frontend (pre-push only; CI covers via frontend-build.yml)
+        entry: bash -c 'cd frontend && npm run build'
+        language: system
+        pass_filenames: false
+        files: ^frontend/src/
+        stages: [pre-push]
+
+      - id: frontend-test
+        name: Run frontend tests (pre-push only; CI covers via frontend-build-sentinel.yml)
+        entry: bash -c 'cd frontend && npx jest --no-coverage --silent'
+        language: system
+        pass_filenames: false
+        files: ^frontend/src/
+        stages: [pre-push]
+
+# Global configuration
+default_stages: [pre-commit, pre-push]
+fail_fast: false
