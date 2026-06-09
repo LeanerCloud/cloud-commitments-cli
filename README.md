@@ -469,8 +469,7 @@ no separate web server process.
 
 ### Capabilities and limitations
 
-The web interface is part of the `feat/multicloud-web-frontend` branch and is
-not yet merged to `main`. The dashboard is operational for AWS workloads; Azure
+The web interface is included in `main`. The dashboard is operational for AWS workloads; Azure
 and GCP support in the web UI follows the same maturity as the CLI providers
 (both are experimental). Specifically:
 
