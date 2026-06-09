@@ -240,7 +240,12 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          terraform_version: 1.6.0
+          # Must satisfy `required_version = ">= 1.10.0"` declared by every
+          # terraform/environments/*/main.tf -- pinning below 1.10 makes
+          # `terraform init`/`validate` abort with "Unsupported Terraform
+          # Core version". Matches the pin in pre-commit.yml so both
+          # workflows resolve to the same binary.
+          terraform_version: 1.10.5
 
       - name: Terraform Format Check
         run: terraform fmt -check -recursive terraform/
