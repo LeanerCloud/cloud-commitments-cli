@@ -623,11 +623,10 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 
 ### Areas for Contribution
 
-- Additional AWS services (Lambda, DynamoDB, etc.)
+- Additional commitment-eligible services (any provider service that offers reserved capacity, savings plans, or committed-use discounts)
 - Azure and GCP service implementations
 - Enhanced reporting and analytics
 - Web UI dashboard
-- Terraform/CloudFormation integration
 
 ## License
 
