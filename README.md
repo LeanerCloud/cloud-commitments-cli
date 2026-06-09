@@ -38,6 +38,9 @@ CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS
 | Azure Cache for Redis | Reserved Capacity |
 | Azure Cosmos DB | Reserved Capacity |
 | Azure Cognitive Search | Reserved Capacity |
+| Azure Managed Redis | Reserved Capacity |
+| Azure Savings Plans | Hourly Commitments |
+| Azure Synapse Analytics | Reserved Capacity |
 
 ### GCP Services (Experimental)
 
@@ -46,7 +49,6 @@ CUDly is a comprehensive CLI tool for managing cloud cost commitments across AWS
 | Compute Engine | Committed Use Discounts |
 | Cloud SQL | Committed Use Discounts |
 | Memorystore | Committed Use Discounts |
-| Cloud Storage | Committed Use Discounts |
 
 ### AWS CLI Support Matrix
 
