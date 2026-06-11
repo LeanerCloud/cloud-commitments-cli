@@ -480,6 +480,25 @@ jobs:
       - name: Run parity script self-tests
         run: bash scripts/test-azure-role-parity.sh
 
+  # Assert that the AWS IAM action lists are identical across the CFN stack,
+  # the TF lambda/fargate modules, and the federation CFN/TF/CLI templates.
+  # Fast (shell only), so it always runs.
+  aws-iam-parity:
+    name: AWS IAM actions parity (CFN vs TF)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert CFN/TF actions parity
+        run: bash scripts/check-aws-iam-parity.sh
+
+      - name: Run parity script self-tests
+        run: bash scripts/test-aws-iam-parity.sh
+
   # Summary job - all checks must pass
   ci-success:
     name: CI Success
@@ -493,6 +512,7 @@ jobs:
       - security-scan
       - e2e-tests
       - azure-role-parity
+      - aws-iam-parity
     if: always()
 
     steps:
