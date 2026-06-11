@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRunToolMultiService_Validation(t *testing.T) {
@@ -1591,148 +1595,223 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 	}
 }
 
+// isolateAWSEnv pins the AWS environment to deterministic invalid static
+// credentials so the runToolFromCSV tests behave identically on credentialed
+// developer machines and bare CI runners: config loading succeeds, every
+// outbound AWS API call fails and takes the warn-and-continue path, and no
+// real account is ever touched.
+func isolateAWSEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("AWS_ACCESS_KEY_ID", "invalid-test-key-id")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "invalid-test-secret")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_CONFIG_FILE", os.DevNull)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", os.DevNull)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+}
+
+// readPurchaseReport parses the CSV purchase report written by runToolFromCSV
+// and returns the header plus per-purchase data rows. The trailing TOTAL
+// summary row is skipped, mirroring loadRecommendationsFromCSV.
+func readPurchaseReport(t *testing.T, path string) ([]string, [][]string) {
+	t.Helper()
+	f, err := os.Open(path)
+	require.NoError(t, err, "runToolFromCSV must write the purchase report")
+	defer func() { _ = f.Close() }()
+	rows, err := csv.NewReader(f).ReadAll()
+	require.NoError(t, err)
+	require.NotEmpty(t, rows, "purchase report must contain a header row")
+	dataRows := make([][]string, 0, len(rows)-1)
+	for _, row := range rows[1:] {
+		if len(row) > 0 && row[0] == "TOTAL" {
+			continue
+		}
+		dataRows = append(dataRows, row)
+	}
+	return rows[0], dataRows
+}
+
+// reportColumn returns the values of the named column across all data rows.
+func reportColumn(t *testing.T, header []string, rows [][]string, name string) []string {
+	t.Helper()
+	idx := -1
+	for i, col := range header {
+		if col == name {
+			idx = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, idx, "column %s missing from purchase report header", name)
+	vals := make([]string, 0, len(rows))
+	for _, row := range rows {
+		vals = append(vals, row[idx])
+	}
+	return vals
+}
+
+// writeTestRecommendationsCSV writes a recommendations CSV into a temp dir
+// and returns its path.
+func writeTestRecommendationsCSV(t *testing.T, csvData string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "recommendations.csv")
+	require.NoError(t, os.WriteFile(path, []byte(csvData), 0o600))
+	return path
+}
+
 func TestRunToolFromCSV(t *testing.T) {
-	// Save original values
 	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
 
-	defer func() {
-		toolCfg = origCfg
-	}()
-
-	// Create a temporary CSV file for testing
-	tmpFile, err := os.CreateTemp("", "test_recommendations_*.csv")
-	assert.NoError(t, err)
-	defer func() { _ = os.Remove(tmpFile.Name()) }()
-
-	// Write test CSV data
-	csvData := `Service,Region,Engine,Instance Type,Payment Option,Term (months),Instance Count,Account ID
-rds,us-east-1,postgres,db.t3.small,All Upfront,12,2,123456789012
-elasticache,us-west-2,redis,cache.t3.micro,All Upfront,12,1,123456789012
-`
-	_, err = tmpFile.WriteString(csvData)
-	assert.NoError(t, err)
-	_ = tmpFile.Close()
+	// Column names match writeMultiServiceCSVReport's header (the real
+	// round-trip shape). The previous fixture used headers the parser
+	// silently ignored, so every row loaded with Count=0 and the whole run
+	// processed nothing while the NotPanics assertion stayed green.
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
+elasticache,us-west-2,cache.t3.micro,redis,1,1yr,All Upfront,123456789012
+`)
 
 	tests := []struct {
-		setupConfig  func()
-		validateFunc func(t *testing.T)
-		name         string
-		expectPanic  bool
+		name              string
+		coverage          float64
+		wantResourceTypes []string
+		wantCounts        []string
 	}{
 		{
-			name: "Dry run mode",
-			setupConfig: func() {
-				toolCfg.CSVInput = tmpFile.Name()
-				toolCfg.ActualPurchase = false
-				toolCfg.Coverage = 100.0
-				toolCfg.MaxInstances = 0
-			},
-			expectPanic: false,
+			// 100% coverage keeps both recommendations at their CSV counts.
+			name:              "Dry run writes a report row per recommendation",
+			coverage:          100.0,
+			wantResourceTypes: []string{"db.t3.small", "cache.t3.micro"},
+			wantCounts:        []string{"2", "1"},
 		},
 		{
-			name: "With coverage adjustment",
-			setupConfig: func() {
-				toolCfg.CSVInput = tmpFile.Name()
-				toolCfg.ActualPurchase = false
-				toolCfg.Coverage = 50.0
-				toolCfg.MaxInstances = 0
-			},
-			expectPanic: false,
+			// 50% coverage halves db.t3.small (2 -> 1) and drops
+			// cache.t3.micro (1 -> 0).
+			name:              "Coverage sizing is applied before the purchase loop",
+			coverage:          50.0,
+			wantResourceTypes: []string{"db.t3.small"},
+			wantCounts:        []string{"1"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.setupConfig()
+			reportPath := filepath.Join(t.TempDir(), "report.csv")
+			toolCfg.CSVInput = csvPath
+			toolCfg.CSVOutput = reportPath
+			toolCfg.ActualPurchase = false
+			toolCfg.Coverage = tt.coverage
+			toolCfg.TargetCoverage = 0
+			toolCfg.MaxInstances = 0
+			toolCfg.OverrideCount = 0
 
-			// Suppress logger
-			// Logger output disabled for testing
+			err := runToolFromCSV(context.Background(), toolCfg)
+			require.NoError(t, err)
 
-			ctx := context.Background()
-
-			if tt.expectPanic {
-				assert.Panics(t, func() {
-					runToolFromCSV(ctx, toolCfg)
-				})
-			} else {
-				// Just verify it doesn't panic - actual purchase testing requires AWS mocks
-				assert.NotPanics(t, func() {
-					runToolFromCSV(ctx, toolCfg)
-				})
+			header, rows := readPurchaseReport(t, reportPath)
+			assert.ElementsMatch(t, tt.wantResourceTypes, reportColumn(t, header, rows, "ResourceType"))
+			assert.ElementsMatch(t, tt.wantCounts, reportColumn(t, header, rows, "Count"))
+			for _, success := range reportColumn(t, header, rows, "Success") {
+				assert.Equal(t, "true", success, "dry-run purchases must be recorded as successful")
 			}
 		})
 	}
 }
 
+// TestRunToolFromCSV_NonExistentFile asserts the unreadable-input error path
+// surfaces as an error (previously log.Fatalf, which made it untestable).
 func TestRunToolFromCSV_NonExistentFile(t *testing.T) {
-	// This test is skipped because runToolFromCSV calls log.Fatalf on file errors,
-	// which causes os.Exit and cannot be caught in tests.
-	// The error handling path is exercised in integration tests.
-	t.Skip("Skipping test that calls log.Fatalf - cannot be tested in unit tests")
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+
+	toolCfg.CSVInput = filepath.Join(t.TempDir(), "does-not-exist.csv")
+	toolCfg.ActualPurchase = false
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read CSV file")
+	assert.Contains(t, err.Error(), "failed to open CSV file")
 }
 
+// TestRunToolFromCSV_EmptyFile asserts a CSV without a header row is rejected
+// with a parse error rather than being silently treated as zero rows.
 func TestRunToolFromCSV_EmptyFile(t *testing.T) {
-	// This test is skipped because runToolFromCSV calls log.Fatalf on CSV parsing errors,
-	// which causes os.Exit and cannot be caught in tests.
-	t.Skip("Skipping test that calls log.Fatalf - cannot be tested in unit tests")
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+
+	toolCfg.CSVInput = writeTestRecommendationsCSV(t, "")
+	toolCfg.ActualPurchase = false
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read CSV file")
+	assert.Contains(t, err.Error(), "failed to read CSV header")
 }
 
 func TestRunToolFromCSV_WithMaxInstances(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
 
-	// Create a CSV file with multiple recommendations
-	tmpFile, err := os.CreateTemp("", "test_max_instances_*.csv")
-	assert.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,10,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,mysql,10,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.large,postgres,10,1yr,All Upfront,123456789012
+`)
 
-	csvData := `Service,Region,Engine,Instance Type,Payment Option,Term (months),Instance Count,Account ID
-rds,us-east-1,postgres,db.t3.small,All Upfront,12,10,123456789012
-rds,us-east-1,mysql,db.t3.medium,All Upfront,12,10,123456789012
-rds,us-east-1,postgres,db.t3.large,All Upfront,12,10,123456789012
-`
-	_, err = tmpFile.WriteString(csvData)
-	assert.NoError(t, err)
-	tmpFile.Close()
-
-	toolCfg.CSVInput = tmpFile.Name()
+	reportPath := filepath.Join(t.TempDir(), "report.csv")
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = reportPath
 	toolCfg.ActualPurchase = false
 	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.OverrideCount = 0
 	toolCfg.MaxInstances = 15 // Should limit total instances to 15
 
-	ctx := context.Background()
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
 
-	assert.NotPanics(t, func() {
-		runToolFromCSV(ctx, toolCfg)
-	})
+	header, rows := readPurchaseReport(t, reportPath)
+	total := 0
+	for _, raw := range reportColumn(t, header, rows, "Count") {
+		n, convErr := strconv.Atoi(raw)
+		require.NoError(t, convErr)
+		total += n
+	}
+	assert.Positive(t, total, "some instances must survive the max-instances cap")
+	assert.LessOrEqual(t, total, 15, "purchased instance total must respect --max-instances")
 }
 
 func TestRunToolFromCSV_WithOverrideCount(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
 
-	tmpFile, err := os.CreateTemp("", "test_override_*.csv")
-	assert.NoError(t, err)
-	defer os.Remove(tmpFile.Name())
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,10,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,mysql,5,1yr,All Upfront,123456789012
+`)
 
-	csvData := `Service,Region,Engine,Instance Type,Payment Option,Term (months),Instance Count,Account ID
-rds,us-east-1,postgres,db.t3.small,All Upfront,12,10,123456789012
-rds,us-east-1,mysql,db.t3.medium,All Upfront,12,5,123456789012
-`
-	_, err = tmpFile.WriteString(csvData)
-	assert.NoError(t, err)
-	tmpFile.Close()
-
-	toolCfg.CSVInput = tmpFile.Name()
+	reportPath := filepath.Join(t.TempDir(), "report.csv")
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = reportPath
 	toolCfg.ActualPurchase = false
 	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.MaxInstances = 0
 	toolCfg.OverrideCount = 3 // Override each recommendation to count=3
 
-	ctx := context.Background()
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
 
-	assert.NotPanics(t, func() {
-		runToolFromCSV(ctx, toolCfg)
-	})
+	header, rows := readPurchaseReport(t, reportPath)
+	counts := reportColumn(t, header, rows, "Count")
+	require.Len(t, counts, 2, "both recommendations must reach the purchase loop")
+	for _, raw := range counts {
+		assert.Equal(t, "3", raw, "--override-count must replace every recommendation count")
+	}
 }
 
 // ==================== Tests for adjustRecommendationForExcludedVersions ====================
