@@ -9,13 +9,23 @@ CUDly is designed to be safe by default. Real purchases require multiple explici
 --purchase  bool   default: false
 ```
 
-The actual purchase decision is computed as:
+There are two code paths with different rules:
 
-```text
-isDryRun = !ActualPurchase || DryRun
-```
+- **Cloud-fetch mode** (the default, recommendations fetched from the cloud APIs):
 
-In plain terms:
+  ```text
+  isDryRun = !ActualPurchase || DryRun
+  ```
+
+- **CSV input mode** (`--input-csv`): `--dry-run` is **ignored**:
+
+  ```text
+  isDryRun = !ActualPurchase
+  ```
+
+  In CSV mode, `--purchase` alone is enough to execute real purchases.
+
+In plain terms, for cloud-fetch mode:
 
 | `--purchase` | `--dry-run` | Result |
 |---|---|---|
@@ -24,14 +34,19 @@ In plain terms:
 | `true` | `false` | Real purchases |
 | (not set / false) | `false` | Dry run - `ActualPurchase` is false, so `isDryRun` stays true |
 
-The footgun: passing `--purchase` alone is not sufficient. You must also pass `--dry-run=false` (or explicitly `--no-dry-run` in shells that support that form). This is intentional - two flags must be flipped to move money.
+The footgun: in cloud-fetch mode, passing `--purchase` alone is not sufficient - you must also pass `--dry-run=false`. This is intentional: two flags must be flipped to move money.
+
+The reverse footgun: in `--input-csv` mode the two-flag protection does not apply. `--purchase` alone performs real purchases, and `--dry-run` has no effect. Treat any CSV-mode invocation that includes `--purchase` as a real purchase run.
 
 ```bash
-# Correct way to execute real purchases:
+# Correct way to execute real purchases (cloud-fetch mode):
 cudly --services rds --purchase --dry-run=false
 
 # Still a dry run (--dry-run defaults to true):
 cudly --services rds --purchase
+
+# CSV mode: this executes REAL purchases (--dry-run is ignored):
+cudly --input-csv recs.csv --purchase
 ```
 
 ## Confirmation prompt: --yes
@@ -58,7 +73,7 @@ Every recommendation - whether purchased or dry-run - is written as a JSON line 
 - Run ID (UUID that groups all purchases in a single invocation)
 - Recommendation details (service, region, instance type, count, term, payment)
 - Purchase result (success/failure, commitment ID, error message)
-- Audit status (`skipped` for dry-run, `success` or `error` for real purchases)
+- Audit status (`skipped` for dry-run, `skipped_covered` for idempotency hits where an equivalent commitment was already purchased within the window, `success` or `error` for real purchases)
 - Whether the run was a dry run
 - Purchase source (`cli`)
 

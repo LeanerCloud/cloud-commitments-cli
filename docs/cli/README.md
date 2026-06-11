@@ -1,8 +1,8 @@
 # CUDly CLI Reference
 
-This section documents the full CLI surface of the `cudly` binary (shipped as `ri-helper` in some builds). Three cobra commands are available:
+This section documents the full CLI surface of the `cudly` binary. The Makefile builds it as `cudly`, while the cobra root command is named `ri-helper` (a legacy name that still appears in `--help` output and in auto-generated CSV filenames). Three cobra commands are available:
 
-- **root** (`cudly`) - the main RI/SP analysis and purchase command
+- **root** (`ri-helper`, invoked via the `cudly` binary) - the main RI/SP analysis and purchase command
 - **configure-azure** - bootstrap Azure Service Principal credentials
 - **configure-gcp** - bootstrap GCP Service Account credentials
 
@@ -26,7 +26,7 @@ All flags belong to the root command unless noted otherwise.
 |------|-------|---------|-------------|
 | `--services` | `-s` | `rds` | Comma-separated list of services to process. Valid values: `rds`, `elasticache`, `ec2`, `opensearch`, `redshift`, `memorydb`, `savingsplans` (fans out to all four SP types), `savingsplans-compute`, `savingsplans-ec2instance`, `savingsplans-sagemaker`, `savingsplans-database`. The legacy alias `elasticsearch` maps to `opensearch`. |
 | `--all-services` | | `false` | Process all supported services; equivalent to listing every service in `--services`. |
-| `--regions` | `-r` | (auto-discover) | AWS regions to process (comma-separated or repeated). When empty, cudly auto-discovers regions from Cost Explorer recommendations. The `--include-regions` / `--exclude-regions` scoping filters are applied on top of the resulting set (see [filtering.md](filtering.md)). |
+| `--regions` | `-r` | (all opted-in regions) | AWS regions to process (comma-separated or repeated). When empty, cudly enumerates all opted-in AWS regions via EC2 `DescribeRegions`; only if that listing fails does it fall back to discovering regions from Cost Explorer recommendations. Savings Plans are account-level, so with `--regions` empty they are always queried once via `us-east-1`. The `--include-regions` / `--exclude-regions` scoping filters are applied to the fetched recommendations afterwards (see [filtering.md](filtering.md)). |
 
 ### Coverage and sizing
 
@@ -49,8 +49,8 @@ All flags belong to the root command unless noted otherwise.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--dry-run` | | `true` | Show what would be purchased without buying. See [purchase-safety.md](purchase-safety.md) for the interaction with `--purchase`. |
-| `--purchase` | | `false` | Execute real purchases. Must be combined with `--dry-run=false` (or not set, since `--purchase` alone sets `ActualPurchase=true` but `DryRun` stays `true` unless explicitly overridden). See [purchase-safety.md](purchase-safety.md). |
+| `--dry-run` | | `true` | Show what would be purchased without buying. **Ignored in `--input-csv` mode**, where the dry-run decision is `!ActualPurchase` (i.e. only `--purchase` matters). See [purchase-safety.md](purchase-safety.md) for the interaction with `--purchase`. |
+| `--purchase` | | `false` | Execute real purchases. In the normal cloud-fetch path it must be combined with `--dry-run=false` (`--purchase` alone sets `ActualPurchase=true` but `DryRun` stays `true`, so the run remains a dry run). **Exception:** in `--input-csv` mode `--dry-run` is ignored and `--purchase` alone executes real purchases. See [purchase-safety.md](purchase-safety.md). |
 | `--yes` | | `false` | Skip the interactive confirmation prompt. Use with caution in automation. |
 | `--audit-log` | | `./cudly-audit.jsonl` | Path to the JSONL audit log file. Written for every recommendation (dry-run and real). See [purchase-safety.md](purchase-safety.md). |
 | `--idempotency-window` | | `24h` | Lookback window for duplicate purchase detection. Any commitment purchased within this window is subtracted from new recommendations. See [purchase-safety.md](purchase-safety.md). |
@@ -90,7 +90,7 @@ All flags belong to the root command unless noted otherwise.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--output` | `-o` | auto-generated | Output CSV file path. Auto-name format: `cudly-dryrun-YYYYMMDD-HHMMSS.csv` or `cudly-purchase-YYYYMMDD-HHMMSS.csv`. |
+| `--output` | `-o` | auto-generated | Output CSV file path. Auto-name format: `ri-helper-dryrun-YYYYMMDD-HHMMSS.csv` or `ri-helper-purchase-YYYYMMDD-HHMMSS.csv`. |
 | `--input-csv` | `-i` | (none) | Read recommendations from an existing CSV instead of fetching from cloud APIs. The file must have a `.csv` extension and exist at the path given. |
 
 ### Authentication

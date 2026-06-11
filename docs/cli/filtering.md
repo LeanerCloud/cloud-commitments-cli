@@ -37,7 +37,7 @@ cudly --services rds --exclude-accounts sandbox
 --exclude-regions  Exclude recommendations for these AWS regions (comma-separated)
 ```
 
-When `--regions` is omitted, cudly auto-discovers regions from Cost Explorer recommendations. `--include-regions` and `--exclude-regions` are applied as a post-discovery filter on the returned recommendations, not as a discovery constraint.
+When `--regions` is omitted, cudly enumerates all opted-in AWS regions via EC2 `DescribeRegions` and queries each of them; discovering regions from Cost Explorer recommendations is only a fallback used when that region listing fails. (Savings Plans are account-level and are always queried once via `us-east-1` when `--regions` is empty.) `--include-regions` and `--exclude-regions` are applied afterwards as a filter on the fetched recommendations (matching each recommendation's region), so they reduce the results but do not change which regions are queried. If both `--regions` and `--include-regions` are set, the queried regions come from `--regions` and the results are then narrowed by the include/exclude lists.
 
 ```bash
 # Only US and EU recommendations
@@ -71,7 +71,7 @@ cudly --services rds --exclude-engines mysql
 --exclude-instance-types  Exclude these instance types (comma-separated)
 ```
 
-Instance type strings must contain a `.` separator (e.g. `db.t3.micro`). cudly validates the format at startup. You can use partial prefixes for simple family exclusions.
+Instance type strings must contain a `.` separator (e.g. `db.t3.micro`). cudly validates the format at startup. Matching is by exact string equality - prefix or family matching is not supported, so every instance type you want included or excluded must be listed in full (e.g. `db.t2.micro,db.t2.small`, not `db.t2`).
 
 ```bash
 # Only modern graviton RDS instances
