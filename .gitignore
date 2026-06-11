@@ -135,10 +135,12 @@ security-audit-swarm/
 # ~/.claude/CLAUDE.md §2a (Tool Selection) for the full rationale.
 .claude/
 
-# Generated docs (security runbooks etc.) and scratch/review files.
-# docs/cli/ is explicitly tracked; all other docs/ subdirectories are ignored.
-docs/*
-!docs/cli
+# Generated docs (security runbooks etc.). Only the generated output
+# directory is ignored; hand-written documentation under docs/ is
+# tracked normally (e.g. docs/DEPLOYMENT.md, docs/DEVELOPMENT.md, and the
+# docs/cli/ CLI reference). Do not re-add a blanket docs/* ignore: it
+# silently hid hand-written docs, which is the regression this narrows away.
+docs/generated/
 
 # Graphify knowledge graph output — regenerated locally, not committed
 graphify-out/
