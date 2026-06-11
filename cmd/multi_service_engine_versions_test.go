@@ -604,6 +604,43 @@ func TestIsInExtendedSupport(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:    "Extended support already ended",
+			engine:  "mysql",
+			version: "5.7.44",
+			versionInfo: map[string]MajorEngineVersionInfo{
+				"mysql:5.7": {
+					Engine:             "mysql",
+					MajorEngineVersion: "5.7",
+					SupportedEngineLifecycles: []EngineLifecycleInfo{
+						{
+							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportStartDate: now.AddDate(-3, 0, 0),
+							LifecycleSupportEndDate:   pastDate,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name:    "Zero end date treated as open-ended",
+			engine:  "mysql",
+			version: "5.7.44",
+			versionInfo: map[string]MajorEngineVersionInfo{
+				"mysql:5.7": {
+					Engine:             "mysql",
+					MajorEngineVersion: "5.7",
+					SupportedEngineLifecycles: []EngineLifecycleInfo{
+						{
+							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportStartDate: pastDate,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
 			name:    "Engine name normalization with spaces",
 			engine:  "Aurora MySQL",
 			version: "5.7.mysql_aurora.2.11.1",
