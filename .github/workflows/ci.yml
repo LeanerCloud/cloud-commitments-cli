@@ -306,7 +306,7 @@ jobs:
           # so scanning the root would silently miss pkg/ and providers/*.
           # Walk every module independently and fail on any HIGH/CRITICAL.
           set -e
-          for mod in . pkg providers/aws providers/azure providers/gcp; do
+          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
             echo "==> govulncheck in $mod"
             (cd "$mod" && govulncheck ./...)
           done
@@ -372,13 +372,13 @@ jobs:
         with:
           args: --severity-threshold=high
 
-  # Docker Compose E2E tests
-  # NOTE: Dockerfile.test and docker-compose.test.yml are not yet implemented.
-  # continue-on-error prevents this unimplemented job from blocking the ci-success gate.
+  # Docker Compose E2E tests: build the app + test-runner images, bring up
+  # postgres + cudly-app, then run the black-box suite in tests/e2e against
+  # the app over HTTP. The test-runner service is profile-gated, so every
+  # compose invocation needs --profile test (issue #1180).
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout code
@@ -389,20 +389,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Build test image
+      - name: Build images
         run: |
-          docker build -t cudly:test -f Dockerfile.test .
+          docker compose -f docker-compose.test.yml --profile test build
 
-      - name: Run E2E tests with docker-compose
+      - name: Run E2E tests with docker compose
         run: |
-          docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
+          docker compose -f docker-compose.test.yml --profile test up --abort-on-container-exit --exit-code-from test-runner
         env:
           COMPOSE_INTERACTIVE_NO_CLI: 1
 
       - name: Cleanup
         if: always()
         run: |
-          docker compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml --profile test down -v
 
   # Assert that the Azure custom-role actions list is identical in the TF module
   # and the ARM onboarding template.  Fast (shell + jq only), so it always runs.

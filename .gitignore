@@ -22,6 +22,8 @@ cmd.test
 
 # Test binary, built with `go test -c`
 *.test
+# ... but not the E2E test-runner image definition
+!Dockerfile.test
 
 # Output of the go coverage tool
 *.out
