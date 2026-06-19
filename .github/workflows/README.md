@@ -342,6 +342,14 @@ gh workflow run database-migration.yml \
   -f direction=down \
   -f steps=2
 
+# Rollback 1 migration on AWS prod (requires typed confirmation)
+gh workflow run database-migration.yml \
+  -f cloud=aws \
+  -f environment=prod \
+  -f direction=down \
+  -f steps=1 \
+  -f confirm=rollback-prod
+
 # Apply to all clouds
 gh workflow run database-migration.yml \
   -f cloud=all \
@@ -351,10 +359,11 @@ gh workflow run database-migration.yml \
 
 ### Safety Features
 
-- **Validation** - Checks migration files exist
-- **Production Warnings** - Warns on prod down migrations
-- **Audit Trail** - Records all migrations
-- **Step Control** - Apply specific number of migrations
+- **Validation** - Checks migration files exist before running
+- **Explicit steps required** - `direction=down` requires an explicit positive `steps` value; `steps=0` (the default, which would run `down -all` and drop the entire schema) is rejected
+- **Production confirmation** - `direction=down` on `environment=prod` additionally requires typing `rollback-prod` in the `confirm` input; omitting or mistyping it blocks the run
+- **Defense in depth** - each migrate job independently re-validates the positive-steps constraint, so a future validate regression cannot reach `down -all`
+- **Audit Trail** - Records all migrations in the step summary
 
 ---
 
