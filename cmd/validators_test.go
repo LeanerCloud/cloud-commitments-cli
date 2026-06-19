@@ -87,6 +87,52 @@ func TestValidateNumericRanges(t *testing.T) {
 			wantErr: true,
 			errMsg:  "override-count",
 		},
+		{
+			name: "min-pool-size negative",
+			setupFunc: func() {
+				toolCfg.Coverage = 80.0
+				toolCfg.MaxInstances = 0
+				toolCfg.OverrideCount = 0
+				toolCfg.CoverageLookbackDays = 30
+				toolCfg.MinPoolSize = -1.0
+			},
+			wantErr: true,
+			errMsg:  "min-pool-size must be 0 (disabled) or a positive whole number",
+		},
+		{
+			name: "min-pool-size fractional rejected",
+			setupFunc: func() {
+				toolCfg.Coverage = 80.0
+				toolCfg.MaxInstances = 0
+				toolCfg.OverrideCount = 0
+				toolCfg.CoverageLookbackDays = 30
+				toolCfg.MinPoolSize = 1.5
+			},
+			wantErr: true,
+			errMsg:  "min-pool-size must be a whole number",
+		},
+		{
+			name: "min-pool-size disabled (zero)",
+			setupFunc: func() {
+				toolCfg.Coverage = 80.0
+				toolCfg.MaxInstances = 0
+				toolCfg.OverrideCount = 0
+				toolCfg.CoverageLookbackDays = 30
+				toolCfg.MinPoolSize = 0
+			},
+			wantErr: false,
+		},
+		{
+			name: "min-pool-size whole number accepted",
+			setupFunc: func() {
+				toolCfg.Coverage = 80.0
+				toolCfg.MaxInstances = 0
+				toolCfg.OverrideCount = 0
+				toolCfg.CoverageLookbackDays = 30
+				toolCfg.MinPoolSize = 2.0
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {

@@ -434,7 +434,7 @@ func TestShouldIncludePoolSize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := common.Recommendation{AverageInstancesUsedPerHour: tt.avg}
 			cfg := Config{MinPoolSize: tt.minPool}
-			assert.Equal(t, tt.expected, shouldIncludePoolSize(rec, cfg))
+			assert.Equal(t, tt.expected, shouldIncludePoolSize(&rec, &cfg))
 		})
 	}
 }
@@ -462,7 +462,7 @@ func TestApplyFilters_PoolSizeLogs(t *testing.T) {
 	}
 	cfg := Config{MinPoolSize: 2.0}
 
-	result := applyFilters(recs, cfg, nil, nil, "")
+	result := applyFilters(recs, &cfg, nil, nil, "")
 
 	// Only the rec above threshold passes through.
 	assert.Len(t, result, 1)
