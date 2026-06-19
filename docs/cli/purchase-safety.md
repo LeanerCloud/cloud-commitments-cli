@@ -73,7 +73,7 @@ Every recommendation - whether purchased or dry-run - is written as a JSON line 
 - Run ID (UUID that groups all purchases in a single invocation)
 - Recommendation details (service, region, instance type, count, term, payment)
 - Purchase result (success/failure, commitment ID, error message)
-- Audit status (`skipped` for dry-run, `skipped_covered` for idempotency hits where an equivalent commitment was already purchased within the window, `success` or `error` for real purchases)
+- Audit status (`skipped` for dry-run, `success` or `error` for real purchases; `skipped_covered` is defined in the schema for server-side idempotency hits but is not emitted by the CLI path)
 - Whether the run was a dry run
 - Purchase source (`cli`)
 
@@ -93,15 +93,12 @@ The default path (`./cudly-audit.jsonl`) writes to the current working directory
 --idempotency-window   string   default: 24h
 ```
 
-Before purchasing a recommendation, cudly checks whether an equivalent commitment was purchased within the idempotency window. If a match is found, the recommendation count is reduced by the already-purchased count. This prevents double-buying when:
+This flag is accepted and validated as a Go duration string (e.g. `24h`, `48h`, `1h30m`). The CLI pipeline stores it but does not yet subtract previously-purchased commitments from new recommendations based on this window; that deduction logic runs in the server-side scheduler path, not the CLI purchase loop. Passing this flag in CLI invocations has no effect on which recommendations are purchased.
 
-- The tool is run multiple times in quick succession
-- A partial batch succeeds and the run is retried
-
-The window is expressed as a Go duration string (e.g. `24h`, `48h`, `1h30m`).
+The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server path and is not emitted by the CLI.
 
 ```bash
-# Extend the window for long-running multi-account deployments
+# Accepted but currently has no effect on CLI recommendation deduction:
 cudly --services rds --idempotency-window 72h
 ```
 
@@ -145,4 +142,4 @@ Before any real purchase run:
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
-6. Use `--idempotency-window` consistent with your run frequency to avoid double-buying on retries.
+6. Note that `--idempotency-window` does not prevent double-buying in the CLI path; use `--dry-run` review and audit-log inspection to guard against retried runs.
