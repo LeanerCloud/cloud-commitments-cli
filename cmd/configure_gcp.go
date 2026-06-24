@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -259,6 +260,10 @@ func printGCPConfigurationSuccess(creds GCPCredentials) {
 	fmt.Println("\nCUDly can now manage GCP Committed Use Discounts.")
 }
 
+// gcpSDKCallTimeout bounds each GCP SDK helper so an ADC lookup or API call
+// cannot hang indefinitely (the calls inherit context.Background()).
+const gcpSDKCallTimeout = 60 * time.Second
+
 // newGCPAPIOption returns an oauth2 token source option for the google.golang.org
 // API client, using Application Default Credentials. ADC resolves credentials in
 // priority order: GOOGLE_APPLICATION_CREDENTIALS env var, gcloud ADC cache
@@ -289,6 +294,9 @@ func newGCPAPIOption(ctx context.Context) (option.ClientOption, error) {
 // Resource Manager API v1 and prints them in a table. This replaces the
 // "gcloud projects list" CLI call.
 func listGCPProjects(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
+	defer cancel()
+
 	opt, err := newGCPAPIOption(ctx)
 	if err != nil {
 		return err
@@ -317,6 +325,9 @@ func listGCPProjects(ctx context.Context) error {
 // createGCPServiceAccount creates a GCP IAM service account via the IAM API v1.
 // This replaces "gcloud iam service-accounts create".
 func createGCPServiceAccount(ctx context.Context, projectID, saName string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
+	defer cancel()
+
 	opt, err := newGCPAPIOption(ctx)
 	if err != nil {
 		return "", err
@@ -347,6 +358,9 @@ func createGCPServiceAccount(ctx context.Context, projectID, saName string) (str
 // Cloud Resource Manager API v1. This replaces
 // "gcloud projects add-iam-policy-binding".
 func grantGCPIAMRole(ctx context.Context, projectID, member, role string) error {
+	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
+	defer cancel()
+
 	opt, err := newGCPAPIOption(ctx)
 	if err != nil {
 		return err
@@ -357,32 +371,24 @@ func grantGCPIAMRole(ctx context.Context, projectID, member, role string) error 
 		return fmt.Errorf("failed to create resource manager client: %w", err)
 	}
 
-	// Get current policy.
-	policy, err := svc.Projects.GetIamPolicy(projectID, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
+	// Request policy version 3 so conditional (IAM condition) bindings are
+	// returned and preserved on the read-modify-write round-trip; otherwise
+	// the SetIamPolicy below would silently drop them.
+	policy, err := svc.Projects.GetIamPolicy(projectID, &cloudresourcemanager.GetIamPolicyRequest{
+		Options: &cloudresourcemanager.GetPolicyOptions{RequestedPolicyVersion: 3},
+	}).Context(ctx).Do()
 	if err != nil {
 		return fmt.Errorf("failed to get IAM policy for project %s: %w", projectID, err)
 	}
 
-	// Append the binding (or extend existing one).
-	found := false
-	for _, b := range policy.Bindings {
-		if b.Role == role {
-			for _, m := range b.Members {
-				if m == member {
-					// Already bound; nothing to do.
-					return nil
-				}
-			}
-			b.Members = append(b.Members, member)
-			found = true
-			break
-		}
+	if !addMemberToPolicyBinding(policy, member, role) {
+		// Member already bound to the role; nothing to write.
+		return nil
 	}
-	if !found {
-		policy.Bindings = append(policy.Bindings, &cloudresourcemanager.Binding{
-			Role:    role,
-			Members: []string{member},
-		})
+
+	// Write the policy back at version 3 to retain any conditional bindings.
+	if policy.Version < 3 {
+		policy.Version = 3
 	}
 	_, err = svc.Projects.SetIamPolicy(projectID, &cloudresourcemanager.SetIamPolicyRequest{
 		Policy: policy,
@@ -393,10 +399,56 @@ func grantGCPIAMRole(ctx context.Context, projectID, member, role string) error 
 	return nil
 }
 
+// addMemberToPolicyBinding adds member to the binding for role in policy,
+// creating the binding if absent. It returns false if member is already bound
+// (no change needed) and true if the policy was modified.
+func addMemberToPolicyBinding(policy *cloudresourcemanager.Policy, member, role string) bool {
+	for _, b := range policy.Bindings {
+		if b.Role != role {
+			continue
+		}
+		for _, m := range b.Members {
+			if m == member {
+				return false
+			}
+		}
+		b.Members = append(b.Members, member)
+		return true
+	}
+	policy.Bindings = append(policy.Bindings, &cloudresourcemanager.Binding{
+		Role:    role,
+		Members: []string{member},
+	})
+	return true
+}
+
 // createGCPServiceAccountKey creates a JSON key for the given service account
-// and writes it to keyFile. Returns the path written. This replaces
+// and writes it to keyFile. This replaces
 // "gcloud iam service-accounts keys create <file> --iam-account=<sa>".
+//
+// To avoid orphaning a live IAM key on a local failure, it reserves the
+// destination file with exclusive-create semantics BEFORE minting the remote
+// key, and deletes the freshly created remote key if decoding or writing the
+// key material fails.
 func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) error {
+	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
+	defer cancel()
+
+	// Reserve the destination file first (fails if it already exists), so we
+	// never mint a remote key we cannot persist locally.
+	f, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to reserve key file %s: %w", keyFile, err)
+	}
+	// Best-effort: remove the reserved file if we return before writing it.
+	wrote := false
+	defer func() {
+		_ = f.Close()
+		if !wrote {
+			_ = os.Remove(keyFile)
+		}
+	}()
+
 	opt, err := newGCPAPIOption(ctx)
 	if err != nil {
 		return err
@@ -415,15 +467,28 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 		return fmt.Errorf("failed to create service account key: %w", err)
 	}
 
+	// From here on, any failure must delete the newly minted remote key so it
+	// does not linger as an active, unused credential.
+	deleteRemoteKey := func(cause error) error {
+		// Use a fresh context: the parent may already be canceled/expired.
+		delCtx, delCancel := context.WithTimeout(context.Background(), gcpSDKCallTimeout)
+		defer delCancel()
+		if _, delErr := svc.Projects.ServiceAccounts.Keys.Delete(key.Name).Context(delCtx).Do(); delErr != nil {
+			return fmt.Errorf("%w; additionally failed to delete the orphaned remote key %s: %w", cause, key.Name, delErr)
+		}
+		return cause
+	}
+
 	// PrivateKeyData is base64-encoded JSON.
 	decoded, err := base64.StdEncoding.DecodeString(key.PrivateKeyData)
 	if err != nil {
-		return fmt.Errorf("failed to decode key data: %w", err)
+		return deleteRemoteKey(fmt.Errorf("failed to decode key data: %w", err))
 	}
 
-	if err := os.WriteFile(keyFile, decoded, 0600); err != nil {
-		return fmt.Errorf("failed to write key file %s: %w", keyFile, err)
+	if _, err := f.Write(decoded); err != nil {
+		return deleteRemoteKey(fmt.Errorf("failed to write key file %s: %w", keyFile, err))
 	}
+	wrote = true
 	return nil
 }
 
@@ -575,7 +640,10 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	return nil
 }
 
-// gcpStepCreateKey creates a JSON key file for the service account.
+// gcpStepCreateKey creates a JSON key file for the service account. It returns
+// the written key-file path only when a key was actually created; on skip or
+// an unknown choice it returns an empty string so the caller knows to prompt
+// for an existing credentials file instead of assuming one was written.
 func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -597,16 +665,17 @@ func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string)
 			return "", err
 		}
 		fmt.Printf("Key file written to: %s\n", keyFile)
+		fmt.Println()
+		return keyFile, nil
 	case "s", "skip":
 		fmt.Println("Skipping Create Key")
 	default:
 		fmt.Printf("Unknown option, skipping\n")
 	}
 
+	// No key file was written; the caller will prompt for an existing one.
 	fmt.Println()
-	fmt.Printf("Key file at: %s\n", keyFile)
-	fmt.Println()
-	return keyFile, nil
+	return "", nil
 }
 
 // readRequiredInputLine prints prompt, reads a line, trims whitespace, and

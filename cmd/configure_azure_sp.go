@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	armauthorization "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/google/uuid"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
@@ -52,6 +52,11 @@ type azureSPProvisioner interface {
 	// AssignRole creates a role assignment binding principalID to
 	// roleDefinitionID at the given scope.
 	AssignRole(ctx context.Context, scope, principalID, roleDefinitionID string) error
+	// DeleteApplication deletes the application registration identified by
+	// objectID. Deleting the application also removes its password credentials
+	// and the service principal created from it, so it serves as the
+	// compensating action for a partially completed creation flow.
+	DeleteApplication(ctx context.Context, objectID string) error
 }
 
 // createAzureServicePrincipal performs the full create-for-rbac equivalent:
@@ -73,23 +78,38 @@ func createAzureServicePrincipal(ctx context.Context, p azureSPProvisioner, subs
 		return azureSPResult{}, fmt.Errorf("failed to create application registration: %w", err)
 	}
 
+	// rollback deletes the just-created application (which cascades to its
+	// password credentials and the derived service principal) so a failure in
+	// a later step does not orphan Azure AD objects. The cleanup runs on a
+	// fresh context in case the parent is already canceled/expired. If the
+	// cleanup itself fails, the operator is told exactly what to delete by hand.
+	rollback := func(cause error) (azureSPResult, error) {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+		defer cancel()
+		if delErr := p.DeleteApplication(cleanupCtx, objectID); delErr != nil {
+			return azureSPResult{}, fmt.Errorf("%w; additionally failed to roll back application %q (appId %s) -- delete it manually: %w",
+				cause, objectID, appID, delErr)
+		}
+		return azureSPResult{}, fmt.Errorf("%w (rolled back: deleted application %q)", cause, objectID)
+	}
+
 	secret, err := p.AddPassword(ctx, objectID)
 	if err != nil {
-		return azureSPResult{}, fmt.Errorf("failed to add password credential: %w", err)
+		return rollback(fmt.Errorf("failed to add password credential: %w", err))
 	}
 
 	principalID, err := p.CreateServicePrincipal(ctx, appID)
 	if err != nil {
-		return azureSPResult{}, fmt.Errorf("failed to create service principal: %w", err)
+		return rollback(fmt.Errorf("failed to create service principal: %w", err))
 	}
 
 	roleDefID, err := p.ResolveRoleDefinitionID(ctx, scope, azureSPRoleName)
 	if err != nil {
-		return azureSPResult{}, fmt.Errorf("failed to resolve %q role definition: %w", azureSPRoleName, err)
+		return rollback(fmt.Errorf("failed to resolve %q role definition: %w", azureSPRoleName, err))
 	}
 
 	if err := p.AssignRole(ctx, scope, principalID, roleDefID); err != nil {
-		return azureSPResult{}, fmt.Errorf("failed to assign %q role at %s: %w", azureSPRoleName, scope, err)
+		return rollback(fmt.Errorf("failed to assign %q role at %s: %w", azureSPRoleName, scope, err))
 	}
 
 	return azureSPResult{
@@ -108,15 +128,15 @@ type graphSPProvisioner struct {
 	roleAsgn *armauthorization.RoleAssignmentsClient
 }
 
-// newGraphSPProvisioner builds a graphSPProvisioner authenticated with
-// DefaultAzureCredential. The credential chain includes AzureCLICredential, so
-// the session established by "az login" is reused (no separate auth step).
+// newGraphSPProvisioner builds a graphSPProvisioner authenticated with the
+// Azure CLI credential, so the session established by "az login" (wizard
+// Step 1) is reused -- matching the principal used by the rest of the wizard.
 // subscriptionID seeds the RoleAssignmentsClient; the actual scope is passed
 // per-call to its Create method.
 func newGraphSPProvisioner(subscriptionID string) (*graphSPProvisioner, error) {
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	cred, err := newAzureWizardCredential()
 	if err != nil {
-		return nil, fmt.Errorf("failed to build DefaultAzureCredential: %w", err)
+		return nil, err
 	}
 
 	graph, err := msgraphsdk.NewGraphServiceClientWithCredentials(
@@ -185,6 +205,10 @@ func (g *graphSPProvisioner) CreateServicePrincipal(ctx context.Context, appID s
 		return "", fmt.Errorf("service principal created but Graph returned no id")
 	}
 	return *principalID, nil
+}
+
+func (g *graphSPProvisioner) DeleteApplication(ctx context.Context, objectID string) error {
+	return g.graph.Applications().ByApplicationId(objectID).Delete(ctx, nil)
 }
 
 func (g *graphSPProvisioner) ResolveRoleDefinitionID(ctx context.Context, scope, roleName string) (string, error) {

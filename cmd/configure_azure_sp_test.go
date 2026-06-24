@@ -13,6 +13,14 @@ import (
 // createAzureServicePrincipal requests the correct app name, role and scope,
 // and surfaces the generated secret.
 type mockSPProvisioner struct {
+	// optional injected errors
+	createAppErr error
+	addPwErr     error
+	createSPErr  error
+	resolveErr   error
+	assignErr    error
+	deleteAppErr error
+
 	// captured inputs
 	createAppName     string
 	addPasswordObjID  string
@@ -22,6 +30,7 @@ type mockSPProvisioner struct {
 	assignScope       string
 	assignPrincipalID string
 	assignRoleDefID   string
+	deleteAppObjID    string
 
 	// canned outputs
 	appObjectID string
@@ -30,16 +39,10 @@ type mockSPProvisioner struct {
 	principalID string
 	roleDefID   string
 
-	// optional injected errors
-	createAppErr error
-	addPwErr     error
-	createSPErr  error
-	resolveErr   error
-	assignErr    error
-
 	// call flags
 	resolveRoleCalled bool
 	assignRoleCalled  bool
+	deleteAppCalled   bool
 }
 
 func (m *mockSPProvisioner) CreateApplication(_ context.Context, displayName string) (string, string, error) {
@@ -82,6 +85,12 @@ func (m *mockSPProvisioner) AssignRole(_ context.Context, scope, principalID, ro
 	m.assignPrincipalID = principalID
 	m.assignRoleDefID = roleDefinitionID
 	return m.assignErr
+}
+
+func (m *mockSPProvisioner) DeleteApplication(_ context.Context, objectID string) error {
+	m.deleteAppCalled = true
+	m.deleteAppObjID = objectID
+	return m.deleteAppErr
 }
 
 const (
@@ -127,6 +136,9 @@ func TestCreateAzureServicePrincipal_Success(t *testing.T) {
 	assert.Equal(t, "app-client-id", result.AppID)
 	assert.Equal(t, "super-secret-password", result.ClientSecret)
 	assert.Equal(t, testTenantID, result.TenantID)
+
+	// No rollback on success.
+	assert.False(t, m.deleteAppCalled, "DeleteApplication must not be called on success")
 }
 
 func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
@@ -136,6 +148,7 @@ func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
 		wantErrPart   string
 		wantNoAssign  bool
 		wantNoResolve bool
+		wantRollback  bool // DeleteApplication should be called to clean up
 	}{
 		{
 			name:          "create application fails",
@@ -143,6 +156,7 @@ func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
 			wantErrPart:   "failed to create application registration",
 			wantNoAssign:  true,
 			wantNoResolve: true,
+			wantRollback:  false, // nothing was created, nothing to roll back
 		},
 		{
 			name:          "add password fails",
@@ -150,6 +164,7 @@ func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
 			wantErrPart:   "failed to add password credential",
 			wantNoAssign:  true,
 			wantNoResolve: true,
+			wantRollback:  true,
 		},
 		{
 			name:          "create service principal fails",
@@ -157,17 +172,20 @@ func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
 			wantErrPart:   "failed to create service principal",
 			wantNoAssign:  true,
 			wantNoResolve: true,
+			wantRollback:  true,
 		},
 		{
 			name:         "resolve role fails",
 			setup:        func(m *mockSPProvisioner) { m.resolveErr = errors.New("role not found") },
 			wantErrPart:  "failed to resolve",
 			wantNoAssign: true,
+			wantRollback: true,
 		},
 		{
-			name:        "assign role fails",
-			setup:       func(m *mockSPProvisioner) { m.assignErr = errors.New("rbac 403") },
-			wantErrPart: "failed to assign",
+			name:         "assign role fails",
+			setup:        func(m *mockSPProvisioner) { m.assignErr = errors.New("rbac 403") },
+			wantErrPart:  "failed to assign",
+			wantRollback: true,
 		},
 	}
 
@@ -192,8 +210,36 @@ func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
 			if tt.wantNoAssign {
 				assert.False(t, m.assignRoleCalled, "AssignRole should not have been called")
 			}
+			assert.Equal(t, tt.wantRollback, m.deleteAppCalled,
+				"DeleteApplication call expectation mismatch")
+			if tt.wantRollback {
+				assert.Equal(t, "app-object-id", m.deleteAppObjID,
+					"rollback should delete the created application by object ID")
+			}
 		})
 	}
+}
+
+// TestCreateAzureServicePrincipal_RollbackFailureSurfaced verifies that when
+// the compensating delete also fails, the error names the orphaned application
+// so the operator can delete it manually.
+func TestCreateAzureServicePrincipal_RollbackFailureSurfaced(t *testing.T) {
+	m := &mockSPProvisioner{
+		appObjectID:  "app-object-id",
+		appID:        "app-client-id",
+		secret:       "secret",
+		principalID:  "sp-principal-id",
+		roleDefID:    "role-def-id",
+		assignErr:    errors.New("rbac 403"),
+		deleteAppErr: errors.New("delete 500"),
+	}
+
+	_, err := createAzureServicePrincipal(context.Background(), m, testSubID, testTenantID)
+	require.Error(t, err)
+	assert.True(t, m.deleteAppCalled)
+	assert.Contains(t, err.Error(), "failed to assign")
+	assert.Contains(t, err.Error(), "failed to roll back")
+	assert.Contains(t, err.Error(), "app-object-id")
 }
 
 func TestCreateAzureServicePrincipal_ScopeFormat(t *testing.T) {

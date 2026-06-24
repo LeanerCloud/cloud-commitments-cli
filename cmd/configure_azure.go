@@ -16,6 +16,7 @@ import (
 
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -272,14 +273,29 @@ func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredential
 	return nil
 }
 
+// newAzureWizardCredential builds the credential used by the interactive Azure
+// setup wizard. It binds explicitly to the Azure CLI session (the "az login"
+// the operator runs in Step 1) via AzureCLICredential rather than
+// DefaultAzureCredential, whose chain prioritizes environment / workload /
+// managed-identity credentials and could otherwise resolve to a different
+// principal than the one the operator just signed in as.
+func newAzureWizardCredential() (azcore.TokenCredential, error) {
+	cred, err := azidentity.NewAzureCLICredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build Azure CLI credential: %w\n"+
+			"Ensure you are authenticated: run 'az login' (Step 1) before continuing", err)
+	}
+	return cred, nil
+}
+
 // listAzureSubscriptions retrieves the operator's subscriptions via the ARM
 // Subscriptions SDK and prints them in a table matching "az account list"
-// output. DefaultAzureCredential picks up the "az login" session via its
-// AzureCLICredential leg so the operator's active session is reused.
+// output. It uses the Azure CLI credential so the listing matches the
+// operator's active "az login" session.
 func listAzureSubscriptions(ctx context.Context) error {
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	cred, err := newAzureWizardCredential()
 	if err != nil {
-		return fmt.Errorf("failed to build credential: %w", err)
+		return err
 	}
 
 	client, err := armsubscriptions.NewClient(cred, nil)
@@ -322,10 +338,9 @@ func listAzureSubscriptions(ctx context.Context) error {
 // SDK on behalf of a human operator who does not yet have a credential. This
 // is the only CLI call retained in this wizard.
 //
-// Step 2 (list subscriptions): performed via the ARM Subscriptions SDK.
-// DefaultAzureCredential automatically picks up the session that "az login"
-// just established (via its AzureCLICredential leg). Fails loud if the SDK
-// cannot authenticate (no CLI fallback).
+// Step 2 (list subscriptions): performed via the ARM Subscriptions SDK using
+// the Azure CLI credential, which reuses the session that "az login" just
+// established. Fails loud if the SDK cannot authenticate (no CLI fallback).
 //
 // Step 3 (create service principal): performed via the Microsoft Graph SDK
 // (application + service principal + password credential) and armauthorization
@@ -356,13 +371,13 @@ func azureStepLogin(reader *bufio.Reader) error {
 
 // azureStepListSubscriptions lists subscriptions via SDK and prompts the
 // operator to enter their subscription ID. It fails loud (no CLI fallback): if
-// DefaultAzureCredential cannot authenticate, it returns an error instructing
-// the operator to run "az login" first.
+// the Azure CLI credential cannot authenticate, it returns an error
+// instructing the operator to run "az login" first.
 func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (string, error) {
 	fmt.Println()
 	fmt.Println("Step 2: Get Subscription ID")
 	fmt.Println("---------------------------")
-	fmt.Println("Listing your Azure subscriptions via SDK (DefaultAzureCredential)...")
+	fmt.Println("Listing your Azure subscriptions via SDK (Azure CLI credential)...")
 	fmt.Println()
 
 	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -390,12 +405,11 @@ func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (stri
 }
 
 // resolveAzureTenantID looks up the tenant ID for the given subscription via
-// the ARM Subscriptions SDK. DefaultAzureCredential reuses the "az login"
-// session.
+// the ARM Subscriptions SDK, using the Azure CLI ("az login") credential.
 func resolveAzureTenantID(ctx context.Context, subscriptionID string) (string, error) {
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	cred, err := newAzureWizardCredential()
 	if err != nil {
-		return "", fmt.Errorf("failed to build credential: %w", err)
+		return "", err
 	}
 	client, err := armsubscriptions.NewClient(cred, nil)
 	if err != nil {
