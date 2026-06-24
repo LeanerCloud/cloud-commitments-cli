@@ -271,8 +271,8 @@ func printGCPConfigurationSuccess(creds GCPCredentials) {
 //
 //	gcloud auth application-default login
 //
-// The wizard Step 3 onwards will call this function; if ADC is not available the
-// calls will fail and the wizard suggests the manual gcloud CLI fallback.
+// The wizard Step 3 onwards calls this function; if ADC is not available the
+// calls fail loud with a hint to run "gcloud auth application-default login".
 func newGCPAPIOption(ctx context.Context) (option.ClientOption, error) {
 	ts, err := google.DefaultTokenSource(ctx,
 		"https://www.googleapis.com/auth/cloud-platform",
@@ -437,16 +437,16 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 // "gcloud auth application-default login" if they want to use ADC.
 //
 // Step 2 (list projects): performed via the Cloud Resource Manager SDK v1,
-// using Application Default Credentials (ADC). Falls back to "gcloud projects
-// list" if ADC is not available.
+// using Application Default Credentials (ADC). Fails loud if ADC is not
+// available (no CLI fallback).
 //
 // Step 3 (gcloud config set project): sets local gcloud config state. There is
 // no cloud-API equivalent for writing to the local gcloud configuration file,
 // so this step remains a CLI call.
 //
 // Steps 4-6 (create SA, grant role, create key): performed via GCP IAM and
-// Cloud Resource Manager SDK v1 APIs using ADC. Fall back to the gcloud CLI
-// if ADC is not available.
+// Cloud Resource Manager SDK v1 APIs using ADC. Fail loud on any SDK error
+// (no CLI fallback).
 func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader) (string, error) {
 	if err := gcpStepLogin(reader); err != nil {
 		return "", err
@@ -489,10 +489,8 @@ func gcpStepSelectProject(ctx context.Context, reader *bufio.Reader) (string, er
 	fmt.Println()
 
 	if err := listGCPProjects(ctx); err != nil {
-		fmt.Printf("SDK project list failed (%v); falling back to gcloud.\n\n", err)
-		if cliErr := promptAndRunGCPCommand(reader, "List Projects", "gcloud projects list", "gcloud", "projects", "list"); cliErr != nil {
-			return "", cliErr
-		}
+		return "", fmt.Errorf("failed to list GCP projects via SDK: %w\n"+
+			"Ensure Application Default Credentials are set: run 'gcloud auth application-default login' first", err)
 	}
 
 	fmt.Println()
@@ -508,6 +506,7 @@ func gcpStepSelectProject(ctx context.Context, reader *bufio.Reader) (string, er
 	// (writes to ~/.config/gcloud/properties) with no cloud-API equivalent.
 	fmt.Println()
 	fmt.Println("Setting gcloud project context (local config)...")
+	//nolint:gosec // G204: local gcloud config write, hardcoded args + validated projectID, no shell
 	cmd := exec.Command("gcloud", "config", "set", "project", projectID)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -517,8 +516,8 @@ func gcpStepSelectProject(ctx context.Context, reader *bufio.Reader) (string, er
 	return projectID, nil
 }
 
-// gcpStepCreateServiceAccount creates the CUDly service account via SDK with
-// a gcloud CLI fallback.
+// gcpStepCreateServiceAccount creates the CUDly service account via the IAM
+// SDK. It fails loud on any SDK error (no CLI fallback).
 func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, projectID string) (string, error) {
 	saName := "cudly-service-account"
 	saEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com", saName, projectID)
@@ -533,20 +532,12 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 	choice, _ := reader.ReadString('\n')
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		email, sdkErr := createGCPServiceAccount(ctx, projectID, saName)
-		if sdkErr != nil {
-			fmt.Printf("SDK call failed (%v); falling back to gcloud.\n", sdkErr)
-			display := fmt.Sprintf(`gcloud iam service-accounts create %s --display-name="CUDly Service Account" --description="Service account for CUDly commitment management"`, saName)
-			if err := promptAndRunGCPCommand(reader, "Create Service Account", display,
-				"gcloud", "iam", "service-accounts", "create", saName,
-				"--display-name=CUDly Service Account",
-				"--description=Service account for CUDly commitment management"); err != nil {
-				return "", err
-			}
-		} else {
-			saEmail = email
-			fmt.Printf("Service account created: %s\n", saEmail)
+		email, err := createGCPServiceAccount(ctx, projectID, saName)
+		if err != nil {
+			return "", err
 		}
+		saEmail = email
+		fmt.Printf("Service account created: %s\n", saEmail)
 	case "s", "skip":
 		fmt.Println("Skipping Create Service Account")
 	default:
@@ -555,7 +546,9 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 	return saEmail, nil
 }
 
-// gcpStepGrantRole grants the compute.admin role to the service account.
+// gcpStepGrantRole grants the compute.admin role to the service account via
+// the Cloud Resource Manager SDK. It fails loud on any SDK error (no CLI
+// fallback).
 func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEmail string) error {
 	member := fmt.Sprintf("serviceAccount:%s", saEmail)
 	role := "roles/compute.admin"
@@ -570,13 +563,8 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	choice, _ := reader.ReadString('\n')
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		if sdkErr := grantGCPIAMRole(ctx, projectID, member, role); sdkErr != nil {
-			fmt.Printf("SDK call failed (%v); falling back to gcloud.\n", sdkErr)
-			display := fmt.Sprintf(`gcloud projects add-iam-policy-binding %s --member="%s" --role="%s"`, projectID, member, role)
-			return promptAndRunGCPCommand(reader, "Grant Compute Admin Role", display,
-				"gcloud", "projects", "add-iam-policy-binding", projectID,
-				fmt.Sprintf("--member=%s", member),
-				fmt.Sprintf("--role=%s", role))
+		if err := grantGCPIAMRole(ctx, projectID, member, role); err != nil {
+			return err
 		}
 		fmt.Printf("Role %s granted to %s on project %s.\n", role, saEmail, projectID)
 	case "s", "skip":
@@ -605,17 +593,10 @@ func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string)
 	choice, _ := reader.ReadString('\n')
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		if sdkErr := createGCPServiceAccountKey(ctx, saEmail, keyFile); sdkErr != nil {
-			fmt.Printf("SDK call failed (%v); falling back to gcloud.\n", sdkErr)
-			display := fmt.Sprintf(`gcloud iam service-accounts keys create %s --iam-account=%s`, keyFile, saEmail)
-			if err := promptAndRunGCPCommand(reader, "Create Key File", display,
-				"gcloud", "iam", "service-accounts", "keys", "create", keyFile,
-				fmt.Sprintf("--iam-account=%s", saEmail)); err != nil {
-				return "", err
-			}
-		} else {
-			fmt.Printf("Key file written to: %s\n", keyFile)
+		if err := createGCPServiceAccountKey(ctx, saEmail, keyFile); err != nil {
+			return "", err
 		}
+		fmt.Printf("Key file written to: %s\n", keyFile)
 	case "s", "skip":
 		fmt.Println("Skipping Create Key")
 	default:
@@ -643,7 +624,8 @@ func readRequiredInputLine(reader *bufio.Reader, prompt, fieldName string) (stri
 }
 
 // promptAndRunGCPCommand shows a command and asks to run or skip.
-// Takes explicit program and args to avoid command injection via string splitting.
+// It is used only for the interactive "gcloud auth login" auth bootstrap
+// (Step 1), which has no SDK equivalent that preserves the cached-credential UX.
 func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, program string, args ...string) error {
 	fmt.Printf("Command: %s\n", displayCmd)
 	fmt.Println()
@@ -668,6 +650,7 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, progr
 }
 
 // executeGCPCommand runs a gcloud command with explicit program and arguments.
+// It is used only for the interactive "gcloud auth login" auth bootstrap.
 // The caller's reader is threaded through to the retry prompt so all input
 // is consumed from one consistent buffered stream (a fresh
 // bufio.NewReader(os.Stdin) here would drop input already buffered by the
@@ -677,6 +660,7 @@ func executeGCPCommand(reader *bufio.Reader, displayCmd string, program string, 
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
+	//nolint:gosec // G204: interactive operator auth (gcloud auth login), hardcoded args, no shell
 	cmd := exec.Command(program, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

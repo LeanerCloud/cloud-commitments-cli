@@ -319,20 +319,19 @@ func listAzureSubscriptions(ctx context.Context) error {
 //
 // Step 1 (az login): performed via the Azure CLI. "az login" launches an
 // interactive browser-based OAuth flow that cannot be replicated through the
-// SDK on behalf of a human operator who does not yet have a credential.
+// SDK on behalf of a human operator who does not yet have a credential. This
+// is the only CLI call retained in this wizard.
 //
 // Step 2 (list subscriptions): performed via the ARM Subscriptions SDK.
 // DefaultAzureCredential automatically picks up the session that "az login"
-// just established (via its AzureCLICredential leg), so no extra auth step is
-// required.
+// just established (via its AzureCLICredential leg). Fails loud if the SDK
+// cannot authenticate (no CLI fallback).
 //
-// Step 3 (create service principal): performed via the Azure CLI
-// (az ad sp create-for-rbac). Creating an AAD application + service principal
-// + password credential via the Microsoft Graph SDK would require adding the
-// msgraph-sdk-go and armauthorization/v2 packages (currently not in the module
-// graph). The CLI path is safe because arguments are passed directly to
-// exec.Command without shell interpolation, and the subscription ID is
-// validated as a UUID before use.
+// Step 3 (create service principal): performed via the Microsoft Graph SDK
+// (application + service principal + password credential) and armauthorization
+// (resolve the "Reservations Administrator" role definition and assign it at
+// subscription scope). This is the create-for-rbac equivalent and fails loud
+// on any SDK error.
 func runAzureSetupCommands(ctx context.Context, reader *bufio.Reader) error {
 	if err := azureStepLogin(reader); err != nil {
 		return err
@@ -343,7 +342,7 @@ func runAzureSetupCommands(ctx context.Context, reader *bufio.Reader) error {
 		return err
 	}
 
-	return azureStepCreateServicePrincipal(reader, subscriptionID)
+	return azureStepCreateServicePrincipal(ctx, reader, subscriptionID)
 }
 
 // azureStepLogin prompts to run "az login".
@@ -355,8 +354,10 @@ func azureStepLogin(reader *bufio.Reader) error {
 	return promptAndRunExplicitCommand(reader, "Azure Login", "az login", "az", "login")
 }
 
-// azureStepListSubscriptions lists subscriptions via SDK (with CLI fallback)
-// and prompts the operator to enter their subscription ID.
+// azureStepListSubscriptions lists subscriptions via SDK and prompts the
+// operator to enter their subscription ID. It fails loud (no CLI fallback): if
+// DefaultAzureCredential cannot authenticate, it returns an error instructing
+// the operator to run "az login" first.
 func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (string, error) {
 	fmt.Println()
 	fmt.Println("Step 2: Get Subscription ID")
@@ -368,10 +369,8 @@ func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (stri
 	defer cancel()
 
 	if err := listAzureSubscriptions(listCtx); err != nil {
-		fmt.Printf("SDK subscription list failed (%v); falling back to az account list.\n\n", err)
-		if cliErr := promptAndRunExplicitCommand(reader, "List Subscriptions", "az account list --output table", "az", "account", "list", "--output", "table"); cliErr != nil {
-			return "", cliErr
-		}
+		return "", fmt.Errorf("failed to list Azure subscriptions via SDK: %w\n"+
+			"Ensure you are authenticated: run 'az login' (Step 1) before continuing", err)
 	}
 
 	fmt.Println()
@@ -390,60 +389,100 @@ func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (stri
 	return subscriptionID, nil
 }
 
-// azureStepCreateServicePrincipal prompts to run az ad sp create-for-rbac.
-func azureStepCreateServicePrincipal(reader *bufio.Reader, subscriptionID string) error {
+// resolveAzureTenantID looks up the tenant ID for the given subscription via
+// the ARM Subscriptions SDK. DefaultAzureCredential reuses the "az login"
+// session.
+func resolveAzureTenantID(ctx context.Context, subscriptionID string) (string, error) {
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to build credential: %w", err)
+	}
+	client, err := armsubscriptions.NewClient(cred, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create subscriptions client: %w", err)
+	}
+	resp, err := client.Get(ctx, subscriptionID, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to get subscription %s: %w", subscriptionID, err)
+	}
+	if resp.TenantID == nil || *resp.TenantID == "" {
+		return "", fmt.Errorf("subscription %s returned no tenant ID", subscriptionID)
+	}
+	return *resp.TenantID, nil
+}
+
+// azureStepCreateServicePrincipal creates the service principal via the
+// Microsoft Graph + armauthorization SDKs (the create-for-rbac equivalent) and
+// prints the resulting credential material. It fails loud: any SDK error is
+// returned rather than silently falling back to the CLI.
+func azureStepCreateServicePrincipal(ctx context.Context, reader *bufio.Reader, subscriptionID string) error {
 	fmt.Println()
 	fmt.Println("Step 3: Create Service Principal")
 	fmt.Println("---------------------------------")
-	fmt.Println("This creates an Azure Service Principal with Reservation Administrator role.")
+	fmt.Println("This creates an Azure Service Principal with the")
+	fmt.Printf("%q role at subscription scope, via the Microsoft Graph SDK.\n", azureSPRoleName)
 	fmt.Println()
-
-	// Run directly without shell to avoid injection; subscription ID is UUID-validated above.
-	fmt.Printf("Command: az ad sp create-for-rbac --name CUDly --role \"Reservations Administrator\" --scopes /subscriptions/%s\n", subscriptionID)
-	fmt.Println()
+	fmt.Printf("Create service principal %q with role %q at /subscriptions/%s?\n", azureSPName, azureSPRoleName, subscriptionID)
 	fmt.Printf("[R]un, [S]kip? ")
 
 	choice, err := readTrimmedLine(reader)
 	if err != nil {
-		return fmt.Errorf("failed to read choice: %w", err)
+		return fmt.Errorf("failed to read service-principal choice: %w", err)
 	}
 	choice = strings.ToLower(choice)
-
-	if choice == "r" || choice == "run" || choice == "" {
-		if err := runCreateSPCommand(reader, subscriptionID); err != nil {
-			return err
-		}
-	} else {
+	if choice != "r" && choice != "run" && choice != "" {
 		fmt.Println("Skipping Create Service Principal")
+		fmt.Println()
+		fmt.Println("Provide the appId, client secret and tenant ID for an existing")
+		fmt.Println("service principal in the next step.")
+		fmt.Println()
+		return nil
 	}
+
+	spCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	tenantID, err := resolveAzureTenantID(spCtx, subscriptionID)
+	if err != nil {
+		return err
+	}
+
+	provisioner, err := newGraphSPProvisioner(subscriptionID)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Azure SDK clients: %w\n"+
+			"Ensure you are authenticated: run 'az login' (Step 1) before continuing", err)
+	}
+
+	fmt.Println()
+	fmt.Println(strings.Repeat("-", 60))
+	result, err := createAzureServicePrincipal(spCtx, provisioner, subscriptionID, tenantID)
+	if err != nil {
+		return err
+	}
+	fmt.Println(strings.Repeat("-", 60))
+
+	printAzureSPResult(result, subscriptionID)
 	return nil
 }
 
-// runCreateSPCommand executes az ad sp create-for-rbac with a continue-anyway
-// prompt on failure.
-func runCreateSPCommand(reader *bufio.Reader, subscriptionID string) error {
+// printAzureSPResult prints the credential material in the same shape that
+// "az ad sp create-for-rbac" prints, so the operator can feed it into the
+// credential collection step that follows.
+func printAzureSPResult(result azureSPResult, subscriptionID string) {
 	fmt.Println()
-	fmt.Println(strings.Repeat("-", 60))
-	cmd := exec.Command("az", "ad", "sp", "create-for-rbac",
-		"--name", "CUDly",
-		"--role", "Reservations Administrator",
-		"--scopes", fmt.Sprintf("/subscriptions/%s", subscriptionID))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("Command failed: %v\n", err)
-		fmt.Print("Continue anyway? [y/N]: ")
-		response, readErr := readTrimmedLine(reader)
-		if readErr != nil {
-			return fmt.Errorf("failed to read response: %w", readErr)
-		}
-		if strings.ToLower(response) != "y" {
-			return fmt.Errorf("failed to create service principal: %w", err)
-		}
-	}
-	fmt.Println(strings.Repeat("-", 60))
-	return nil
+	fmt.Println("Service principal created. Credential material:")
+	fmt.Println()
+	fmt.Printf("  appId (Client ID):       %s\n", result.AppID)
+	fmt.Printf("  password (Client Secret): %s\n", result.ClientSecret)
+	fmt.Printf("  tenant (Tenant ID):       %s\n", result.TenantID)
+	fmt.Println()
+	fmt.Println("IMPORTANT: copy the client secret now -- it cannot be retrieved later.")
+	fmt.Println("You'll enter these values in the next step:")
+	fmt.Println("  - appId      -> Client ID")
+	fmt.Println("  - password   -> Client Secret")
+	fmt.Println("  - tenant     -> Tenant ID")
+	fmt.Printf("  - Subscription ID: %s\n", subscriptionID)
+	fmt.Println()
 }
 
 // promptAndRunExplicitCommand shows a command and asks to run or skip.
@@ -472,6 +511,8 @@ func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, 
 }
 
 // executeExplicitCommand runs a command with explicit program and arguments.
+// It is used only for the interactive "az login" auth bootstrap (Step 1),
+// which has no SDK equivalent that preserves the cached-credential UX.
 // The caller's reader is threaded through to the retry prompt so all input
 // is consumed from one consistent buffered stream (a fresh
 // bufio.NewReader(os.Stdin) here would drop input already buffered by the
@@ -481,6 +522,7 @@ func executeExplicitCommand(reader *bufio.Reader, displayCmd string, program str
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
+	//nolint:gosec // G204: interactive operator auth (az login), hardcoded args, no shell
 	cmd := exec.Command(program, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

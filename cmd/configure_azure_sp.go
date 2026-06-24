@@ -1,0 +1,222 @@
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	armauthorization "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
+	"github.com/google/uuid"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
+	"github.com/microsoftgraph/msgraph-sdk-go/applications"
+	graphmodels "github.com/microsoftgraph/msgraph-sdk-go/models"
+)
+
+// azureSPName is the Azure AD application / service principal display name.
+// It matches the name the previous "az ad sp create-for-rbac --name CUDly"
+// call used so the resulting identity is interchangeable.
+const azureSPName = "CUDly"
+
+// azureSPRoleName is the RBAC role assigned to the service principal at
+// subscription scope, matching the previous create-for-rbac invocation.
+const azureSPRoleName = "Reservations Administrator"
+
+// azureSPResult holds the credential material produced by creating the service
+// principal. It mirrors the appId/password/tenant fields that
+// "az ad sp create-for-rbac" prints, which the operator feeds into the
+// subsequent configure step.
+type azureSPResult struct {
+	AppID        string // application (client) ID
+	ClientSecret string // generated password / client secret
+	TenantID     string // Azure AD tenant ID
+}
+
+// azureSPProvisioner abstracts the cloud operations needed to create a service
+// principal and grant it the Reservations Administrator role. It exists so the
+// orchestration logic can be unit-tested with a mock without depending on the
+// concrete Graph / armauthorization client types (which are not interfaces).
+type azureSPProvisioner interface {
+	// CreateApplication creates an AAD application registration with the given
+	// display name and returns its object ID and application (client) ID.
+	CreateApplication(ctx context.Context, displayName string) (objectID, appID string, err error)
+	// AddPassword adds a password credential to the application identified by
+	// objectID and returns the generated secret text.
+	AddPassword(ctx context.Context, objectID string) (secretText string, err error)
+	// CreateServicePrincipal creates a service principal for the given
+	// application (client) ID and returns the service principal object ID
+	// (the principal ID used for role assignment).
+	CreateServicePrincipal(ctx context.Context, appID string) (principalID string, err error)
+	// ResolveRoleDefinitionID resolves the role definition ID for the given
+	// role display name at the given scope.
+	ResolveRoleDefinitionID(ctx context.Context, scope, roleName string) (roleDefinitionID string, err error)
+	// AssignRole creates a role assignment binding principalID to
+	// roleDefinitionID at the given scope.
+	AssignRole(ctx context.Context, scope, principalID, roleDefinitionID string) error
+}
+
+// createAzureServicePrincipal performs the full create-for-rbac equivalent:
+// it creates the application + password + service principal, resolves the
+// "Reservations Administrator" role at subscription scope, assigns it, and
+// returns the credential material.
+//
+// subscriptionID must already be validated (UUID) and tenantID resolved by the
+// caller. The behavior matches:
+//
+//	az ad sp create-for-rbac --name CUDly \
+//	  --role "Reservations Administrator" \
+//	  --scopes /subscriptions/<subscriptionID>
+func createAzureServicePrincipal(ctx context.Context, p azureSPProvisioner, subscriptionID, tenantID string) (azureSPResult, error) {
+	scope := fmt.Sprintf("/subscriptions/%s", subscriptionID)
+
+	objectID, appID, err := p.CreateApplication(ctx, azureSPName)
+	if err != nil {
+		return azureSPResult{}, fmt.Errorf("failed to create application registration: %w", err)
+	}
+
+	secret, err := p.AddPassword(ctx, objectID)
+	if err != nil {
+		return azureSPResult{}, fmt.Errorf("failed to add password credential: %w", err)
+	}
+
+	principalID, err := p.CreateServicePrincipal(ctx, appID)
+	if err != nil {
+		return azureSPResult{}, fmt.Errorf("failed to create service principal: %w", err)
+	}
+
+	roleDefID, err := p.ResolveRoleDefinitionID(ctx, scope, azureSPRoleName)
+	if err != nil {
+		return azureSPResult{}, fmt.Errorf("failed to resolve %q role definition: %w", azureSPRoleName, err)
+	}
+
+	if err := p.AssignRole(ctx, scope, principalID, roleDefID); err != nil {
+		return azureSPResult{}, fmt.Errorf("failed to assign %q role at %s: %w", azureSPRoleName, scope, err)
+	}
+
+	return azureSPResult{
+		AppID:        appID,
+		ClientSecret: secret,
+		TenantID:     tenantID,
+	}, nil
+}
+
+// graphSPProvisioner is the production azureSPProvisioner backed by the
+// Microsoft Graph SDK (application + service principal) and armauthorization
+// (role definition + role assignment).
+type graphSPProvisioner struct {
+	graph    *msgraphsdk.GraphServiceClient
+	roleDefs *armauthorization.RoleDefinitionsClient
+	roleAsgn *armauthorization.RoleAssignmentsClient
+}
+
+// newGraphSPProvisioner builds a graphSPProvisioner authenticated with
+// DefaultAzureCredential. The credential chain includes AzureCLICredential, so
+// the session established by "az login" is reused (no separate auth step).
+// subscriptionID seeds the RoleAssignmentsClient; the actual scope is passed
+// per-call to its Create method.
+func newGraphSPProvisioner(subscriptionID string) (*graphSPProvisioner, error) {
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build DefaultAzureCredential: %w", err)
+	}
+
+	graph, err := msgraphsdk.NewGraphServiceClientWithCredentials(
+		cred, []string{"https://graph.microsoft.com/.default"})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Microsoft Graph client: %w", err)
+	}
+
+	roleDefs, err := armauthorization.NewRoleDefinitionsClient(cred, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create role definitions client: %w", err)
+	}
+
+	roleAsgn, err := armauthorization.NewRoleAssignmentsClient(subscriptionID, cred, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create role assignments client: %w", err)
+	}
+
+	return &graphSPProvisioner{graph: graph, roleDefs: roleDefs, roleAsgn: roleAsgn}, nil
+}
+
+func (g *graphSPProvisioner) CreateApplication(ctx context.Context, displayName string) (objectID, appID string, err error) {
+	app := graphmodels.NewApplication()
+	app.SetDisplayName(&displayName)
+
+	created, err := g.graph.Applications().Post(ctx, app, nil)
+	if err != nil {
+		return "", "", err
+	}
+	oid := created.GetId()
+	aid := created.GetAppId()
+	if oid == nil || aid == nil {
+		return "", "", fmt.Errorf("application created but Graph returned no id/appId")
+	}
+	return *oid, *aid, nil
+}
+
+func (g *graphSPProvisioner) AddPassword(ctx context.Context, objectID string) (string, error) {
+	body := applications.NewItemAddPasswordPostRequestBody()
+	cred := graphmodels.NewPasswordCredential()
+	displayName := azureSPName + "-secret"
+	cred.SetDisplayName(&displayName)
+	body.SetPasswordCredential(cred)
+
+	result, err := g.graph.Applications().ByApplicationId(objectID).AddPassword().Post(ctx, body, nil)
+	if err != nil {
+		return "", err
+	}
+	secret := result.GetSecretText()
+	if secret == nil || *secret == "" {
+		return "", fmt.Errorf("password credential created but Graph returned no secret text")
+	}
+	return *secret, nil
+}
+
+func (g *graphSPProvisioner) CreateServicePrincipal(ctx context.Context, appID string) (string, error) {
+	sp := graphmodels.NewServicePrincipal()
+	sp.SetAppId(&appID)
+
+	created, err := g.graph.ServicePrincipals().Post(ctx, sp, nil)
+	if err != nil {
+		return "", err
+	}
+	principalID := created.GetId()
+	if principalID == nil {
+		return "", fmt.Errorf("service principal created but Graph returned no id")
+	}
+	return *principalID, nil
+}
+
+func (g *graphSPProvisioner) ResolveRoleDefinitionID(ctx context.Context, scope, roleName string) (string, error) {
+	filter := fmt.Sprintf("roleName eq '%s'", roleName)
+	pager := g.roleDefs.NewListPager(scope, &armauthorization.RoleDefinitionsClientListOptions{
+		Filter: &filter,
+	})
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return "", err
+		}
+		for _, rd := range page.Value {
+			if rd == nil || rd.ID == nil {
+				continue
+			}
+			if rd.Properties != nil && rd.Properties.RoleName != nil && *rd.Properties.RoleName == roleName {
+				return *rd.ID, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("role definition %q not found at scope %s", roleName, scope)
+}
+
+func (g *graphSPProvisioner) AssignRole(ctx context.Context, scope, principalID, roleDefinitionID string) error {
+	principalType := armauthorization.PrincipalTypeServicePrincipal
+	_, err := g.roleAsgn.Create(ctx, scope, uuid.NewString(), armauthorization.RoleAssignmentCreateParameters{
+		Properties: &armauthorization.RoleAssignmentProperties{
+			PrincipalID:      &principalID,
+			RoleDefinitionID: &roleDefinitionID,
+			PrincipalType:    &principalType,
+		},
+	}, nil)
+	return err
+}
