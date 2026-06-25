@@ -529,7 +529,7 @@ func TestPrintFinalMessage(t *testing.T) {
 			name:       "Successful purchase shows Archera pitch with URL and disclosure",
 			isDryRun:   false,
 			riSuccess:  3,
-			wantOutput: []string{"Purchase operations completed", "underutilization insurance", archeraSignupURL, "first 7 days", "sponsors CUDly's Open Source"},
+			wantOutput: []string{"Purchase operations completed", "underutilization insurance", "https://www.archera.ai/cudly", "first 7 days", "sponsors CUDly's Open Source"},
 		},
 	}
 
