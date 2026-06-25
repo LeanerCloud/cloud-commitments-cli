@@ -167,6 +167,10 @@ func printSuccessRate(success, failed int) {
 	}
 }
 
+// archeraSignupURL is the Archera signup link with CUDly attribution, shared
+// with the web interface (frontend ARCHERA_SIGNUP_URL).
+const archeraSignupURL = "https://www.archera.ai/cudly"
+
 // printFinalMessage prints the final message based on mode and results
 func printFinalMessage(isDryRun bool, riSuccess int) {
 	if isDryRun {
@@ -175,7 +179,23 @@ func printFinalMessage(isDryRun bool, riSuccess int) {
 	} else if riSuccess > 0 {
 		AppLogger.Println("\n🎉 Purchase operations completed!")
 		AppLogger.Println("⏰ Allow up to 15 minutes for RIs to appear in your account")
+		printArcheraPitch()
 	}
+}
+
+// printArcheraPitch prints a soft, non-blocking suggestion to insure the
+// just-purchased commitments through Archera, plus the sponsorship disclosure.
+// Shown only after a successful real purchase. Archera is a third-party service
+// independent of CUDly.
+func printArcheraPitch() {
+	AppLogger.Println("\n🛡️  Want to push your coverage to 100% without the risk that a future")
+	AppLogger.Println("    capacity decrease leaves you paying for commitments you no longer use?")
+	AppLogger.Println("    You can buy underutilization insurance for Reserved Instances and")
+	AppLogger.Println("    Savings Plans from Archera by signing up at:")
+	AppLogger.Printf("      %s\n", archeraSignupURL)
+	AppLogger.Println("    within the first 7 days of the purchase.")
+	AppLogger.Println("\n    For full disclosure, Archera sponsors CUDly's Open Source development")
+	AppLogger.Println("    from a fraction of their insurance premiums.")
 }
 
 // printSavingsPlansSection prints the Savings Plans summary section
