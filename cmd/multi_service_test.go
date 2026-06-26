@@ -12,6 +12,7 @@ import (
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -1828,12 +1829,12 @@ func createTestVersionInfo() map[string]MajorEngineVersionInfo {
 			MajorEngineVersion: "5.7",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-standard-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsStandardSupport),
 					LifecycleSupportStartDate: now.AddDate(-5, 0, 0),
 					LifecycleSupportEndDate:   pastDate,
 				},
 				{
-					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 					LifecycleSupportStartDate: pastDate,
 					LifecycleSupportEndDate:   futureDate,
 				},
@@ -1844,7 +1845,7 @@ func createTestVersionInfo() map[string]MajorEngineVersionInfo {
 			MajorEngineVersion: "8.0",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-standard-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsStandardSupport),
 					LifecycleSupportStartDate: now.AddDate(-2, 0, 0),
 					LifecycleSupportEndDate:   futureDate,
 				},
