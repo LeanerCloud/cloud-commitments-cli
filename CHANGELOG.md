@@ -15,6 +15,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   CloudFormation deploy scripts had no registration call at all).
   Re-download the bundle from the CUDly UI and the new copy will register
   your account automatically with no manual edits required.
+- **Federation IaC bundles deployed before #1219 need to be re-applied** to
+  pick up reconciled IAM action grants. Older bundles silently degrade on
+  federated accounts: the Cost Explorer `Get*Coverage` actions are missing
+  (coverage-targeted sizing assumes zero existing coverage), and the
+  cross-account CloudFormation flavor lacks the optional `EnableOrgDiscovery`
+  parameter and the legacy CE statement that the original `CUDly-CrossAccount`
+  template carried. Re-download the federation bundle from the CUDly UI and
+  re-apply (`terraform apply` / `aws cloudformation update-stack`) -- no
+  manual edits required, no changes to existing CUDly resources. Customers
+  on the runtime CloudFormation stack or Terraform lambda/fargate modules
+  also need an update to pick up the new `ec2:*ReservedInstancesExchangeQuote`
+  actions, `ec2:DescribeRegions`, `rds:DescribeDBInstances`, and the
+  new-style `es:*ReservedInstance*` OpenSearch actions (replacing the legacy
+  `es:*ReservedElasticsearch*` names).
 
 ### Fixed
 
