@@ -11,6 +11,7 @@ import (
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/LeanerCloud/CUDly/pkg/provider"
 	_ "github.com/LeanerCloud/CUDly/providers/aws"
+	"github.com/LeanerCloud/CUDly/providers/aws/recommendations"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/ec2"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/elasticache"
 	"github.com/LeanerCloud/CUDly/providers/aws/services/memorydb"
@@ -70,9 +71,10 @@ type Config struct {
 	DryRun                 bool
 	SkipConfirmation       bool
 	// RecLookbackPeriod controls the LookbackPeriodInDays passed to
-	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d".
+	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d"
+	// (recommendations.DefaultRecLookbackPeriod is the shared default).
 	// A longer window smooths seasonal spikes; a shorter window weights
-	// recent demand more heavily. Default "7d" matches the CE console default.
+	// recent demand more heavily.
 	RecLookbackPeriod string
 }
 
@@ -151,7 +153,7 @@ func init() {
 			"below this threshold. Useful with --target-coverage to skip tiny pools "+
 			"that integer arithmetic forces above target (e.g. avg=1 cannot hit 80%%). "+
 			"Default 0 = no filter.")
-	rootCmd.Flags().StringVar(&toolCfg.RecLookbackPeriod, "rec-lookback-period", "7d",
+	rootCmd.Flags().StringVar(&toolCfg.RecLookbackPeriod, "rec-lookback-period", recommendations.DefaultRecLookbackPeriod,
 		"Historical window for GetReservationPurchaseRecommendation. "+
 			"Valid values: 7d, 30d, 60d. A longer window smooths seasonal spikes; "+
 			"a shorter window weights recent demand more heavily. Default 7d.")
