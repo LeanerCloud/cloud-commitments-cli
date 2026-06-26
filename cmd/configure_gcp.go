@@ -594,12 +594,15 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? (creates service account '%s' via SDK) ", saName)
 
-	choice, _ := reader.ReadString('\n')
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read service-account choice: %w", err)
+	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		email, err := createGCPServiceAccount(ctx, projectID, saName)
-		if err != nil {
-			return "", err
+		email, createErr := createGCPServiceAccount(ctx, projectID, saName)
+		if createErr != nil {
+			return "", createErr
 		}
 		saEmail = email
 		fmt.Printf("Service account created: %s\n", saEmail)
@@ -625,11 +628,14 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? (grants %s to %s on project %s via SDK) ", role, saEmail, projectID)
 
-	choice, _ := reader.ReadString('\n')
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read grant-role choice: %w", err)
+	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		if err := grantGCPIAMRole(ctx, projectID, member, role); err != nil {
-			return err
+		if grantErr := grantGCPIAMRole(ctx, projectID, member, role); grantErr != nil {
+			return grantErr
 		}
 		fmt.Printf("Role %s granted to %s on project %s.\n", role, saEmail, projectID)
 	case "s", "skip":
@@ -658,11 +664,14 @@ func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string)
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? (creates key for %s, writes to %s via SDK) ", saEmail, keyFile)
 
-	choice, _ := reader.ReadString('\n')
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read create-key choice: %w", err)
+	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		if err := createGCPServiceAccountKey(ctx, saEmail, keyFile); err != nil {
-			return "", err
+		if keyErr := createGCPServiceAccountKey(ctx, saEmail, keyFile); keyErr != nil {
+			return "", keyErr
 		}
 		fmt.Printf("Key file written to: %s\n", keyFile)
 		fmt.Println()

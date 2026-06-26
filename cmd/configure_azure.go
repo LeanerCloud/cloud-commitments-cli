@@ -392,7 +392,7 @@ func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (stri
 	fmt.Print("Enter your Subscription ID from above: ")
 	subscriptionID, err := readTrimmedLine(reader)
 	if err != nil {
-		return fmt.Errorf("failed to read subscription ID: %w", err)
+		return "", fmt.Errorf("failed to read subscription ID: %w", err)
 	}
 
 	if subscriptionID == "" {
