@@ -93,7 +93,7 @@ The default path (`./cudly-audit.jsonl`) writes to the current working directory
 --idempotency-window   string   default: 24h
 ```
 
-This flag is accepted and validated as a Go duration string (e.g. `24h`, `48h`, `1h30m`). The CLI pipeline stores it but does not yet subtract previously-purchased commitments from new recommendations based on this window; that deduction logic runs in the server-side scheduler path, not the CLI purchase loop. Passing this flag in CLI invocations has no effect on which recommendations are purchased.
+This flag is accepted as a Go duration string (e.g. `24h`, `48h`, `1h30m`). The CLI does not validate the string at startup; it stores the raw value but does not yet subtract previously-purchased commitments from new recommendations based on this window. The deduction logic runs in the server-side scheduler path (where the duration IS parsed), not the CLI purchase loop. Passing this flag in CLI invocations has no effect on which recommendations are purchased.
 
 The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server path and is not emitted by the CLI.
 

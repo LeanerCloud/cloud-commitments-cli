@@ -9,9 +9,11 @@ All filters are evaluated before any purchase is attempted. Filtered-out recomme
 
 ## Scoping filters
 
-Scoping filters operate on include/exclude list pairs. An item that appears in both lists is rejected at startup with an error:
+Scoping filters operate on include/exclude list pairs. For region, instance-type, and engine pairs, an item that appears in both lists is rejected at startup with an error:
 
 > `region 'us-east-1' cannot be both included and excluded`
+
+The conflict check is NOT applied to `--include-accounts`/`--exclude-accounts` or `--include-sp-types`/`--exclude-sp-types`; for those, a name listed in both lists silently behaves as excluded (exclude wins). Avoid listing the same value in both lists.
 
 ### Account filters
 
@@ -20,7 +22,7 @@ Scoping filters operate on include/exclude list pairs. An item that appears in b
 --exclude-accounts  Exclude recommendations for these account names (comma-separated)
 ```
 
-Account names are matched against the friendly alias resolved from AWS Organizations (`organizations:ListAccounts`). If the alias cannot be resolved, the account ID is used as a fallback.
+Account names are matched against the friendly alias resolved from AWS Organizations (`organizations:DescribeAccount`, called per account ID and cached). If the alias cannot be resolved, the account ID is used as a fallback.
 
 ```bash
 # Only process two accounts
