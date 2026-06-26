@@ -526,10 +526,20 @@ func TestPrintFinalMessage(t *testing.T) {
 			notWanted: []string{"Purchase operations completed", "Archera", archeraSignupURL},
 		},
 		{
-			name:       "Successful purchase shows Archera pitch with URL and disclosure",
-			isDryRun:   false,
-			riSuccess:  3,
-			wantOutput: []string{"Purchase operations completed", "underutilization insurance", "https://www.archera.ai/cudly", "first 7 days", "sponsors CUDly's Open Source"},
+			name:      "Successful purchase shows Archera pitch with URL and disclosure",
+			isDryRun:  false,
+			riSuccess: 3,
+			wantOutput: []string{
+				"Purchase operations completed",
+				"underutilization insurance",
+				"https://www.archera.ai/cudly",
+				"first 7 days",
+				// Non-gating partnership disclosure (project_archera_partnership memory).
+				"entirely optional",
+				"work fully without Archera",
+				// Sponsorship partnership disclosure (project_archera_partnership memory).
+				"sponsors CUDly's Open Source",
+			},
 		},
 	}
 
