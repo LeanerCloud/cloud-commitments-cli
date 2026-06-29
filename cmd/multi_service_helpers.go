@@ -458,7 +458,7 @@ func applyRegionFilters(
 	cfg Config,
 ) []common.Recommendation {
 	originalCount := len(recs)
-	recs = applyFilters(recs, cfg, engineData.instanceVersions, engineData.versionInfo, region)
+	recs = applyFilters(recs, &cfg, engineData.instanceVersions, engineData.versionInfo, region)
 
 	if len(recs) < originalCount {
 		AppLogger.Printf("  🔍 After filters: %d recommendations (filtered out %d)\n", len(recs), originalCount-len(recs))

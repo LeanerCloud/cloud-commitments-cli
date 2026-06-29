@@ -394,7 +394,7 @@ func filterAndAdjustRecommendations(recommendations []common.Recommendation, csv
 
 	// Apply filters (empty currentRegion since we're processing from CSV, not iterating regions)
 	originalCount := len(recommendations)
-	recommendations = applyFilters(recommendations, cfg, instanceVersions, versionInfo, "")
+	recommendations = applyFilters(recommendations, &cfg, instanceVersions, versionInfo, "")
 	if len(recommendations) < originalCount {
 		AppLogger.Printf("🔍 After filters: %d recommendations (filtered out %d)\n", len(recommendations), originalCount-len(recommendations))
 	}

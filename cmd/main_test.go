@@ -98,12 +98,12 @@ func TestGetAllServices(t *testing.T) {
 func TestGeneratePurchaseID(t *testing.T) {
 	tests := []struct {
 		name           string
-		rec            common.Recommendation
 		region         string
-		index          int
-		isDryRun       bool
-		coverage       float64
 		expectedPrefix string
+		rec            common.Recommendation
+		index          int
+		coverage       float64
+		isDryRun       bool
 	}{
 		{
 			name: "RDS Recommendation - dry run",
@@ -401,11 +401,11 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 
 	tests := []struct {
 		name                string
-		rec                 common.Recommendation
 		region              string
-		isDryRun            bool
+		rec                 common.Recommendation
 		expectedContains    []string
 		expectedNotContains []string
+		isDryRun            bool
 	}{
 		{
 			name: "RDS with account name and engine",
@@ -617,15 +617,15 @@ func TestGeneratePurchaseIDCoverageVariations(t *testing.T) {
 
 	tests := []struct {
 		name             string
-		coverage         float64
 		expectedCoverage string
+		coverage         float64
 	}{
-		{"Coverage 0%", 0.0, "0pct"},
-		{"Coverage 50%", 50.0, "50pct"},
-		{"Coverage 75.5%", 75.5, "76pct"}, // Rounds to nearest integer
-		{"Coverage 99%", 99.0, "99pct"},
-		{"Coverage 100%", 100.0, "100pct"},
-		{"Coverage 33.3%", 33.3, "33pct"},
+		{"Coverage 0%", "0pct", 0.0},
+		{"Coverage 50%", "50pct", 50.0},
+		{"Coverage 75.5%", "76pct", 75.5}, // Rounds to nearest integer
+		{"Coverage 99%", "99pct", 99.0},
+		{"Coverage 100%", "100pct", 100.0},
+		{"Coverage 33.3%", "33pct", 33.3},
 	}
 
 	for _, tt := range tests {
@@ -685,12 +685,12 @@ func TestFilterFlagValidation(t *testing.T) {
 
 	tests := []struct {
 		name                 string
+		errorContains        string
 		includeRegions       []string
 		excludeRegions       []string
 		includeInstanceTypes []string
 		excludeInstanceTypes []string
 		expectError          bool
-		errorContains        string
 	}{
 		{
 			name:                 "No conflicts",
@@ -770,9 +770,9 @@ func TestCreateServiceClientAllServices(t *testing.T) {
 func TestValidateFlags(t *testing.T) {
 	tests := []struct {
 		name        string
+		setPayment  string
 		setCoverage float64
 		setTerm     int
-		setPayment  string
 		expectError bool
 	}{
 		{
@@ -846,21 +846,21 @@ func TestValidateFlagsExtended(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name               string
-		setCoverage        float64
-		setTerm            int
-		setPayment         string
-		setMaxInstances    int32
-		setCSVOutput       string
 		setCSVInput        string
+		setCSVOutput       string
+		errorContains      string
+		setPayment         string
+		name               string
 		setIncludeEngines  []string
-		setExcludeEngines  []string
-		setIncludeAccounts []string
 		setExcludeAccounts []string
+		setIncludeAccounts []string
+		setExcludeEngines  []string
 		setIncludeTypes    []string
 		setExcludeTypes    []string
+		setCoverage        float64
+		setTerm            int
+		setMaxInstances    int32
 		expectError        bool
-		errorContains      string
 	}{
 		// Coverage boundary tests
 		{
@@ -1104,8 +1104,8 @@ func TestSanitizeAccountName(t *testing.T) {
 func TestGeneratePurchaseID_EdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
-		rec      common.Recommendation
 		region   string
+		rec      common.Recommendation
 		index    int
 		isDryRun bool
 	}{
@@ -1179,9 +1179,9 @@ func TestGeneratePurchaseID_EdgeCases(t *testing.T) {
 func TestValidateInstanceTypes(t *testing.T) {
 	tests := []struct {
 		name          string
+		errorContains string
 		instanceTypes []string
 		expectError   bool
-		errorContains string
 	}{
 		{
 			name:          "Empty slice is valid",

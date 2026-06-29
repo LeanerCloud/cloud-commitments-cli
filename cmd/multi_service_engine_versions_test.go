@@ -11,10 +11,10 @@ import (
 
 func TestAdjustRecommendationForExcludedVersions(t *testing.T) {
 	tests := []struct {
-		name             string
-		recommendation   common.Recommendation
 		versionInfo      map[string]MajorEngineVersionInfo
 		instanceVersions map[string][]InstanceEngineVersion
+		name             string
+		recommendation   common.Recommendation
 		expectedCount    int
 		expectedAdjusted bool
 	}{
@@ -313,7 +313,7 @@ func TestExtractMajorVersion_Additional(t *testing.T) {
 	}
 }
 
-// Comprehensive tests for extractMajorVersion function
+// Comprehensive tests for extractMajorVersion function.
 func TestExtractMajorVersion_Comprehensive(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -502,10 +502,10 @@ func TestIsInExtendedSupport(t *testing.T) {
 	futureDate := now.AddDate(3, 0, 0)
 
 	tests := []struct {
+		versionInfo map[string]MajorEngineVersionInfo
 		name        string
 		engine      string
 		version     string
-		versionInfo map[string]MajorEngineVersionInfo
 		expected    bool
 	}{
 		{

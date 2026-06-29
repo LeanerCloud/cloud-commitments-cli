@@ -199,8 +199,8 @@ func TestApplyCountOverride(t *testing.T) {
 	tests := []struct {
 		name           string
 		recs           []common.Recommendation
-		overrideCount  int32
 		expectedCounts []int
+		overrideCount  int32
 	}{
 		{
 			name: "Override with positive value",
@@ -252,8 +252,8 @@ func TestApplyCoverage(t *testing.T) {
 	tests := []struct {
 		name           string
 		recs           []common.Recommendation
-		coverage       float64
 		expectedCounts []int
+		coverage       float64
 		expectedLen    int
 	}{
 		{
@@ -383,8 +383,8 @@ func TestAdjustRecommendationsForExisting(t *testing.T) {
 		name           string
 		inputRecs      []common.Recommendation
 		existingRIs    []common.Commitment
-		expectedLen    int
 		expectedCounts []int
+		expectedLen    int
 	}{
 		{
 			name: "No existing RIs - all recommendations kept",
@@ -490,8 +490,8 @@ func TestAdjustRecommendationsForExisting(t *testing.T) {
 func TestGetRecommendationDescription(t *testing.T) {
 	tests := []struct {
 		name     string
-		rec      common.Recommendation
 		expected string
+		rec      common.Recommendation
 	}{
 		{
 			name: "RDS recommendation with database details",
@@ -570,8 +570,8 @@ func TestNormalizeEngineName(t *testing.T) {
 func TestGetEngineFromRecommendation(t *testing.T) {
 	tests := []struct {
 		name     string
-		rec      common.Recommendation
 		expected string
+		rec      common.Recommendation
 	}{
 		{
 			name: "DatabaseDetails value type",
@@ -627,7 +627,7 @@ func TestGetEngineFromRecommendation(t *testing.T) {
 
 // confirmPurchaseWithInput is a testable variant of ConfirmPurchase that reads
 // from the provided reader rather than os.Stdin, allowing stdin to be mocked in tests.
-func confirmPurchaseWithInput(totalInstances int, totalCost float64, skipConfirmation bool, input string) bool {
+func confirmPurchaseWithInput(skipConfirmation bool, input string) bool {
 	if skipConfirmation {
 		return true
 	}
@@ -693,7 +693,7 @@ func TestConfirmPurchaseInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := confirmPurchaseWithInput(1, 10.0, false, tt.input)
+			result := confirmPurchaseWithInput(false, tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -706,8 +706,8 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 		name           string
 		inputRecs      []common.Recommendation
 		existingRIs    []common.Commitment
-		expectedLen    int
 		expectedCounts []int
+		expectedLen    int
 	}{
 		{
 			name: "Multiple RIs same instance type different regions",
@@ -771,9 +771,9 @@ func TestApplyInstanceLimit(t *testing.T) {
 	tests := []struct {
 		name           string
 		recs           []common.Recommendation
-		maxInstances   int32
-		expectedLen    int
 		expectedCounts []int
+		expectedLen    int
+		maxInstances   int32
 	}{
 		{
 			name: "No limit - all recommendations kept",

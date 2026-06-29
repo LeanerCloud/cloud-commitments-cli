@@ -111,7 +111,7 @@ func TestApplyFilters(t *testing.T) {
 			toolCfg.ExcludeInstanceTypes = tt.excludeInstanceTypes
 
 			// Apply filters with Config (empty currentRegion for test)
-			result := applyFilters(tt.recommendations, toolCfg, make(map[string][]InstanceEngineVersion), make(map[string]MajorEngineVersionInfo), "")
+			result := applyFilters(tt.recommendations, &toolCfg, make(map[string][]InstanceEngineVersion), make(map[string]MajorEngineVersionInfo), "")
 
 			// Check count
 			assert.Equal(t, tt.expectedCount, len(result))
@@ -169,7 +169,7 @@ func TestShouldIncludeRegion(t *testing.T) {
 			toolCfg.IncludeRegions = tt.includeRegions
 			toolCfg.ExcludeRegions = tt.excludeRegions
 
-			result := shouldIncludeRegion(tt.region, toolCfg)
+			result := shouldIncludeRegion(tt.region, &toolCfg)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -225,7 +225,7 @@ func TestShouldIncludeInstanceType(t *testing.T) {
 			toolCfg.IncludeInstanceTypes = tt.includeInstanceTypes
 			toolCfg.ExcludeInstanceTypes = tt.excludeInstanceTypes
 
-			result := shouldIncludeInstanceType(tt.instanceType, toolCfg)
+			result := shouldIncludeInstanceType(tt.instanceType, &toolCfg)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -345,7 +345,7 @@ func TestShouldIncludeEngine(t *testing.T) {
 			toolCfg.IncludeEngines = tt.includeEngines
 			toolCfg.ExcludeEngines = tt.excludeEngines
 
-			result := shouldIncludeEngine(tt.recommendation, toolCfg)
+			result := shouldIncludeEngine(&tt.recommendation, &toolCfg)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -408,7 +408,7 @@ func TestShouldIncludeAccount(t *testing.T) {
 			toolCfg.IncludeAccounts = tt.includeAccounts
 			toolCfg.ExcludeAccounts = tt.excludeAccounts
 
-			result := shouldIncludeAccount(tt.accountID, toolCfg)
+			result := shouldIncludeAccount(tt.accountID, &toolCfg)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
