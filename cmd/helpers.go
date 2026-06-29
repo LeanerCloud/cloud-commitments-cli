@@ -18,36 +18,36 @@ import (
 	"golang.org/x/term"
 )
 
-// Constants for purchase processing
+// Constants for purchase processing.
 const (
-	// DefaultDuplicateCheckLookbackHours is the default lookback period for checking recent purchases
+	// DefaultDuplicateCheckLookbackHours is the default lookback period for checking recent purchases.
 	DefaultDuplicateCheckLookbackHours = 24
 
-	// PurchaseDelaySeconds is the delay between consecutive purchases to avoid rate limiting
+	// PurchaseDelaySeconds is the delay between consecutive purchases to avoid rate limiting.
 	PurchaseDelaySeconds = 2
 )
 
-// AppLogger is a simple logger for application output
+// AppLogger is a simple logger for application output.
 var AppLogger = log.New(os.Stdout, "", 0)
 
-// OrganizationsAPI interface for describing accounts
+// OrganizationsAPI interface for describing accounts.
 type OrganizationsAPI interface {
 	DescribeAccount(ctx context.Context, params *organizations.DescribeAccountInput, optFns ...func(*organizations.Options)) (*organizations.DescribeAccountOutput, error)
 }
 
-// AccountAliasGetter is an interface for getting account aliases
+// AccountAliasGetter is an interface for getting account aliases.
 type AccountAliasGetter interface {
 	GetAccountAlias(ctx context.Context, accountID string) string
 }
 
-// AccountAliasCache caches account ID to alias mappings
+// AccountAliasCache caches account ID to alias mappings.
 type AccountAliasCache struct {
 	mu        sync.RWMutex
 	cache     map[string]string
 	orgClient OrganizationsAPI
 }
 
-// NewAccountAliasCache creates a new account alias cache
+// NewAccountAliasCache creates a new account alias cache.
 func NewAccountAliasCache(cfg aws.Config) *AccountAliasCache {
 	return &AccountAliasCache{
 		cache:     make(map[string]string),
@@ -56,7 +56,7 @@ func NewAccountAliasCache(cfg aws.Config) *AccountAliasCache {
 }
 
 // NewAccountAliasCacheWithClient creates a new account alias cache with a custom client
-// This is useful for testing with mocked clients
+// This is useful for testing with mocked clients.
 func NewAccountAliasCacheWithClient(orgClient OrganizationsAPI) *AccountAliasCache {
 	return &AccountAliasCache{
 		cache:     make(map[string]string),
@@ -64,7 +64,7 @@ func NewAccountAliasCacheWithClient(orgClient OrganizationsAPI) *AccountAliasCac
 	}
 }
 
-// GetAccountAlias returns the account alias for an account ID
+// GetAccountAlias returns the account alias for an account ID.
 func (c *AccountAliasCache) GetAccountAlias(ctx context.Context, accountID string) string {
 	if accountID == "" {
 		return ""
@@ -104,7 +104,7 @@ func (c *AccountAliasCache) GetAccountAlias(ctx context.Context, accountID strin
 	return accountID
 }
 
-// CalculateTotalInstances calculates the total instance count across recommendations
+// CalculateTotalInstances calculates the total instance count across recommendations.
 func CalculateTotalInstances(recs []common.Recommendation) int {
 	total := 0
 	for _, rec := range recs {
@@ -223,7 +223,7 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 //
 //	Pools where CE reports 100% existing coverage but AWS still recommends
 //	new RIs (typical when existing RIs are near expiry) are dropped here —
-//	the existing coverage is honoured strictly. Use --rebuy-window-days to
+//	the existing coverage is honored strictly. Use --rebuy-window-days to
 //	surface those replacements before the cliff.
 //
 // SPs:
@@ -424,7 +424,7 @@ func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common
 	// RecommendedUtilization is consulted only as a no-signal guard above (a
 	// zero value means we can't sanity-check the result); the scaling itself
 	// uses targetPct directly rather than a recUtil/target ratio so the flag's
-	// intent is honoured even when AWS already projects above target.
+	// intent is honored even when AWS already projects above target.
 	//
 	// If Details isn't a *SavingsPlanDetails (defensive — should always be
 	// for SP recs), log a warning and pass through UNCHANGED — including
@@ -467,7 +467,7 @@ func applySizing(recs []common.Recommendation, cfg Config, coverage float64) []c
 	return ApplyCoverage(recs, coverage)
 }
 
-// ApplyCountOverride overrides the count for all recommendations
+// ApplyCountOverride overrides the count for all recommendations.
 func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []common.Recommendation {
 	if overrideCount <= 0 {
 		return recs
@@ -480,7 +480,7 @@ func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []com
 	return result
 }
 
-// ApplyInstanceLimit limits the total number of instances
+// ApplyInstanceLimit limits the total number of instances.
 func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []common.Recommendation {
 	if maxInstances <= 0 {
 		return recs
@@ -540,7 +540,7 @@ func CheckAuditLogWritable(path string) error {
 	return f.Close()
 }
 
-// DuplicateChecker checks for existing commitments to avoid duplicates
+// DuplicateChecker checks for existing commitments to avoid duplicates.
 type DuplicateChecker struct {
 	LookbackHours int // How many hours to look back for recent purchases
 }
@@ -586,7 +586,7 @@ func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context,
 	return passed, filtered, nil
 }
 
-// filterRecentCommitments filters commitments to only recent purchases within the lookback window
+// filterRecentCommitments filters commitments to only recent purchases within the lookback window.
 func (d *DuplicateChecker) filterRecentCommitments(existing []common.Commitment) []common.Commitment {
 	cutoffTime := time.Now().Add(-time.Duration(d.LookbackHours) * time.Hour)
 	recentExisting := make([]common.Commitment, 0)
@@ -600,12 +600,12 @@ func (d *DuplicateChecker) filterRecentCommitments(existing []common.Commitment)
 	return recentExisting
 }
 
-// isRecentActiveCommitment checks if a commitment is active and purchased after the cutoff time
+// isRecentActiveCommitment checks if a commitment is active and purchased after the cutoff time.
 func isRecentActiveCommitment(c common.Commitment, cutoffTime time.Time) bool {
 	return (c.State == "active" || c.State == "payment-pending") && c.StartDate.After(cutoffTime)
 }
 
-// buildExistingCommitmentsMap builds a map of commitments by resource type, region, and engine
+// buildExistingCommitmentsMap builds a map of commitments by resource type, region, and engine.
 func buildExistingCommitmentsMap(commitments []common.Commitment) map[string]int {
 	existingMap := make(map[string]int)
 
@@ -638,7 +638,7 @@ func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existing
 	return passed, filtered
 }
 
-// adjustSingleRecommendation adjusts a single recommendation based on existing commitments
+// adjustSingleRecommendation adjusts a single recommendation based on existing commitments.
 func adjustSingleRecommendation(rec common.Recommendation, existingMap map[string]int) common.Recommendation {
 	engine := getEngineFromRecommendation(rec)
 	key := fmt.Sprintf("%s|%s|%s", rec.ResourceType, rec.Region, engine)
@@ -664,7 +664,7 @@ func adjustSingleRecommendation(rec common.Recommendation, existingMap map[strin
 	return adjusted
 }
 
-// getEngineFromRecommendation extracts the engine from recommendation details
+// getEngineFromRecommendation extracts the engine from recommendation details.
 func getEngineFromRecommendation(rec common.Recommendation) string {
 	if rec.Details == nil {
 		return ""
@@ -687,7 +687,7 @@ func getEngineFromRecommendation(rec common.Recommendation) string {
 
 // engineNameMap maps database engine names to a consistent normalized format.
 // AWS RIs use: "aurora-postgresql", "aurora-mysql", "mysql", "postgres"
-// Cost Explorer uses: "Aurora PostgreSQL", "Aurora MySQL", "MySQL", "PostgreSQL"
+// Cost Explorer uses: "Aurora PostgreSQL", "Aurora MySQL", "MySQL", "PostgreSQL".
 var engineNameMap = map[string]string{
 	// Cost Explorer format -> normalized
 	"Aurora PostgreSQL": "aurora-postgresql",
@@ -714,7 +714,7 @@ var engineNameMap = map[string]string{
 	"sqlserver-web":     "sqlserver",
 }
 
-// normalizeEngineName normalizes database engine names to a consistent format
+// normalizeEngineName normalizes database engine names to a consistent format.
 func normalizeEngineName(engine string) string {
 	if normalized, ok := engineNameMap[engine]; ok {
 		return normalized
@@ -723,12 +723,12 @@ func normalizeEngineName(engine string) string {
 	return strings.ToLower(engine)
 }
 
-// AdjustRecommendationsForExistingRIs is an alias for AdjustRecommendationsForExisting
+// AdjustRecommendationsForExistingRIs is an alias for AdjustRecommendationsForExisting.
 func (d *DuplicateChecker) AdjustRecommendationsForExistingRIs(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, []common.Recommendation, error) {
 	return d.AdjustRecommendationsForExisting(ctx, recs, client)
 }
 
-// GetRecommendationDescription returns a human-readable description
+// GetRecommendationDescription returns a human-readable description.
 func GetRecommendationDescription(rec common.Recommendation) string {
 	desc := fmt.Sprintf("%s %s", rec.Service, rec.ResourceType)
 	if rec.Details != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,7 +14,7 @@ import (
 	"github.com/LeanerCloud/CUDly/providers/aws/recommendations"
 )
 
-// determineCSVCoverage determines the coverage percentage to use for CSV mode
+// determineCSVCoverage determines the coverage percentage to use for CSV mode.
 func determineCSVCoverage(cfg Config) float64 {
 	// When using CSV input, default to 100% coverage (use exact numbers from CSV)
 	// unless user explicitly provided a different coverage value
@@ -24,7 +25,7 @@ func determineCSVCoverage(cfg Config) float64 {
 	return cfg.Coverage
 }
 
-// loadRecommendationsFromCSV reads and returns recommendations from a CSV file
+// loadRecommendationsFromCSV reads and returns recommendations from a CSV file.
 func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error) {
 	file, err := os.Open(csvPath)
 	if err != nil {
@@ -56,7 +57,7 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	return recommendations, nil
 }
 
-// buildColumnIndexMap creates a map from column names to indices
+// buildColumnIndexMap creates a map from column names to indices.
 func buildColumnIndexMap(header []string) map[string]int {
 	colIdx := make(map[string]int)
 	for i, col := range header {
@@ -65,13 +66,13 @@ func buildColumnIndexMap(header []string) map[string]int {
 	return colIdx
 }
 
-// parseCSVRecords reads and parses all CSV records
+// parseCSVRecords reads and parses all CSV records.
 func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recommendation, error) {
 	var recommendations []common.Recommendation
 
 	for {
 		record, err := reader.Read()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -97,7 +98,7 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 	return recommendations, nil
 }
 
-// parseCSVRecord parses a single CSV record into a Recommendation
+// parseCSVRecord parses a single CSV record into a Recommendation.
 func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendation, error) {
 	rec := common.Recommendation{}
 
@@ -154,7 +155,7 @@ func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendati
 	return rec, nil
 }
 
-// getCSVField safely retrieves a string field from a CSV record
+// getCSVField safely retrieves a string field from a CSV record.
 func getCSVField(record []string, colIdx map[string]int, fieldName string) string {
 	if idx, ok := colIdx[fieldName]; ok && idx < len(record) {
 		return record[idx]
@@ -162,7 +163,7 @@ func getCSVField(record []string, colIdx map[string]int, fieldName string) strin
 	return ""
 }
 
-// parseCSVInt parses an integer field from a CSV record
+// parseCSVInt parses an integer field from a CSV record.
 func parseCSVInt(record []string, colIdx map[string]int, fieldName string, target *int) error {
 	value := getCSVField(record, colIdx, fieldName)
 	if value == "" {
@@ -175,7 +176,7 @@ func parseCSVInt(record []string, colIdx map[string]int, fieldName string, targe
 	return nil
 }
 
-// parseCSVFloat parses a float field from a CSV record
+// parseCSVFloat parses a float field from a CSV record.
 func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, target *float64) error {
 	value := getCSVField(record, colIdx, fieldName)
 	if value == "" {
@@ -188,7 +189,7 @@ func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, tar
 	return nil
 }
 
-// writeMultiServiceCSVReport writes purchase results to a CSV file
+// writeMultiServiceCSVReport writes purchase results to a CSV file.
 func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string) error {
 	if len(results) == 0 {
 		return nil

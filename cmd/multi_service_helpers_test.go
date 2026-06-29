@@ -731,7 +731,7 @@ func TestPopulateAccountNames(t *testing.T) {
 }
 
 // TestPopulateAccountNamesLogic tests the logic of populateAccountNames
-// by verifying it populates the AccountName field correctly
+// by verifying it populates the AccountName field correctly.
 func TestPopulateAccountNamesLogic(t *testing.T) {
 	ctx := context.Background()
 

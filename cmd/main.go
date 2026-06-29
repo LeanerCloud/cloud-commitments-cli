@@ -27,11 +27,11 @@ import (
 
 const (
 	// MaxReasonableInstances is the maximum number of instances that can be processed
-	// This is a safety limit to prevent accidental large purchases
+	// This is a safety limit to prevent accidental large purchases.
 	MaxReasonableInstances = 10000
 )
 
-// Config holds all configuration for the RI helper tool
+// Config holds all configuration for the RI helper tool.
 type Config struct {
 	Providers []string
 	Regions   []string
@@ -173,7 +173,7 @@ func init() {
 			"Default 0 = no filter.")
 }
 
-// Package-level Config that cobra flags bind to
+// Package-level Config that cobra flags bind to.
 var toolCfg = Config{}
 
 // validateFlags is now defined in validators.go
@@ -239,7 +239,7 @@ func parseServices(serviceNames []string) []common.ServiceType {
 	return result
 }
 
-// getAllServices returns all supported services
+// getAllServices returns all supported services.
 func getAllServices() []common.ServiceType {
 	return []common.ServiceType{
 		common.ServiceRDS,
@@ -255,7 +255,7 @@ func getAllServices() []common.ServiceType {
 	}
 }
 
-// createServiceClient creates the appropriate service client for a service
+// createServiceClient creates the appropriate service client for a service.
 func createServiceClient(service common.ServiceType, cfg aws.Config) provider.ServiceClient {
 	switch service {
 	case common.ServiceRDS:
@@ -366,7 +366,7 @@ func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRu
 		prefix, service, region, instanceType, rec.Count, coveragePct, timestamp, uuidSuffix)
 }
 
-// sanitizeAccountName converts account name to a filesystem/ID-safe format
+// sanitizeAccountName converts account name to a filesystem/ID-safe format.
 func sanitizeAccountName(accountName string) string {
 	if accountName == "" {
 		return ""

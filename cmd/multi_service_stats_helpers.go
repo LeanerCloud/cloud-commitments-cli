@@ -4,7 +4,7 @@ import (
 	"github.com/LeanerCloud/CUDly/pkg/common"
 )
 
-// SPTypeBreakdown holds savings information broken down by Savings Plan type
+// SPTypeBreakdown holds savings information broken down by Savings Plan type.
 type SPTypeBreakdown struct {
 	ComputeSavings     float64
 	EC2InstanceSavings float64
@@ -16,7 +16,7 @@ type SPTypeBreakdown struct {
 	DatabaseCount      int
 }
 
-// categorizeSPRecommendations categorizes Savings Plan recommendations by type
+// categorizeSPRecommendations categorizes Savings Plan recommendations by type.
 func categorizeSPRecommendations(recommendations []common.Recommendation) SPTypeBreakdown {
 	breakdown := SPTypeBreakdown{}
 
@@ -44,7 +44,7 @@ func categorizeSPRecommendations(recommendations []common.Recommendation) SPType
 	return breakdown
 }
 
-// printSPTypeSummaries prints the summary for each Savings Plan type
+// printSPTypeSummaries prints the summary for each Savings Plan type.
 func printSPTypeSummaries(breakdown SPTypeBreakdown) {
 	if breakdown.ComputeCount > 0 {
 		AppLogger.Printf("  Compute SP    | Recs: %3d | Covers: EC2, Fargate, Lambda | $%8.2f/mo\n",
@@ -64,7 +64,7 @@ func printSPTypeSummaries(breakdown SPTypeBreakdown) {
 	}
 }
 
-// printBestSPOptions prints the best Savings Plan options by category
+// printBestSPOptions prints the best Savings Plan options by category.
 func printBestSPOptions(breakdown SPTypeBreakdown) {
 	AppLogger.Println()
 
@@ -88,14 +88,14 @@ func printBestSPOptions(breakdown SPTypeBreakdown) {
 	}
 }
 
-// SPSavingsByType holds Savings Plan savings categorized by plan type
+// SPSavingsByType holds Savings Plan savings categorized by plan type.
 type SPSavingsByType struct {
 	EC2SPSavings      float64
 	ComputeSPSavings  float64
 	DatabaseSPSavings float64
 }
 
-// collectSPSavings collects Savings Plan savings by type
+// collectSPSavings collects Savings Plan savings by type.
 func collectSPSavings(recommendations []common.Recommendation) SPSavingsByType {
 	savings := SPSavingsByType{}
 
@@ -117,13 +117,13 @@ func collectSPSavings(recommendations []common.Recommendation) SPSavingsByType {
 	return savings
 }
 
-// RISavingsByService holds Reserved Instance savings categorized by service
+// RISavingsByService holds Reserved Instance savings categorized by service.
 type RISavingsByService struct {
 	EC2RISavings float64
 	DBRISavings  float64
 }
 
-// collectRISavings collects Reserved Instance savings by service
+// collectRISavings collects Reserved Instance savings by service.
 func collectRISavings(riStats map[common.ServiceType]ServiceProcessingStats) RISavingsByService {
 	savings := RISavingsByService{}
 
@@ -143,7 +143,7 @@ func collectRISavings(riStats map[common.ServiceType]ServiceProcessingStats) RIS
 	return savings
 }
 
-// ComparisonOptions holds the calculated savings for different purchasing options
+// ComparisonOptions holds the calculated savings for different purchasing options.
 type ComparisonOptions struct {
 	Option1Savings    float64
 	Option2Savings    float64
@@ -153,7 +153,7 @@ type ComparisonOptions struct {
 	HasDatabaseSP     bool
 }
 
-// calculateComparisonOptions calculates savings for all comparison options
+// calculateComparisonOptions calculates savings for all comparison options.
 func calculateComparisonOptions(riSavings float64, spSavings SPSavingsByType, risByService RISavingsByService) ComparisonOptions {
 	opts := ComparisonOptions{
 		Option1Savings: riSavings,
@@ -180,7 +180,7 @@ func calculateComparisonOptions(riSavings float64, spSavings SPSavingsByType, ri
 	return opts
 }
 
-// printComparisonOptions prints all comparison options
+// printComparisonOptions prints all comparison options.
 func printComparisonOptions(opts ComparisonOptions) {
 	// Option 1: All RIs
 	AppLogger.Printf("Option 1 (All RIs):\n")
@@ -203,7 +203,7 @@ func printComparisonOptions(opts ComparisonOptions) {
 	}
 }
 
-// determineBestOption determines and prints the best purchasing option
+// determineBestOption determines and prints the best purchasing option.
 func determineBestOption(opts ComparisonOptions) {
 	if !opts.HasDatabaseSP {
 		// Only 2 options available

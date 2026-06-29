@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// MockSecretsStore is a mock implementation of SecretsStore for testing
+// MockSecretsStore is a mock implementation of SecretsStore for testing.
 type MockSecretsStore struct {
 	listSecretsFunc   func(ctx context.Context, filter string) ([]string, error)
 	updateSecretFunc  func(ctx context.Context, secretID string, secretValue string) error
@@ -40,7 +40,7 @@ func (m *MockSecretsStore) UpdateSecret(ctx context.Context, secretID string, se
 	return nil
 }
 
-// TestAzureCredentials_Struct tests the AzureCredentials struct
+// TestAzureCredentials_Struct tests the AzureCredentials struct.
 func TestAzureCredentials_Struct(t *testing.T) {
 	creds := AzureCredentials{
 		TenantID:       "tenant-123",
@@ -55,7 +55,7 @@ func TestAzureCredentials_Struct(t *testing.T) {
 	assert.Equal(t, "sub-abc", creds.SubscriptionID)
 }
 
-// TestAzureConfigOptions_Defaults tests AzureConfigOptions defaults
+// TestAzureConfigOptions_Defaults tests AzureConfigOptions defaults.
 func TestAzureConfigOptions_Defaults(t *testing.T) {
 	opts := AzureConfigOptions{}
 
@@ -68,7 +68,7 @@ func TestAzureConfigOptions_Defaults(t *testing.T) {
 	assert.False(t, opts.Interactive)
 }
 
-// TestAzureConfigOptions_WithValues tests AzureConfigOptions with values
+// TestAzureConfigOptions_WithValues tests AzureConfigOptions with values.
 func TestAzureConfigOptions_WithValues(t *testing.T) {
 	opts := AzureConfigOptions{
 		StackName:      "my-cudly",
@@ -89,7 +89,7 @@ func TestAzureConfigOptions_WithValues(t *testing.T) {
 	assert.True(t, opts.Interactive)
 }
 
-// TestGCPCredentials_Struct tests the GCPCredentials struct
+// TestGCPCredentials_Struct tests the GCPCredentials struct.
 func TestGCPCredentials_Struct(t *testing.T) {
 	creds := GCPCredentials{
 		Type:         "service_account",
@@ -108,7 +108,7 @@ func TestGCPCredentials_Struct(t *testing.T) {
 	assert.Equal(t, "12345678901234567890", creds.ClientID)
 }
 
-// TestGCPConfigOptions_Defaults tests GCPConfigOptions defaults
+// TestGCPConfigOptions_Defaults tests GCPConfigOptions defaults.
 func TestGCPConfigOptions_Defaults(t *testing.T) {
 	opts := GCPConfigOptions{}
 
@@ -119,7 +119,7 @@ func TestGCPConfigOptions_Defaults(t *testing.T) {
 	assert.False(t, opts.Interactive)
 }
 
-// TestGCPConfigOptions_WithValues tests GCPConfigOptions with values
+// TestGCPConfigOptions_WithValues tests GCPConfigOptions with values.
 func TestGCPConfigOptions_WithValues(t *testing.T) {
 	opts := GCPConfigOptions{
 		StackName:       "my-cudly",
@@ -136,7 +136,7 @@ func TestGCPConfigOptions_WithValues(t *testing.T) {
 	assert.True(t, opts.Interactive)
 }
 
-// Tests for validateAzureUUID function
+// Tests for validateAzureUUID function.
 func TestValidateAzureUUID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -256,7 +256,7 @@ func TestValidateAzureUUID(t *testing.T) {
 	}
 }
 
-// Tests for validateGCPProjectID function
+// Tests for validateGCPProjectID function.
 func TestValidateGCPProjectID(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -383,7 +383,7 @@ func TestValidateGCPProjectID(t *testing.T) {
 	}
 }
 
-// Tests for storeAzureCredentials function
+// Tests for storeAzureCredentials function.
 func TestStoreAzureCredentials(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -549,7 +549,7 @@ func TestStoreAzureCredentials(t *testing.T) {
 	}
 }
 
-// Tests for storeGCPCredentials function
+// Tests for storeGCPCredentials function.
 func TestStoreGCPCredentials(t *testing.T) {
 	// private_key validation is presence-only; the key content is not parsed or
 	// validated as a real PEM block by storeGCPCredentials.

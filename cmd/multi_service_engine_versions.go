@@ -18,7 +18,7 @@ import (
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 )
 
-// InstanceEngineVersion stores engine version information for an instance
+// InstanceEngineVersion stores engine version information for an instance.
 type InstanceEngineVersion struct {
 	Engine        string
 	EngineVersion string
@@ -26,21 +26,21 @@ type InstanceEngineVersion struct {
 	Region        string
 }
 
-// EngineLifecycleInfo stores lifecycle support information for a major engine version
+// EngineLifecycleInfo stores lifecycle support information for a major engine version.
 type EngineLifecycleInfo struct {
 	LifecycleSupportName      string
 	LifecycleSupportStartDate time.Time
 	LifecycleSupportEndDate   time.Time
 }
 
-// MajorEngineVersionInfo stores support information for a major engine version
+// MajorEngineVersionInfo stores support information for a major engine version.
 type MajorEngineVersionInfo struct {
 	Engine                    string
 	MajorEngineVersion        string
 	SupportedEngineLifecycles []EngineLifecycleInfo
 }
 
-// queryRunningInstanceEngineVersions queries all running RDS instances and returns their engine versions
+// queryRunningInstanceEngineVersions queries all running RDS instances and returns their engine versions.
 func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[string][]InstanceEngineVersion, error) {
 	awsCfg, err := loadValidationAWSConfig(ctx, cfg)
 	if err != nil {
@@ -55,7 +55,7 @@ func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[st
 	return queryRDSInstancesInRegions(ctx, awsCfg, regions)
 }
 
-// loadValidationAWSConfig loads AWS configuration for validation
+// loadValidationAWSConfig loads AWS configuration for validation.
 func loadValidationAWSConfig(ctx context.Context, cfg Config) (aws.Config, error) {
 	validationProfile := cfg.ValidationProfile
 	if validationProfile == "" {
@@ -76,7 +76,7 @@ func loadValidationAWSConfig(ctx context.Context, cfg Config) (aws.Config, error
 	return awsCfg, nil
 }
 
-// getAWSRegions retrieves all AWS regions
+// getAWSRegions retrieves all AWS regions.
 func getAWSRegions(ctx context.Context, awsCfg aws.Config) ([]ec2types.Region, error) {
 	ec2Client := awsec2.NewFromConfig(awsCfg)
 	regionsOutput, err := ec2Client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
@@ -86,7 +86,7 @@ func getAWSRegions(ctx context.Context, awsCfg aws.Config) ([]ec2types.Region, e
 	return regionsOutput.Regions, nil
 }
 
-// maxConcurrentRegionQueries limits the number of concurrent AWS API calls across regions
+// maxConcurrentRegionQueries limits the number of concurrent AWS API calls across regions.
 const maxConcurrentRegionQueries = 10
 
 // maxEngineVersionPages caps DescribeDBMajorEngineVersions pagination per engine.
@@ -99,7 +99,7 @@ type RDSMajorVersionsClient interface {
 	DescribeDBMajorEngineVersions(ctx context.Context, params *awsrds.DescribeDBMajorEngineVersionsInput, optFns ...func(*awsrds.Options)) (*awsrds.DescribeDBMajorEngineVersionsOutput, error)
 }
 
-// queryRDSInstancesInRegions queries RDS instances in all regions concurrently
+// queryRDSInstancesInRegions queries RDS instances in all regions concurrently.
 func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (map[string][]InstanceEngineVersion, error) {
 	instanceVersions := make(map[string][]InstanceEngineVersion)
 	var mu sync.Mutex
@@ -128,7 +128,7 @@ func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions 
 	return instanceVersions, nil
 }
 
-// queryRDSInstancesInRegion queries RDS instances in a single region
+// queryRDSInstancesInRegion queries RDS instances in a single region.
 func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) {
 	regionCfg := awsCfg.Copy()
 	regionCfg.Region = regionName
@@ -156,7 +156,7 @@ func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionNam
 	}
 }
 
-// queryRDSInstancesPage queries a single page of RDS instances
+// queryRDSInstancesPage queries a single page of RDS instances.
 func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker *string, regionName string) (map[string][]InstanceEngineVersion, *string, error) {
 	input := &awsrds.DescribeDBInstancesInput{Marker: marker}
 	output, err := rdsClient.DescribeDBInstances(ctx, input)
@@ -186,7 +186,7 @@ func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker
 	return localVersions, nextMarker, nil
 }
 
-// queryMajorEngineVersions queries AWS for major engine version lifecycle support information
+// queryMajorEngineVersions queries AWS for major engine version lifecycle support information.
 func queryMajorEngineVersions(ctx context.Context, cfg Config) (map[string]MajorEngineVersionInfo, error) {
 	// Determine which profile to use
 	profile := cfg.ValidationProfile
@@ -295,7 +295,7 @@ func parseDBMajorEngineVersion(version rdstypes.DBMajorEngineVersion) MajorEngin
 }
 
 // extractMajorVersion extracts the major version from a full engine version string
-// Handles special cases like Aurora MySQL version mapping
+// Handles special cases like Aurora MySQL version mapping.
 func extractMajorVersion(engine, fullVersion string) string {
 	if fullVersion == "" {
 		return ""
@@ -314,7 +314,7 @@ func extractMajorVersion(engine, fullVersion string) string {
 	return extractStandardVersion(fullVersion)
 }
 
-// normalizeEngineNameForVersion normalizes an engine name by removing spaces and hyphens
+// normalizeEngineNameForVersion normalizes an engine name by removing spaces and hyphens.
 func normalizeEngineNameForVersion(engine string) string {
 	normalized := strings.ToLower(engine)
 	normalized = strings.ReplaceAll(normalized, "-", "")
@@ -322,7 +322,7 @@ func normalizeEngineNameForVersion(engine string) string {
 	return normalized
 }
 
-// extractAuroraMySQLVersion extracts the MySQL-compatible version from Aurora MySQL
+// extractAuroraMySQLVersion extracts the MySQL-compatible version from Aurora MySQL.
 func extractAuroraMySQLVersion(fullVersion string) string {
 	// Aurora MySQL 2.x is compatible with MySQL 5.7
 	if strings.Contains(fullVersion, "mysql_aurora.2.") {
@@ -342,7 +342,7 @@ func extractAuroraMySQLVersion(fullVersion string) string {
 	return ""
 }
 
-// extractStandardVersion extracts major.minor version from a standard version string
+// extractStandardVersion extracts major.minor version from a standard version string.
 func extractStandardVersion(fullVersion string) string {
 	parts := strings.Split(fullVersion, ".")
 	if len(parts) >= 2 {
@@ -354,7 +354,7 @@ func extractStandardVersion(fullVersion string) string {
 	return ""
 }
 
-// extractMajorMinorVersion combines major and minor version parts
+// extractMajorMinorVersion combines major and minor version parts.
 func extractMajorMinorVersion(major, minor string) string {
 	// Filter out non-numeric parts in minor version
 	numericMinor := extractNumericPrefix(minor)
@@ -364,7 +364,7 @@ func extractMajorMinorVersion(major, minor string) string {
 	return major
 }
 
-// extractNumericPrefix extracts the numeric prefix from a string
+// extractNumericPrefix extracts the numeric prefix from a string.
 func extractNumericPrefix(s string) string {
 	numericPrefix := ""
 	for _, ch := range s {
@@ -377,7 +377,7 @@ func extractNumericPrefix(s string) string {
 	return numericPrefix
 }
 
-// isInExtendedSupport checks if a version is currently in extended support based on lifecycle dates
+// isInExtendedSupport checks if a version is currently in extended support based on lifecycle dates.
 func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]MajorEngineVersionInfo) bool {
 	majorVersion := extractMajorVersion(engine, fullVersion)
 	if majorVersion == "" {
@@ -411,7 +411,7 @@ func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]Majo
 }
 
 // adjustRecommendationForExcludedVersions reduces the instance count in a recommendation
-// by the number of instances running versions in extended support
+// by the number of instances running versions in extended support.
 func adjustRecommendationForExcludedVersions(rec common.Recommendation, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo) common.Recommendation {
 	// Check if this instance type has any running instances
 	versions, exists := instanceVersions[rec.ResourceType]

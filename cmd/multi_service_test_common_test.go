@@ -13,7 +13,7 @@ import (
 
 // ==================== Mock Implementations ====================
 
-// MockEC2Client for testing getAllAWSRegions
+// MockEC2Client for testing getAllAWSRegions.
 type MockEC2Client struct {
 	mock.Mock
 }
@@ -26,7 +26,7 @@ func (m *MockEC2Client) DescribeRegions(ctx context.Context, params *ec2.Describ
 	return args.Get(0).(*ec2.DescribeRegionsOutput), args.Error(1)
 }
 
-// MockRecommendationsClient for testing
+// MockRecommendationsClient for testing.
 type MockRecommendationsClient struct {
 	mock.Mock
 }
@@ -55,7 +55,7 @@ func (m *MockRecommendationsClient) GetAllRecommendations(ctx context.Context) (
 	return args.Get(0).([]common.Recommendation), args.Error(1)
 }
 
-// MockServiceClient implements provider.ServiceClient for testing
+// MockServiceClient implements provider.ServiceClient for testing.
 type MockServiceClient struct {
 	mock.Mock
 }
@@ -114,29 +114,29 @@ func (m *MockServiceClient) GetValidResourceTypes(ctx context.Context) ([]string
 
 // ==================== Test Helpers ====================
 
-// globalVarsSnapshot captures the toolCfg for tests
+// globalVarsSnapshot captures the toolCfg for tests.
 type globalVarsSnapshot struct {
 	cfg Config
 }
 
-// saveGlobalVars captures current toolCfg state
+// saveGlobalVars captures current toolCfg state.
 func saveGlobalVars() *globalVarsSnapshot {
 	return &globalVarsSnapshot{
 		cfg: toolCfg,
 	}
 }
 
-// restoreGlobalVars restores toolCfg state from snapshot
+// restoreGlobalVars restores toolCfg state from snapshot.
 func (s *globalVarsSnapshot) restore() {
 	toolCfg = s.cfg
 }
 
-// OrganizationsClientAPI is an interface for organizations client operations
+// OrganizationsClientAPI is an interface for organizations client operations.
 type OrganizationsClientAPI interface {
 	DescribeAccount(ctx context.Context, params *organizations.DescribeAccountInput, optFns ...func(*organizations.Options)) (*organizations.DescribeAccountOutput, error)
 }
 
-// MockOrganizationsClient for testing account alias cache
+// MockOrganizationsClient for testing account alias cache.
 type MockOrganizationsClient struct {
 	mock.Mock
 }
@@ -149,14 +149,14 @@ func (m *MockOrganizationsClient) DescribeAccount(ctx context.Context, params *o
 	return args.Get(0).(*organizations.DescribeAccountOutput), args.Error(1)
 }
 
-// TestAccountAliasCache is a test-friendly version of AccountAliasCache
+// TestAccountAliasCache is a test-friendly version of AccountAliasCache.
 type TestAccountAliasCache struct {
 	mu        sync.RWMutex
 	cache     map[string]string
 	orgClient OrganizationsClientAPI
 }
 
-// GetAccountAlias returns the account alias for an account ID (same logic as production)
+// GetAccountAlias returns the account alias for an account ID (same logic as production).
 func (c *TestAccountAliasCache) GetAccountAlias(ctx context.Context, accountID string) string {
 	if accountID == "" {
 		return ""

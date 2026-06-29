@@ -256,7 +256,7 @@ func buildServiceStats(recs []common.Recommendation, results []common.PurchaseRe
 	return stats
 }
 
-// runToolFromCSV processes recommendations from a CSV input file
+// runToolFromCSV processes recommendations from a CSV input file.
 func runToolFromCSV(ctx context.Context, cfg Config) {
 	// Determine if this is a dry run
 	isDryRun := !cfg.ActualPurchase
@@ -368,7 +368,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	printMultiServiceSummary(recommendations, allResults, serviceStats, isDryRun)
 }
 
-// filterAndAdjustRecommendations applies filters, coverage, count override, and instance limits to recommendations
+// filterAndAdjustRecommendations applies filters, coverage, count override, and instance limits to recommendations.
 func filterAndAdjustRecommendations(recommendations []common.Recommendation, csvModeCoverage float64, cfg Config) []common.Recommendation {
 	// Query running instances for engine version validation
 	log.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...")
@@ -458,7 +458,7 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient provider.R
 	return serviceRecs, serviceResults
 }
 
-// processPurchaseLoop processes purchases for a single region (used by CSV mode)
+// processPurchaseLoop processes purchases for a single region (used by CSV mode).
 func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, region string, isDryRun bool, serviceClient provider.ServiceClient, cfg Config) []common.PurchaseResult {
 	results := make([]common.PurchaseResult, 0, len(recs))
 

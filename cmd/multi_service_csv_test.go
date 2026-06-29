@@ -549,7 +549,7 @@ func TestExtractEngine(t *testing.T) {
 	}
 }
 
-// TestFormatCurrencyOrBlank locks the blank-when-zero behaviour for the
+// TestFormatCurrencyOrBlank locks the blank-when-zero behavior for the
 // UpfrontPayment column. Non-zero renders with two decimals; zero renders
 // as an empty cell so users can distinguish "no upfront due" from "actual
 // $0 upfront", consistent with the rest of the optional CSV columns.
@@ -570,7 +570,7 @@ func TestFormatCurrencyOrBlank(t *testing.T) {
 	}
 }
 
-// Tests for loadRecommendationsFromCSV function
+// Tests for loadRecommendationsFromCSV function.
 func TestLoadRecommendationsFromCSV(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -803,7 +803,7 @@ rds,us-east-1,db.t3.micro,0,0`,
 	}
 }
 
-// Test loadRecommendationsFromCSV with file errors
+// Test loadRecommendationsFromCSV with file errors.
 func TestLoadRecommendationsFromCSV_FileErrors(t *testing.T) {
 	tests := []struct {
 		name        string

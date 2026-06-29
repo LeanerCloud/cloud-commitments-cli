@@ -13,7 +13,7 @@ import (
 )
 
 // captureAppOutput captures output from AppLogger and returns the captured string.
-// Usage: output := captureAppOutput(t, func() { printSomething() })
+// Usage: output := captureAppOutput(t, func() { printSomething() }).
 func captureAppOutput(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout

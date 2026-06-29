@@ -770,7 +770,7 @@ func TestFilterAndAdjustRecommendations_OverrideCountApplied(t *testing.T) {
 }
 
 // TestFetchExistingCoverage_LookbackDays verifies that fetchExistingCoverage
-// honours cfg.CoverageLookbackDays (issue #360). The test uses the
+// honors cfg.CoverageLookbackDays (issue #360). The test uses the
 // MockRecommendationsClient which fails the *awsprovider.RecommendationsClientAdapter
 // type assertion, exercising the non-AWS-provider early-return path. The key
 // assertions are:

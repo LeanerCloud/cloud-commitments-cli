@@ -195,7 +195,7 @@ func TestProcessService_EdgeCases(t *testing.T) {
 	}
 }
 
-// TestProcessServiceWithMocks tests the processService function using mocks
+// TestProcessServiceWithMocks tests the processService function using mocks.
 func TestProcessServiceWithMocks(t *testing.T) {
 	ctx := context.Background()
 	awsCfg := aws.Config{Region: "us-east-1"}
@@ -746,7 +746,7 @@ func generateCSVFilenameTestHelper(service common.ServiceType, payment string, t
 	return serviceStr + "-" + payment + "-" + mode + ".csv"
 }
 
-// Test types
+// Test types.
 type MultiServiceConfig struct {
 	Services      map[common.ServiceType]ServiceConfig
 	PaymentOption string
@@ -1740,7 +1740,7 @@ rds,us-east-1,mysql,db.t3.medium,All Upfront,12,5,123456789012
 
 // ==================== Tests for adjustRecommendationForExcludedVersions ====================
 
-// Helper to create test version info with extended support dates
+// Helper to create test version info with extended support dates.
 func createTestVersionInfo() map[string]MajorEngineVersionInfo {
 	now := time.Now()
 	pastDate := now.AddDate(0, -6, 0)  // 6 months ago
