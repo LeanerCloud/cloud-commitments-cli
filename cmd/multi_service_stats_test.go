@@ -504,3 +504,57 @@ func TestPrintComparisonSection(t *testing.T) {
 		})
 	}
 }
+
+func TestPrintFinalMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		isDryRun   bool
+		riSuccess  int
+		wantOutput []string
+		notWanted  []string
+	}{
+		{
+			name:      "Dry run shows no Archera pitch",
+			isDryRun:  true,
+			riSuccess: 5,
+			notWanted: []string{"Archera", archeraSignupURL},
+		},
+		{
+			name:      "No successful purchases shows no pitch",
+			isDryRun:  false,
+			riSuccess: 0,
+			notWanted: []string{"Purchase operations completed", "Archera", archeraSignupURL},
+		},
+		{
+			name:      "Successful purchase shows Archera pitch with URL and disclosure",
+			isDryRun:  false,
+			riSuccess: 3,
+			wantOutput: []string{
+				"Purchase operations completed",
+				"underutilization insurance",
+				"https://www.archera.ai/cudly",
+				"first 7 days",
+				// Non-gating partnership disclosure (project_archera_partnership memory).
+				"entirely optional",
+				"work fully without Archera",
+				// Sponsorship partnership disclosure (project_archera_partnership memory).
+				"sponsors CUDly's Open Source",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := captureAppOutput(t, func() {
+				printFinalMessage(tt.isDryRun, tt.riSuccess)
+			})
+
+			for _, want := range tt.wantOutput {
+				assert.Contains(t, output, want)
+			}
+			for _, notWant := range tt.notWanted {
+				assert.NotContains(t, output, notWant)
+			}
+		})
+	}
+}
