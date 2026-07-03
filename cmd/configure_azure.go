@@ -381,7 +381,7 @@ func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, 
 
 	switch choice {
 	case "r", "run", "":
-		return executeExplicitCommand(displayCmd, program, args...)
+		return executeExplicitCommand(reader, displayCmd, program, args...)
 	case "s", "skip":
 		fmt.Printf("Skipping %s\n", name)
 		return nil
@@ -391,8 +391,12 @@ func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, 
 	}
 }
 
-// executeExplicitCommand runs a command with explicit program and arguments
-func executeExplicitCommand(displayCmd string, program string, args ...string) error {
+// executeExplicitCommand runs a command with explicit program and arguments.
+// The caller's reader is threaded through to the retry prompt so all input
+// is consumed from one consistent buffered stream (a fresh
+// bufio.NewReader(os.Stdin) here would drop input already buffered by the
+// caller's reader, breaking piped input after earlier prompts).
+func executeExplicitCommand(reader *bufio.Reader, displayCmd string, program string, args ...string) error {
 	fmt.Println()
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
@@ -408,7 +412,6 @@ func executeExplicitCommand(displayCmd string, program string, args ...string) e
 	if err != nil {
 		fmt.Printf("Command failed: %v\n", err)
 		fmt.Print("Continue anyway? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
 		response, readErr := readTrimmedLine(reader)
 		if readErr != nil {
 			return fmt.Errorf("failed to read response: %w", readErr)

@@ -387,7 +387,7 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, progr
 
 	switch choice {
 	case "r", "run", "":
-		return executeGCPCommand(displayCmd, program, args...)
+		return executeGCPCommand(reader, displayCmd, program, args...)
 	case "s", "skip":
 		fmt.Printf("Skipping %s\n", name)
 		return nil
@@ -397,8 +397,12 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, progr
 	}
 }
 
-// executeGCPCommand runs a gcloud command with explicit program and arguments
-func executeGCPCommand(displayCmd string, program string, args ...string) error {
+// executeGCPCommand runs a gcloud command with explicit program and arguments.
+// The caller's reader is threaded through to the retry prompt so all input
+// is consumed from one consistent buffered stream (a fresh
+// bufio.NewReader(os.Stdin) here would drop input already buffered by the
+// caller's reader, breaking piped input after earlier prompts).
+func executeGCPCommand(reader *bufio.Reader, displayCmd string, program string, args ...string) error {
 	fmt.Println()
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
@@ -414,7 +418,6 @@ func executeGCPCommand(displayCmd string, program string, args ...string) error 
 	if err != nil {
 		fmt.Printf("Command failed: %v\n", err)
 		fmt.Print("Continue anyway? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
 		response, readErr := readTrimmedLine(reader)
 		if readErr != nil {
 			return fmt.Errorf("failed to read response: %w", readErr)
