@@ -177,7 +177,11 @@ func getGCPCredentialsFilePath(reader *bufio.Reader) (string, error) {
 
 	if credsFile == "" {
 		fmt.Print("Path to GCP service account JSON key file: ")
-		credsFile, _ = reader.ReadString('\n')
+		var readErr error
+		credsFile, readErr = reader.ReadString('\n')
+		if readErr != nil {
+			return "", fmt.Errorf("failed to read credentials file path: %w", readErr)
+		}
 		credsFile = strings.TrimSpace(credsFile)
 	}
 
@@ -273,12 +277,9 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	}
 
 	fmt.Println()
-	fmt.Print("Enter your Project ID from above: ")
-	projectID, _ := reader.ReadString('\n')
-	projectID = strings.TrimSpace(projectID)
-
-	if projectID == "" {
-		return "", fmt.Errorf("project ID is required")
+	projectID, err := readRequiredInputLine(reader, "Enter your Project ID from above: ", "project ID")
+	if err != nil {
+		return "", err
 	}
 
 	// Validate project ID to prevent command injection
@@ -358,6 +359,21 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	return keyFile, nil
 }
 
+// readRequiredInputLine prints prompt, reads a line, trims whitespace, and
+// returns an error if the result is empty.
+func readRequiredInputLine(reader *bufio.Reader, prompt, fieldName string) (string, error) {
+	fmt.Print(prompt)
+	value, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", fieldName, err)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", fieldName)
+	}
+	return value, nil
+}
+
 // promptAndRunGCPCommand shows a command and asks to run or skip.
 // Takes explicit program and args to avoid command injection via string splitting.
 func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, program string, args ...string) error {
@@ -365,7 +381,10 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, progr
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
 
-	choice, _ := reader.ReadString('\n')
+	choice, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read choice: %w", err)
+	}
 	choice = strings.ToLower(strings.TrimSpace(choice))
 
 	switch choice {
@@ -398,7 +417,10 @@ func executeGCPCommand(displayCmd string, program string, args ...string) error 
 		fmt.Printf("Command failed: %v\n", err)
 		fmt.Print("Continue anyway? [y/N]: ")
 		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
+		response, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			return fmt.Errorf("failed to read response: %w", readErr)
+		}
 		if strings.ToLower(strings.TrimSpace(response)) != "y" {
 			return fmt.Errorf("command failed: %w", err)
 		}
