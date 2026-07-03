@@ -2,15 +2,65 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	armauthorization "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/google/uuid"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/applications"
 	graphmodels "github.com/microsoftgraph/msgraph-sdk-go/models"
 )
+
+// roleAssignRetryInitial is the first back-off interval when retrying a role
+// assignment that fails with PrincipalNotFound. Each subsequent interval is
+// doubled up to roleAssignRetryMax.
+const (
+	roleAssignRetryInitial = 5 * time.Second
+	roleAssignRetryMax     = 30 * time.Second
+	// roleAssignRetryBudget is the ceiling on total retry time. Azure AD
+	// replication is usually complete within seconds but can take up to ~10
+	// minutes in the worst case (see feedback_tf_depends_on_rbac.md). Three
+	// minutes covers the large majority of propagation windows without
+	// keeping the operator waiting too long.
+	roleAssignRetryBudget = 3 * time.Minute
+)
+
+// roleAssigner is the minimal subset of *armauthorization.RoleAssignmentsClient
+// used by graphSPProvisioner. The interface exists solely to allow the retry
+// logic in AssignRole to be exercised in unit tests without hitting Azure.
+type roleAssigner interface {
+	Create(
+		ctx context.Context,
+		scope, roleAssignmentName string,
+		parameters armauthorization.RoleAssignmentCreateParameters,
+		options *armauthorization.RoleAssignmentsClientCreateOptions,
+	) (armauthorization.RoleAssignmentsClientCreateResponse, error)
+}
+
+// isPrincipalNotFoundErr reports whether err is an Azure ARM
+// PrincipalNotFound / ServicePrincipalNotFound response -- the transient
+// condition that occurs when a newly-created Entra ID service principal has
+// not yet replicated to the ARM region handling the role-assignment request.
+// It covers the canonical error codes as well as the message-body form
+// returned by some older API versions.
+func isPrincipalNotFoundErr(err error) bool {
+	var respErr *azcore.ResponseError
+	if !errors.As(err, &respErr) {
+		return false
+	}
+	switch respErr.ErrorCode {
+	case "PrincipalNotFound", "ServicePrincipalNotFound":
+		return true
+	}
+	// Older ARM API versions surface the condition as HTTP 400 without a
+	// distinct error code; instead the response body contains the canonical
+	// phrase "does not exist in the directory".
+	return strings.Contains(respErr.Error(), "does not exist in the directory")
+}
 
 // azureSPName is the Azure AD application / service principal display name.
 // It matches the name the previous "az ad sp create-for-rbac --name CUDly"
@@ -125,7 +175,12 @@ func createAzureServicePrincipal(ctx context.Context, p azureSPProvisioner, subs
 type graphSPProvisioner struct {
 	graph    *msgraphsdk.GraphServiceClient
 	roleDefs *armauthorization.RoleDefinitionsClient
-	roleAsgn *armauthorization.RoleAssignmentsClient
+	roleAsgn roleAssigner
+	// retryInitial and retryBudget control the PrincipalNotFound retry loop
+	// in AssignRole. They are set to the package constants by
+	// newGraphSPProvisioner and overridden in tests to keep test duration short.
+	retryInitial time.Duration
+	retryBudget  time.Duration
 }
 
 // newGraphSPProvisioner builds a graphSPProvisioner authenticated with the
@@ -155,7 +210,13 @@ func newGraphSPProvisioner(subscriptionID string) (*graphSPProvisioner, error) {
 		return nil, fmt.Errorf("failed to create role assignments client: %w", err)
 	}
 
-	return &graphSPProvisioner{graph: graph, roleDefs: roleDefs, roleAsgn: roleAsgn}, nil
+	return &graphSPProvisioner{
+		graph:        graph,
+		roleDefs:     roleDefs,
+		roleAsgn:     roleAsgn,
+		retryInitial: roleAssignRetryInitial,
+		retryBudget:  roleAssignRetryBudget,
+	}, nil
 }
 
 func (g *graphSPProvisioner) CreateApplication(ctx context.Context, displayName string) (objectID, appID string, err error) {
@@ -235,12 +296,42 @@ func (g *graphSPProvisioner) ResolveRoleDefinitionID(ctx context.Context, scope,
 
 func (g *graphSPProvisioner) AssignRole(ctx context.Context, scope, principalID, roleDefinitionID string) error {
 	principalType := armauthorization.PrincipalTypeServicePrincipal
-	_, err := g.roleAsgn.Create(ctx, scope, uuid.NewString(), armauthorization.RoleAssignmentCreateParameters{
+	params := armauthorization.RoleAssignmentCreateParameters{
 		Properties: &armauthorization.RoleAssignmentProperties{
 			PrincipalID:      &principalID,
 			RoleDefinitionID: &roleDefinitionID,
 			PrincipalType:    &principalType,
 		},
-	}, nil)
-	return err
+	}
+
+	// Azure AD replication is eventually consistent: a service principal
+	// created moments ago may not yet be visible to the ARM role-assignment
+	// API in a different region, returning PrincipalNotFound. Retry with
+	// bounded exponential back-off until the SP propagates or the budget is
+	// exhausted (see also: feedback_tf_depends_on_rbac.md).
+	deadline := time.Now().Add(g.retryBudget)
+	delay := g.retryInitial
+	for {
+		_, err := g.roleAsgn.Create(ctx, scope, uuid.NewString(), params, nil)
+		if err == nil {
+			return nil
+		}
+		if !isPrincipalNotFoundErr(err) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf(
+				"service principal %q did not propagate to ARM within %v "+
+					"(Azure AD replication is eventually consistent -- "+
+					"https://learn.microsoft.com/en-us/azure/role-based-access-control/troubleshooting): %w",
+				principalID, g.retryBudget, err)
+		}
+		// Context cancellation is terminal: do not continue retrying.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, roleAssignRetryMax)
+	}
 }

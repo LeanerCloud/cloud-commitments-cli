@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	armauthorization "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -251,4 +254,145 @@ func TestCreateAzureServicePrincipal_ScopeFormat(t *testing.T) {
 	// Scope must be exactly /subscriptions/<id> (subscription scope, not resource group).
 	assert.Equal(t, "/subscriptions/"+testSubID, m.resolveRoleScope)
 	assert.Equal(t, "/subscriptions/"+testSubID, m.assignScope)
+}
+
+// fakeRoleAssigner is a test double for roleAssigner that fails with a
+// PrincipalNotFound error for the first failsRemaining calls, then succeeds.
+// If otherErr is set it is always returned instead (to test non-retryable paths).
+type fakeRoleAssigner struct {
+	failsRemaining       int
+	principalNotFoundErr *azcore.ResponseError
+	otherErr             error
+	callCount            int
+}
+
+func (f *fakeRoleAssigner) Create(
+	_ context.Context,
+	_, _ string,
+	_ armauthorization.RoleAssignmentCreateParameters,
+	_ *armauthorization.RoleAssignmentsClientCreateOptions,
+) (armauthorization.RoleAssignmentsClientCreateResponse, error) {
+	f.callCount++
+	if f.otherErr != nil {
+		return armauthorization.RoleAssignmentsClientCreateResponse{}, f.otherErr
+	}
+	if f.failsRemaining > 0 {
+		f.failsRemaining--
+		return armauthorization.RoleAssignmentsClientCreateResponse{}, f.principalNotFoundErr
+	}
+	return armauthorization.RoleAssignmentsClientCreateResponse{}, nil
+}
+
+// newFakePrincipalNotFoundProvisioner returns a graphSPProvisioner wired to a
+// fakeRoleAssigner with very short retry timing so tests complete in
+// milliseconds rather than minutes.
+func newFakePrincipalNotFoundProvisioner(fake *fakeRoleAssigner) *graphSPProvisioner {
+	return &graphSPProvisioner{
+		roleAsgn:     fake,
+		retryInitial: time.Millisecond,
+		retryBudget:  50 * time.Millisecond,
+	}
+}
+
+// TestGraphSPProvisioner_AssignRole_RetrySucceeds verifies that AssignRole
+// retries when ARM returns PrincipalNotFound and eventually succeeds.
+func TestGraphSPProvisioner_AssignRole_RetrySucceeds(t *testing.T) {
+	principalNotFound := &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400}
+	fake := &fakeRoleAssigner{failsRemaining: 2, principalNotFoundErr: principalNotFound}
+	p := newFakePrincipalNotFoundProvisioner(fake)
+
+	err := p.AssignRole(context.Background(), "/subscriptions/sub", "sp-id", "role-def-id")
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, fake.callCount,
+		"should call Create 3 times: 2 PrincipalNotFound failures then 1 success")
+}
+
+// TestGraphSPProvisioner_AssignRole_ExhaustsRetryBudget verifies that
+// AssignRole fails loud with a clear message when the service principal never
+// propagates within the budget.
+func TestGraphSPProvisioner_AssignRole_ExhaustsRetryBudget(t *testing.T) {
+	principalNotFound := &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400}
+	fake := &fakeRoleAssigner{failsRemaining: 100, principalNotFoundErr: principalNotFound}
+	p := newFakePrincipalNotFoundProvisioner(fake)
+
+	err := p.AssignRole(context.Background(), "/subscriptions/sub", "sp-id", "role-def-id")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "did not propagate",
+		"error must explain that the SP did not propagate")
+	assert.Contains(t, err.Error(), "sp-id",
+		"error must identify the principal that failed to propagate")
+	assert.True(t, fake.callCount >= 1, "should have attempted Create at least once")
+}
+
+// TestGraphSPProvisioner_AssignRole_NonRetryableError verifies that a
+// non-PrincipalNotFound error is returned immediately without retrying.
+func TestGraphSPProvisioner_AssignRole_NonRetryableError(t *testing.T) {
+	fake := &fakeRoleAssigner{otherErr: errors.New("authorization denied")}
+	p := newFakePrincipalNotFoundProvisioner(fake)
+
+	err := p.AssignRole(context.Background(), "/subscriptions/sub", "sp-id", "role-def-id")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authorization denied")
+	assert.Equal(t, 1, fake.callCount, "should not retry on non-PrincipalNotFound errors")
+}
+
+// TestGraphSPProvisioner_AssignRole_ContextCancellation verifies that context
+// cancellation is treated as a terminal stop and does not continue retrying.
+func TestGraphSPProvisioner_AssignRole_ContextCancellation(t *testing.T) {
+	principalNotFound := &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400}
+	fake := &fakeRoleAssigner{failsRemaining: 100, principalNotFoundErr: principalNotFound}
+	p := newFakePrincipalNotFoundProvisioner(fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the first retry sleep fires
+
+	err := p.AssignRole(ctx, "/subscriptions/sub", "sp-id", "role-def-id")
+
+	require.Error(t, err)
+	// The first Create call returns PrincipalNotFound; the subsequent select
+	// detects ctx.Done() and returns ctx.Err() immediately.
+	assert.Equal(t, 1, fake.callCount, "should stop retrying after context is cancelled")
+}
+
+// TestIsPrincipalNotFoundErr covers the error-code detection helper directly.
+func TestIsPrincipalNotFoundErr(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "PrincipalNotFound error code",
+			err:  &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400},
+			want: true,
+		},
+		{
+			name: "ServicePrincipalNotFound error code",
+			err:  &azcore.ResponseError{ErrorCode: "ServicePrincipalNotFound", StatusCode: 400},
+			want: true,
+		},
+		{
+			name: "unrelated ARM error",
+			err:  &azcore.ResponseError{ErrorCode: "AuthorizationFailed", StatusCode: 403},
+			want: false,
+		},
+		{
+			name: "plain error",
+			err:  errors.New("network error"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPrincipalNotFoundErr(tt.err))
+		})
+	}
 }
