@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -28,6 +30,18 @@ func validateAzureUUID(uuid, fieldName string) error {
 		return fmt.Errorf("invalid %s format: must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)", fieldName)
 	}
 	return nil
+}
+
+// readTrimmedLine reads one line from reader and returns it with surrounding
+// whitespace trimmed. io.EOF is tolerated when data was read — a final
+// unterminated line from piped input (e.g. `printf "r" | cudly configure-azure`)
+// is still valid input. io.EOF with no data, or any other error, is returned.
+func readTrimmedLine(reader *bufio.Reader) (string, error) {
+	input, err := reader.ReadString('\n')
+	if err != nil && !(errors.Is(err, io.EOF) && input != "") {
+		return "", err
+	}
+	return strings.TrimSpace(input), nil
 }
 
 // AzureCredentials holds the Azure Service Principal credentials
@@ -216,20 +230,20 @@ func collectAzureCredentials(reader *bufio.Reader) (AzureCredentials, error) {
 func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredentials) error {
 	if creds.TenantID == "" {
 		fmt.Print("Azure Tenant ID: ")
-		input, err := reader.ReadString('\n')
+		input, err := readTrimmedLine(reader)
 		if err != nil {
 			return fmt.Errorf("failed to read tenant ID: %w", err)
 		}
-		creds.TenantID = strings.TrimSpace(input)
+		creds.TenantID = input
 	}
 
 	if creds.ClientID == "" {
 		fmt.Print("Client ID (appId): ")
-		input, err := reader.ReadString('\n')
+		input, err := readTrimmedLine(reader)
 		if err != nil {
 			return fmt.Errorf("failed to read client ID: %w", err)
 		}
-		creds.ClientID = strings.TrimSpace(input)
+		creds.ClientID = input
 	}
 
 	if creds.ClientSecret == "" {
@@ -244,11 +258,11 @@ func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredential
 
 	if creds.SubscriptionID == "" {
 		fmt.Print("Subscription ID: ")
-		input, err := reader.ReadString('\n')
+		input, err := readTrimmedLine(reader)
 		if err != nil {
 			return fmt.Errorf("failed to read subscription ID: %w", err)
 		}
-		creds.SubscriptionID = strings.TrimSpace(input)
+		creds.SubscriptionID = input
 	}
 
 	return nil
@@ -277,8 +291,10 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 
 	fmt.Println()
 	fmt.Print("Enter your Subscription ID from above: ")
-	subscriptionID, _ := reader.ReadString('\n')
-	subscriptionID = strings.TrimSpace(subscriptionID)
+	subscriptionID, err := readTrimmedLine(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read subscription ID: %w", err)
+	}
 
 	if subscriptionID == "" {
 		return fmt.Errorf("subscription ID is required")
@@ -289,20 +305,38 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 		return err
 	}
 
+	if err := createAzureServicePrincipal(reader, subscriptionID); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("IMPORTANT: Copy the output above! You'll need:")
+	fmt.Println("  - appId      -> Client ID")
+	fmt.Println("  - password   -> Client Secret")
+	fmt.Println("  - tenant     -> Tenant ID")
+	fmt.Printf("  - Subscription ID: %s\n", subscriptionID)
+	fmt.Println()
+
+	return nil
+}
+
+// createAzureServicePrincipal runs Step 3 of Azure setup: create service principal.
+func createAzureServicePrincipal(reader *bufio.Reader, subscriptionID string) error {
 	fmt.Println()
 	fmt.Println("Step 3: Create Service Principal")
 	fmt.Println("---------------------------------")
 	fmt.Println("This creates an Azure Service Principal with Reservation Administrator role.")
 	fmt.Println()
 
-	// Build the create SP command - run directly without shell to avoid injection
-	// Using exec.Command directly with proper arguments
 	fmt.Printf("Command: az ad sp create-for-rbac --name CUDly --role \"Reservations Administrator\" --scopes /subscriptions/%s\n", subscriptionID)
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
 
-	choice, _ := reader.ReadString('\n')
-	choice = strings.ToLower(strings.TrimSpace(choice))
+	choice, err := readTrimmedLine(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read choice: %w", err)
+	}
+	choice = strings.ToLower(choice)
 
 	if choice == "r" || choice == "run" || choice == "" {
 		fmt.Println()
@@ -317,8 +351,11 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("Command failed: %v\n", err)
 			fmt.Print("Continue anyway? [y/N]: ")
-			response, _ := reader.ReadString('\n')
-			if strings.ToLower(strings.TrimSpace(response)) != "y" {
+			response, readErr := readTrimmedLine(reader)
+			if readErr != nil {
+				return fmt.Errorf("failed to read response: %w", readErr)
+			}
+			if strings.ToLower(response) != "y" {
 				return fmt.Errorf("failed to create service principal: %w", err)
 			}
 		}
@@ -326,15 +363,6 @@ func runAzureSetupCommands(reader *bufio.Reader) error {
 	} else {
 		fmt.Println("Skipping Create Service Principal")
 	}
-
-	fmt.Println()
-	fmt.Println("IMPORTANT: Copy the output above! You'll need:")
-	fmt.Println("  - appId      -> Client ID")
-	fmt.Println("  - password   -> Client Secret")
-	fmt.Println("  - tenant     -> Tenant ID")
-	fmt.Printf("  - Subscription ID: %s\n", subscriptionID)
-	fmt.Println()
-
 	return nil
 }
 
@@ -345,12 +373,15 @@ func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, 
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
 
-	choice, _ := reader.ReadString('\n')
-	choice = strings.ToLower(strings.TrimSpace(choice))
+	choice, err := readTrimmedLine(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read choice: %w", err)
+	}
+	choice = strings.ToLower(choice)
 
 	switch choice {
 	case "r", "run", "":
-		return executeExplicitCommand(displayCmd, program, args...)
+		return executeExplicitCommand(reader, displayCmd, program, args...)
 	case "s", "skip":
 		fmt.Printf("Skipping %s\n", name)
 		return nil
@@ -360,8 +391,12 @@ func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, 
 	}
 }
 
-// executeExplicitCommand runs a command with explicit program and arguments
-func executeExplicitCommand(displayCmd string, program string, args ...string) error {
+// executeExplicitCommand runs a command with explicit program and arguments.
+// The caller's reader is threaded through to the retry prompt so all input
+// is consumed from one consistent buffered stream (a fresh
+// bufio.NewReader(os.Stdin) here would drop input already buffered by the
+// caller's reader, breaking piped input after earlier prompts).
+func executeExplicitCommand(reader *bufio.Reader, displayCmd string, program string, args ...string) error {
 	fmt.Println()
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
@@ -377,9 +412,11 @@ func executeExplicitCommand(displayCmd string, program string, args ...string) e
 	if err != nil {
 		fmt.Printf("Command failed: %v\n", err)
 		fmt.Print("Continue anyway? [y/N]: ")
-		reader := bufio.NewReader(os.Stdin)
-		response, _ := reader.ReadString('\n')
-		if strings.ToLower(strings.TrimSpace(response)) != "y" {
+		response, readErr := readTrimmedLine(reader)
+		if readErr != nil {
+			return fmt.Errorf("failed to read response: %w", readErr)
+		}
+		if strings.ToLower(response) != "y" {
 			return fmt.Errorf("command failed: %w", err)
 		}
 	}
