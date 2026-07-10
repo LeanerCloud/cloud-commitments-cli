@@ -83,9 +83,7 @@ func effectiveDryRun(cfg Config) bool {
 // (2) score, display, confirm, and purchase.
 func runToolMultiService(ctx context.Context, cfg Config) {
 	if cfg.CSVInput != "" {
-		if err := runToolFromCSV(ctx, cfg); err != nil {
-			log.Fatalf("%v", err)
-		}
+		runCSVPathOrFatal(ctx, cfg)
 		return
 	}
 
@@ -274,9 +272,19 @@ func buildServiceStats(recs []common.Recommendation, results []common.PurchaseRe
 	return stats
 }
 
+// runCSVPathOrFatal runs the CSV purchase path and exits fatally on error.
+// It isolates the error-to-fatal glue from runToolMultiService so that path
+// stays under the cyclomatic-complexity budget while runToolFromCSV remains
+// unit-testable via its returned error.
+func runCSVPathOrFatal(ctx context.Context, cfg Config) {
+	if err := runToolFromCSV(ctx, cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
 // runToolFromCSV processes recommendations from a CSV input file.
 // It returns an error instead of exiting so the orchestration glue is
-// unit-testable; the caller (runToolMultiService) turns errors fatal.
+// unit-testable; the caller (runCSVPathOrFatal) turns errors fatal.
 func runToolFromCSV(ctx context.Context, cfg Config) error {
 	isDryRun := effectiveDryRun(cfg)
 	printRunMode(isDryRun)
