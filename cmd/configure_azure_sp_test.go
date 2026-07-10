@@ -260,9 +260,9 @@ func TestCreateAzureServicePrincipal_ScopeFormat(t *testing.T) {
 // PrincipalNotFound error for the first failsRemaining calls, then succeeds.
 // If otherErr is set it is always returned instead (to test non-retryable paths).
 type fakeRoleAssigner struct {
-	failsRemaining       int
 	principalNotFoundErr *azcore.ResponseError
 	otherErr             error
+	failsRemaining       int
 	callCount            int
 }
 
@@ -354,14 +354,14 @@ func TestGraphSPProvisioner_AssignRole_ContextCancellation(t *testing.T) {
 	require.Error(t, err)
 	// The first Create call returns PrincipalNotFound; the subsequent select
 	// detects ctx.Done() and returns ctx.Err() immediately.
-	assert.Equal(t, 1, fake.callCount, "should stop retrying after context is cancelled")
+	assert.Equal(t, 1, fake.callCount, "should stop retrying after context is canceled")
 }
 
 // TestIsPrincipalNotFoundErr covers the error-code detection helper directly.
 func TestIsPrincipalNotFoundErr(t *testing.T) {
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{

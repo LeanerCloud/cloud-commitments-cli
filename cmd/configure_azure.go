@@ -26,10 +26,10 @@ import (
 	"golang.org/x/term"
 )
 
-// azureUUIDRegex validates Azure UUIDs (subscription IDs, tenant IDs, client IDs)
+// azureUUIDRegex validates Azure UUIDs (subscription IDs, tenant IDs, client IDs).
 var azureUUIDRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// validateAzureUUID validates an Azure UUID to prevent command injection
+// validateAzureUUID validates an Azure UUID to prevent command injection.
 func validateAzureUUID(uuid, fieldName string) error {
 	if !azureUUIDRegex.MatchString(uuid) {
 		return fmt.Errorf("invalid %s format: must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)", fieldName)
@@ -43,13 +43,13 @@ func validateAzureUUID(uuid, fieldName string) error {
 // is still valid input. io.EOF with no data, or any other error, is returned.
 func readTrimmedLine(reader *bufio.Reader) (string, error) {
 	input, err := reader.ReadString('\n')
-	if err != nil && !(errors.Is(err, io.EOF) && input != "") {
+	if err != nil && (!errors.Is(err, io.EOF) || input == "") {
 		return "", err
 	}
 	return strings.TrimSpace(input), nil
 }
 
-// AzureCredentials holds the Azure Service Principal credentials
+// AzureCredentials holds the Azure Service Principal credentials.
 type AzureCredentials struct {
 	TenantID       string `json:"tenant_id"`
 	ClientID       string `json:"client_id"`
@@ -57,7 +57,7 @@ type AzureCredentials struct {
 	SubscriptionID string `json:"subscription_id"`
 }
 
-// AzureConfigOptions holds configuration for the Azure config command
+// AzureConfigOptions holds configuration for the Azure config command.
 type AzureConfigOptions struct {
 	StackName      string
 	Profile        string
@@ -116,7 +116,7 @@ func validateAzureCredentialFields(creds AzureCredentials) error {
 	return validateAzureUUID(creds.SubscriptionID, "Subscription ID")
 }
 
-// storeAzureCredentials stores Azure credentials in the secrets store
+// storeAzureCredentials stores Azure credentials in the secrets store.
 func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName string, creds AzureCredentials) error {
 	if err := validateAzureCredentialFields(creds); err != nil {
 		return err
@@ -135,7 +135,7 @@ func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName st
 	}
 
 	// Marshal credentials to JSON
-	credJSON, err := json.Marshal(creds)
+	credJSON, err := json.Marshal(creds) // #nosec G117 -- AzureCredentials marshaled intentionally for Secrets Manager storage
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
@@ -192,7 +192,7 @@ func runConfigureAzure(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// loadAWSConfigForAzure loads AWS configuration with optional profile
+// loadAWSConfigForAzure loads AWS configuration with optional profile.
 func loadAWSConfigForAzure(ctx context.Context) (aws.Config, error) {
 	var opts []func(*awsconfig.LoadOptions) error
 	if azureOpts.Profile != "" {
@@ -207,7 +207,7 @@ func loadAWSConfigForAzure(ctx context.Context) (aws.Config, error) {
 	return cfg, nil
 }
 
-// collectAzureCredentials collects Azure credentials interactively or from flags
+// collectAzureCredentials collects Azure credentials interactively or from flags.
 func collectAzureCredentials(reader *bufio.Reader) (AzureCredentials, error) {
 	creds := AzureCredentials{
 		TenantID:       azureOpts.TenantID,
@@ -231,7 +231,7 @@ func collectAzureCredentials(reader *bufio.Reader) (AzureCredentials, error) {
 	return creds, nil
 }
 
-// promptForAzureCredentialFields prompts for missing credential fields
+// promptForAzureCredentialFields prompts for missing credential fields.
 func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredentials) error {
 	if creds.TenantID == "" {
 		fmt.Print("Azure Tenant ID: ")
@@ -253,7 +253,7 @@ func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredential
 
 	if creds.ClientSecret == "" {
 		fmt.Print("Client Secret (password): ")
-		secret, err := term.ReadPassword(int(syscall.Stdin))
+		secret, err := term.ReadPassword(syscall.Stdin)
 		if err != nil {
 			return fmt.Errorf("failed to read secret: %w", err)
 		}
@@ -501,7 +501,7 @@ func printAzureSPResult(result azureSPResult, subscriptionID string) {
 
 // promptAndRunExplicitCommand shows a command and asks to run or skip.
 // Takes explicit program and args to avoid command injection via string splitting.
-func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, program string, args ...string) error {
+func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd, program string, args ...string) error {
 	fmt.Printf("Command: %s\n", displayCmd)
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
@@ -531,7 +531,7 @@ func promptAndRunExplicitCommand(reader *bufio.Reader, name, displayCmd string, 
 // is consumed from one consistent buffered stream (a fresh
 // bufio.NewReader(os.Stdin) here would drop input already buffered by the
 // caller's reader, breaking piped input after earlier prompts).
-func executeExplicitCommand(reader *bufio.Reader, displayCmd string, program string, args ...string) error {
+func executeExplicitCommand(reader *bufio.Reader, displayCmd, program string, args ...string) error {
 	fmt.Println()
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
@@ -552,7 +552,7 @@ func executeExplicitCommand(reader *bufio.Reader, displayCmd string, program str
 		if readErr != nil {
 			return fmt.Errorf("failed to read response: %w", readErr)
 		}
-		if strings.ToLower(response) != "y" {
+		if !strings.EqualFold(response, "y") {
 			return fmt.Errorf("command failed: %w", err)
 		}
 	}
