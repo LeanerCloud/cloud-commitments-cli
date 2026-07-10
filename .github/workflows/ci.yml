@@ -6,7 +6,7 @@
 # Required GitHub Secrets: None (all checks run without cloud credentials)
 #
 # Required GitHub Variables:
-#   - GO_VERSION: Go version to use (default: 1.25)
+#   - GO_VERSION: Go version to use (default: 1.26.5)
 #
 # Triggered by:
 #   - Pull requests to main/develop
@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26.5'
   DOCKER_BUILDKIT: 1
   COMPOSE_DOCKER_CLI_BUILD: 1
 
