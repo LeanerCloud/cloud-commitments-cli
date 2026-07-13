@@ -346,11 +346,32 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-      - name: Run tfsec (Terraform Security)
-        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
+      # Terraform IaC misconfiguration scanning. Replaces the deprecated
+      # aquasecurity/tfsec-action, whose bundled HCL parser rejects Terraform
+      # 1.5+ `check {}` blocks (e.g. terraform/modules/deployment-checks/main.tf)
+      # with a hard "scan failed" parse error that soft_fail does not suppress
+      # (soft_fail only downgrades findings, not scan errors). Trivy is tfsec's
+      # official successor, parses `check {}` blocks, and (like the fs scan
+      # above) uses the default exit-code 0 so misconfig findings are reported
+      # to the Security tab without gating the job -- matching tfsec's prior
+      # soft_fail: true behaviour while preserving Terraform IaC coverage.
+      - name: Run Trivy IaC misconfiguration scanner (Terraform)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          working_directory: terraform/
-          soft_fail: true
+          scan-type: 'config'
+          scan-ref: 'terraform/'
+          format: 'sarif'
+          output: 'trivy-config-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy IaC results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: 'trivy-config-results.sarif'
+          # Distinct category so this IaC analysis does not overwrite the
+          # filesystem Trivy analysis uploaded above (both report as "Trivy").
+          category: 'trivy-iac'
 
   # Snyk security scanning
   snyk-scan:
