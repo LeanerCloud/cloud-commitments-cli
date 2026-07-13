@@ -798,7 +798,7 @@ func TestFetchExistingCoverage_LookbackDays(t *testing.T) {
 	})
 
 	t.Run("custom lookback stored in Config", func(t *testing.T) {
-		cfg := Config{TargetCoverage: 80, CoverageLookbackDays: 60, Regions: []string{"us-east-1"}} //nolint:govet // unusedwrite: field set for test completeness
+		cfg := Config{TargetCoverage: 80, CoverageLookbackDays: 60, Regions: []string{"us-east-1"}}
 		// CoverageLookbackDays field value is preserved in the struct.
 		assert.Equal(t, 60, cfg.CoverageLookbackDays)
 	})

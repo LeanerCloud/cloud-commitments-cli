@@ -32,6 +32,13 @@ linters:
         - diagnostic
         - performance
         - style
+      settings:
+        # aws.Config and similar SDK/config structs are designed to be passed
+        # by value (the AWS SDK v2 copies Config intentionally). 1024 bytes covers
+        # these idiomatic large-but-value-typed params without suppressing
+        # genuinely oversized plain domain structs.
+        hugeParam:
+          sizeThreshold: 1024
     gocyclo:
       min-complexity: 15
     gosec:
@@ -45,6 +52,17 @@ linters:
           pattern: (?i)passwd|pass|password|pwd|secret|token
     govet:
       enable-all: true
+      disable:
+        # fieldalignment fires on test table-struct literals where field order
+        # is chosen for readability, not memory layout. It also fires on public
+        # API structs where reordering would break documented field groupings.
+        # Disabling rather than suppressing per-instance since there is no
+        # legitimate code path where a test struct layout affects correctness.
+        - fieldalignment
+        # unusedwrite fires when test fixture struct fields are set for
+        # documentation completeness even if the specific test only reads a
+        # subset of fields. This is intentional test-clarity practice.
+        - unusedwrite
     misspell:
       locale: US
     revive:
@@ -97,11 +115,19 @@ linters:
       - linters:
           - noctx
         path: (internal/deploy/docker|cmd/configure_gcp|cmd/configure_azure)\.go
+      # noctx: http.Get and net.Listen in test helpers appropriately use the
+      # background context; threading a test context through every helper would
+      # add noise without improving test correctness.
+      - linters:
+          - noctx
+        path: _test\.go
       # misspell: "cancelled" is the canonical DB column name (migration 000035).
-      # Allow the double-L spelling in the config package SQL files.
+      # Allow the double-L spelling in the config package SQL files and in the
+      # ladder package where RunStatusCancelled/TrancheStatusCancelled are the
+      # typed constants matching the DB value.
       - linters:
           - misspell
-        path: internal/config/(store_postgres|store_postgres_pgxmock_test|types)\.go
+        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|types)|pkg/ladder/(store|types_test))\.go
         text: "cancelled"
     paths:
       - third_party$

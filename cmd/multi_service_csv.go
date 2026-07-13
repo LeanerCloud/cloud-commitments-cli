@@ -15,7 +15,7 @@ import (
 )
 
 // determineCSVCoverage determines the coverage percentage to use for CSV mode.
-func determineCSVCoverage(cfg Config) float64 { //nolint:gocritic // hugeParam: by-value per calling convention
+func determineCSVCoverage(cfg Config) float64 {
 	// When using CSV input, default to 100% coverage (use exact numbers from CSV)
 	// unless user explicitly provided a different coverage value
 	if cfg.Coverage == 80.0 {
@@ -352,7 +352,7 @@ func formatIntOrBlank(v int) string {
 // instance type doesn't follow the RDS three-part naming. Useful for
 // grouping rows in the CSV by family-NU bucket so operators can see at
 // a glance which recs belong to the same size-flex family.
-func extractRDSFamily(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func extractRDSFamily(rec common.Recommendation) string {
 	if rec.Service != common.ServiceRDS && rec.Service != common.ServiceRelationalDB {
 		return ""
 	}
@@ -365,7 +365,7 @@ func extractRDSFamily(rec common.Recommendation) string { //nolint:gocritic // h
 // into a single rec at one size — without this column, operators have
 // to compute NU by hand to verify the bundling. Renders blank for
 // non-RDS rows and for sizes not in the standard NU scale.
-func formatNormalizedUnitsOrBlank(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func formatNormalizedUnitsOrBlank(rec common.Recommendation) string {
 	if rec.Service != common.ServiceRDS && rec.Service != common.ServiceRelationalDB {
 		return ""
 	}
@@ -385,7 +385,7 @@ func formatNormalizedUnitsOrBlank(rec common.Recommendation) string { //nolint:g
 //
 // Both value and pointer Details are accepted to mirror extractEngine
 // (parser path stores pointers; CSV-loader path constructs values).
-func extractDeployment(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func extractDeployment(rec common.Recommendation) string {
 	switch details := rec.Details.(type) {
 	case *common.DatabaseDetails:
 		if details != nil {
@@ -407,7 +407,7 @@ func extractDeployment(rec common.Recommendation) string { //nolint:gocritic // 
 // path constructs the value forms; the dispatch in generatePurchaseID does
 // the same trick. Without the pointer cases the column silently blanks
 // every row coming from the live parser path.
-func extractEngine(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func extractEngine(rec common.Recommendation) string {
 	switch details := rec.Details.(type) {
 	case *common.DatabaseDetails:
 		if details != nil {
@@ -444,7 +444,7 @@ func extractEngine(rec common.Recommendation) string { //nolint:gocritic // huge
 // Previously both the no-data and the genuine-zero cases rendered as a
 // blank cell, conflating "we don't know" with "definitely zero" and
 // making it impossible to spot pools where the CE signal was missing.
-func formatExistingCoverage(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func formatExistingCoverage(rec common.Recommendation) string {
 	if !rec.ExistingCoverageKnown {
 		return "n/a"
 	}
@@ -494,7 +494,7 @@ func formatAvgInstancesOrBlank(v float64) string {
 // next to Instances so operators can read "you have X running, Y are
 // already covered, this rec adds N more" without doing the arithmetic.
 // Blank when either signal is zero (we can't compute a meaningful value).
-func formatCoveredInstancesOrBlank(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func formatCoveredInstancesOrBlank(rec common.Recommendation) string {
 	if rec.AverageInstancesUsedPerHour <= 0 || rec.ExistingCoveragePct <= 0 {
 		return ""
 	}

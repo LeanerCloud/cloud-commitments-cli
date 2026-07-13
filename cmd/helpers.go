@@ -48,7 +48,7 @@ type AccountAliasCache struct {
 }
 
 // NewAccountAliasCache creates a new account alias cache.
-func NewAccountAliasCache(cfg aws.Config) *AccountAliasCache { //nolint:gocritic // hugeParam: by-value per calling convention
+func NewAccountAliasCache(cfg aws.Config) *AccountAliasCache {
 	return &AccountAliasCache{
 		cache:     make(map[string]string),
 		orgClient: organizations.NewFromConfig(cfg),
@@ -278,7 +278,7 @@ func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64) []comm
 //
 // Split out of ApplyTargetCoverage to keep that function under gocyclo's
 // complexity threshold.
-func applyTargetCoverageOne(rec common.Recommendation, targetPct float64, unsupportedSeen map[common.CommitmentType]bool) (common.Recommendation, bool, bool) { //nolint:gocritic // hugeParam: by-value per calling convention
+func applyTargetCoverageOne(rec common.Recommendation, targetPct float64, unsupportedSeen map[common.CommitmentType]bool) (common.Recommendation, bool, bool) {
 	switch {
 	case common.IsSavingsPlan(rec.Service):
 		adjusted, ok := applyTargetCoverageSP(rec, targetPct)
@@ -311,7 +311,7 @@ func applyTargetCoverageOne(rec common.Recommendation, targetPct float64, unsupp
 // (adjusted, true) on success, (rec, false) when the rec should be passed
 // through unscaled (no signal) or dropped (target unreachable). Caller
 // distinguishes the two via rec.AverageInstancesUsedPerHour.
-func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common.Recommendation, bool) { //nolint:gocritic // hugeParam: by-value per calling convention
+func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common.Recommendation, bool) {
 	if rec.AverageInstancesUsedPerHour <= 0 {
 		// No signal — caller will pass through and count in the summary.
 		return rec, false
@@ -405,7 +405,7 @@ func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common
 // applyTargetCoverageSP is the SP branch of ApplyTargetCoverage. Returns
 // (adjusted, true) when the rec is kept, (rec, false) when it should be
 // skipped (caller passes through unscaled and counts in the skip summary).
-func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common.Recommendation, bool) { //nolint:gocritic // hugeParam: by-value per calling convention
+func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common.Recommendation, bool) {
 	if rec.RecommendedUtilization <= 0 {
 		return rec, false
 	}
@@ -460,7 +460,7 @@ func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common
 // (the main path passes cfg.Coverage; the CSV path passes csvModeCoverage,
 // which substitutes the default 80% with 100% so CSV-driven counts aren't
 // silently dropped).
-func applySizing(recs []common.Recommendation, cfg Config, coverage float64) []common.Recommendation { //nolint:gocritic // hugeParam: by-value per calling convention
+func applySizing(recs []common.Recommendation, cfg Config, coverage float64) []common.Recommendation {
 	if cfg.TargetCoverage > 0 {
 		return ApplyTargetCoverage(recs, cfg.TargetCoverage)
 	}
@@ -601,7 +601,7 @@ func (d *DuplicateChecker) filterRecentCommitments(existing []common.Commitment)
 }
 
 // isRecentActiveCommitment checks if a commitment is active and purchased after the cutoff time.
-func isRecentActiveCommitment(c common.Commitment, cutoffTime time.Time) bool { //nolint:gocritic // hugeParam: by-value per calling convention
+func isRecentActiveCommitment(c common.Commitment, cutoffTime time.Time) bool {
 	return (c.State == "active" || c.State == "payment-pending") && c.StartDate.After(cutoffTime)
 }
 
@@ -639,7 +639,7 @@ func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existing
 }
 
 // adjustSingleRecommendation adjusts a single recommendation based on existing commitments.
-func adjustSingleRecommendation(rec common.Recommendation, existingMap map[string]int) common.Recommendation { //nolint:gocritic // hugeParam: by-value per calling convention
+func adjustSingleRecommendation(rec common.Recommendation, existingMap map[string]int) common.Recommendation {
 	engine := getEngineFromRecommendation(rec)
 	key := fmt.Sprintf("%s|%s|%s", rec.ResourceType, rec.Region, engine)
 	existingCount := existingMap[key]
@@ -665,7 +665,7 @@ func adjustSingleRecommendation(rec common.Recommendation, existingMap map[strin
 }
 
 // getEngineFromRecommendation extracts the engine from recommendation details.
-func getEngineFromRecommendation(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func getEngineFromRecommendation(rec common.Recommendation) string {
 	if rec.Details == nil {
 		return ""
 	}
@@ -729,7 +729,7 @@ func (d *DuplicateChecker) AdjustRecommendationsForExistingRIs(ctx context.Conte
 }
 
 // GetRecommendationDescription returns a human-readable description.
-func GetRecommendationDescription(rec common.Recommendation) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func GetRecommendationDescription(rec common.Recommendation) string {
 	desc := fmt.Sprintf("%s %s", rec.Service, rec.ResourceType)
 	if rec.Details != nil {
 		desc += " " + rec.Details.GetDetailDescription()

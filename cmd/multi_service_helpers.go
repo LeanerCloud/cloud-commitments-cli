@@ -69,7 +69,7 @@ func savingsPlanDisplayName(service common.ServiceType) (string, bool) {
 }
 
 // getAllAWSRegions retrieves all available AWS regions.
-func getAllAWSRegions(ctx context.Context, cfg aws.Config) ([]string, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func getAllAWSRegions(ctx context.Context, cfg aws.Config) ([]string, error) {
 	// Create EC2 client to get regions
 	ec2Client := awsec2.NewFromConfig(cfg)
 	return getAllAWSRegionsWithClient(ctx, ec2Client)
@@ -125,7 +125,7 @@ func applyCommonCoverage(recs []common.Recommendation, coverage float64) []commo
 }
 
 // determineServicesToProcess returns the list of services to process based on flags.
-func determineServicesToProcess(cfg Config) []common.ServiceType { //nolint:gocritic // hugeParam: by-value per calling convention
+func determineServicesToProcess(cfg Config) []common.ServiceType {
 	if cfg.AllServices {
 		return getAllServices()
 	}
@@ -146,12 +146,12 @@ func printRunMode(isDryRun bool) {
 }
 
 // printPaymentAndTerm prints the payment option and term information.
-func printPaymentAndTerm(cfg Config) { //nolint:gocritic // hugeParam: by-value per calling convention
+func printPaymentAndTerm(cfg Config) {
 	AppLogger.Printf("💳 Payment option: %s, Term: %d year(s)\n", cfg.PaymentOption, cfg.TermYears)
 }
 
 // generateCSVFilename generates a CSV filename based on the mode and timestamp.
-func generateCSVFilename(isDryRun bool, cfg Config) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func generateCSVFilename(isDryRun bool, cfg Config) string {
 	if cfg.CSVOutput != "" {
 		return cfg.CSVOutput
 	}
@@ -202,7 +202,7 @@ func adjustRecsForDuplicates(ctx context.Context, recs []common.Recommendation, 
 }
 
 // createDryRunResult creates a purchase result for dry run mode.
-func createDryRunResult(rec common.Recommendation, region string, index int, cfg Config) common.PurchaseResult { //nolint:gocritic // hugeParam: by-value per calling convention
+func createDryRunResult(rec common.Recommendation, region string, index int, cfg Config) common.PurchaseResult {
 	return common.PurchaseResult{
 		Recommendation: rec,
 		Success:        true,
@@ -213,7 +213,7 @@ func createDryRunResult(rec common.Recommendation, region string, index int, cfg
 }
 
 // createCancelledResults creates purchase results for canceled purchases.
-func createCancelledResults(recs []common.Recommendation, region string, cfg Config) []common.PurchaseResult { //nolint:gocritic // hugeParam: by-value per calling convention
+func createCancelledResults(recs []common.Recommendation, region string, cfg Config) []common.PurchaseResult {
 	results := make([]common.PurchaseResult, len(recs))
 	for k := range recs {
 		results[k] = common.PurchaseResult{
@@ -228,7 +228,7 @@ func createCancelledResults(recs []common.Recommendation, region string, cfg Con
 }
 
 // executePurchase executes an actual RI purchase.
-func executePurchase(ctx context.Context, rec common.Recommendation, region string, index int, serviceClient provider.ServiceClient, cfg Config) common.PurchaseResult { //nolint:gocritic // hugeParam: by-value per calling convention
+func executePurchase(ctx context.Context, rec common.Recommendation, region string, index int, serviceClient provider.ServiceClient, cfg Config) common.PurchaseResult {
 	AppLogger.Printf("    ⚠️  ACTUAL PURCHASE: About to buy %d instances of %s\n", rec.Count, rec.ResourceType)
 	// Compute the descriptive commitment ID up front and hand it to the
 	// provider so the purchased commitment is named descriptively at AWS
@@ -247,7 +247,7 @@ func executePurchase(ctx context.Context, rec common.Recommendation, region stri
 }
 
 // determineRegionsForService determines which regions to process for a given service.
-func determineRegionsForService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, service common.ServiceType, configuredRegions []string) ([]string, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func determineRegionsForService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, service common.ServiceType, configuredRegions []string) ([]string, error) {
 	// If regions are explicitly configured, use those
 	if len(configuredRegions) > 0 {
 		return configuredRegions, nil
@@ -290,7 +290,7 @@ type engineVersionData struct {
 }
 
 // fetchEngineVersionData queries running instances and major engine versions for validation.
-func fetchEngineVersionData(ctx context.Context, cfg Config) engineVersionData { //nolint:gocritic // hugeParam: by-value per calling convention
+func fetchEngineVersionData(ctx context.Context, cfg Config) engineVersionData {
 	data := engineVersionData{
 		instanceVersions: make(map[string][]InstanceEngineVersion),
 		versionInfo:      make(map[string]MajorEngineVersionInfo),
@@ -306,7 +306,7 @@ func fetchEngineVersionData(ctx context.Context, cfg Config) engineVersionData {
 }
 
 // queryInstanceVersions queries running instances for engine version validation.
-func queryInstanceVersions(ctx context.Context, cfg Config) map[string][]InstanceEngineVersion { //nolint:gocritic // hugeParam: by-value per calling convention
+func queryInstanceVersions(ctx context.Context, cfg Config) map[string][]InstanceEngineVersion {
 	AppLogger.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...\n")
 	instanceVersions, err := queryRunningInstanceEngineVersions(ctx, cfg)
 	if err != nil {
@@ -320,7 +320,7 @@ func queryInstanceVersions(ctx context.Context, cfg Config) map[string][]Instanc
 }
 
 // queryMajorVersions queries major engine versions for extended support detection.
-func queryMajorVersions(ctx context.Context, cfg Config) map[string]MajorEngineVersionInfo { //nolint:gocritic // hugeParam: by-value per calling convention
+func queryMajorVersions(ctx context.Context, cfg Config) map[string]MajorEngineVersionInfo {
 	AppLogger.Printf("🔍 Querying AWS RDS major engine versions for extended support information...\n")
 	versionInfo, err := queryMajorEngineVersions(ctx, cfg)
 	if err != nil {
@@ -342,7 +342,7 @@ type regionRecommendations struct {
 // processRegionRecommendations fetches and processes recommendations for a single region.
 func processRegionRecommendations(
 	ctx context.Context,
-	awsCfg aws.Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	awsCfg aws.Config,
 	recClient provider.RecommendationsClient,
 	accountCache *AccountAliasCache,
 	service common.ServiceType,
@@ -350,7 +350,7 @@ func processRegionRecommendations(
 	regionIndex, totalRegions int,
 	engineData engineVersionData,
 	isDryRun bool,
-	cfg Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	cfg Config,
 	coverageMap recommendations.PoolCoverageMap,
 ) regionRecommendations {
 	result := regionRecommendations{
@@ -414,7 +414,7 @@ func fetchRecommendationsForRegion(
 	recClient provider.RecommendationsClient,
 	service common.ServiceType,
 	region string,
-	cfg Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	cfg Config,
 ) []common.Recommendation {
 	termStr := "1yr"
 	if cfg.TermYears == 3 {
@@ -455,7 +455,7 @@ func applyRegionFilters(
 	recs []common.Recommendation,
 	engineData engineVersionData,
 	region string,
-	cfg Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	cfg Config,
 ) []common.Recommendation {
 	originalCount := len(recs)
 	recs = applyFilters(recs, &cfg, engineData.instanceVersions, engineData.versionInfo, region)
@@ -479,7 +479,7 @@ func applyRegionFilters(
 // ExistingCoveragePct further by the share of pool demand attributable to
 // RIs expiring within the window, so --target-coverage recommends
 // replacements before the cliff. Doesn't run if either input is empty.
-func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment) []common.Recommendation { //nolint:gocritic // hugeParam: by-value per calling convention
+func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment) []common.Recommendation {
 	recommendations.ApplyCoverageMapToRecommendations(recs, coverageMap)
 	if cfg.RebuyWindowDays > 0 && len(expiringCommitments) > 0 {
 		n := recommendations.AdjustExistingCoverageForExpiringCommitments(recs, expiringCommitments, cfg.RebuyWindowDays)
@@ -520,7 +520,7 @@ func checkDuplicatesAndApplyLimit(
 	ctx context.Context,
 	filteredRecs []common.Recommendation,
 	serviceClient provider.ServiceClient,
-	cfg Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	cfg Config,
 ) []common.Recommendation {
 	// Check for duplicate RIs to avoid double purchasing
 	duplicateChecker := NewDuplicateChecker(0)
@@ -556,14 +556,14 @@ func checkDuplicatesAndApplyLimit(
 // step for --target-coverage.
 func fetchAndFilterRegionRecs(
 	ctx context.Context,
-	awsCfg aws.Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	awsCfg aws.Config,
 	recClient provider.RecommendationsClient,
 	accountCache *AccountAliasCache,
 	service common.ServiceType,
 	region string,
 	regionIndex, totalRegions int,
 	engineData engineVersionData,
-	cfg Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	cfg Config,
 	coverageMap recommendations.PoolCoverageMap,
 ) []common.Recommendation {
 	AppLogger.Printf("\n  📍 [%d/%d] Region: %s\n", regionIndex, totalRegions, region)
@@ -618,12 +618,12 @@ func fetchAndFilterRegionRecs(
 // owned in the same pool.
 func fetchAllRecs(
 	ctx context.Context,
-	awsCfg aws.Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	awsCfg aws.Config,
 	recClient provider.RecommendationsClient,
 	accountCache *AccountAliasCache,
 	servicesToProcess []common.ServiceType,
 	engineData engineVersionData,
-	cfg Config, //nolint:gocritic // hugeParam: by-value per calling convention
+	cfg Config,
 	coverageMap recommendations.PoolCoverageMap,
 ) []common.Recommendation {
 	all := make([]common.Recommendation, 0)

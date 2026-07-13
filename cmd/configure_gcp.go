@@ -247,7 +247,7 @@ func expandHomeDirectory(path string) string {
 }
 
 // printGCPConfigurationSuccess prints success message with credentials info.
-func printGCPConfigurationSuccess(creds GCPCredentials) { //nolint:gocritic // hugeParam: by-value per calling convention
+func printGCPConfigurationSuccess(creds GCPCredentials) {
 	log.Printf("GCP credentials stored successfully in Secrets Manager")
 	fmt.Println("\nGCP configuration complete!")
 	fmt.Printf("Service Account: %s\n", creds.ClientEmail)

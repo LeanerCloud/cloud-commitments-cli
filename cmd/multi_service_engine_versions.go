@@ -41,7 +41,7 @@ type MajorEngineVersionInfo struct {
 }
 
 // queryRunningInstanceEngineVersions queries all running RDS instances and returns their engine versions.
-func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[string][]InstanceEngineVersion, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[string][]InstanceEngineVersion, error) {
 	awsCfg, err := loadValidationAWSConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[st
 }
 
 // loadValidationAWSConfig loads AWS configuration for validation.
-func loadValidationAWSConfig(ctx context.Context, cfg Config) (aws.Config, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func loadValidationAWSConfig(ctx context.Context, cfg Config) (aws.Config, error) {
 	validationProfile := cfg.ValidationProfile
 	if validationProfile == "" {
 		validationProfile = cfg.Profile
@@ -77,7 +77,7 @@ func loadValidationAWSConfig(ctx context.Context, cfg Config) (aws.Config, error
 }
 
 // getAWSRegions retrieves all AWS regions.
-func getAWSRegions(ctx context.Context, awsCfg aws.Config) ([]ec2types.Region, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func getAWSRegions(ctx context.Context, awsCfg aws.Config) ([]ec2types.Region, error) {
 	ec2Client := awsec2.NewFromConfig(awsCfg)
 	regionsOutput, err := ec2Client.DescribeRegions(ctx, &awsec2.DescribeRegionsInput{})
 	if err != nil {
@@ -100,7 +100,7 @@ type RDSMajorVersionsClient interface {
 }
 
 // queryRDSInstancesInRegions queries RDS instances in all regions concurrently.
-func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (map[string][]InstanceEngineVersion, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (map[string][]InstanceEngineVersion, error) {
 	instanceVersions := make(map[string][]InstanceEngineVersion)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -129,7 +129,7 @@ func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions 
 }
 
 // queryRDSInstancesInRegion queries RDS instances in a single region.
-func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) { //nolint:gocritic // hugeParam: by-value per calling convention
+func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) {
 	regionCfg := awsCfg.Copy()
 	regionCfg.Region = regionName
 	rdsClient := awsrds.NewFromConfig(regionCfg)
@@ -186,7 +186,7 @@ func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker
 }
 
 // queryMajorEngineVersions queries AWS for major engine version lifecycle support information.
-func queryMajorEngineVersions(ctx context.Context, cfg Config) (map[string]MajorEngineVersionInfo, error) { //nolint:gocritic // hugeParam: by-value per calling convention
+func queryMajorEngineVersions(ctx context.Context, cfg Config) (map[string]MajorEngineVersionInfo, error) {
 	// Determine which profile to use
 	profile := cfg.ValidationProfile
 	if profile == "" {
@@ -411,7 +411,7 @@ func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]Majo
 
 // adjustRecommendationForExcludedVersions reduces the instance count in a recommendation
 // by the number of instances running versions in extended support.
-func adjustRecommendationForExcludedVersions(rec common.Recommendation, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo) common.Recommendation { //nolint:gocritic // hugeParam: by-value per calling convention
+func adjustRecommendationForExcludedVersions(rec common.Recommendation, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo) common.Recommendation {
 	// Check if this instance type has any running instances
 	versions, exists := instanceVersions[rec.ResourceType]
 	if !exists {

@@ -398,7 +398,7 @@ func TestWriteMultiServiceCSVReport_SortAndTotal(t *testing.T) {
 // previously meant either "CE was queried but returned 0%" or "CE
 // returned nothing", with no way to tell which.
 func TestFormatExistingCoverage(t *testing.T) {
-	tests := []struct { //nolint:govet // fieldalignment: reorder would break API/readability
+	tests := []struct {
 		name string
 		rec  common.Recommendation
 		want string
@@ -442,7 +442,7 @@ func TestFormatRecurringMonthlyOrBlank(t *testing.T) {
 // TestExtractRDSFamily covers the family-prefix extraction used by the
 // CSV writer to group rows by size-flex family.
 func TestExtractRDSFamily(t *testing.T) {
-	tests := []struct { //nolint:govet // fieldalignment: reorder would break API/readability
+	tests := []struct {
 		name string
 		rec  common.Recommendation
 		want string
@@ -467,7 +467,7 @@ func TestExtractRDSFamily(t *testing.T) {
 // with known sizes and stay blank for non-RDS / zero-count / unknown-size
 // inputs, matching the "0/empty = unknown" convention used elsewhere.
 func TestFormatNormalizedUnitsOrBlank(t *testing.T) {
-	tests := []struct { //nolint:govet // fieldalignment: reorder would break API/readability
+	tests := []struct {
 		name string
 		rec  common.Recommendation
 		want string
@@ -498,7 +498,7 @@ func TestFormatNormalizedUnitsOrBlank(t *testing.T) {
 // column should land for every RDS rec regardless of which Details form
 // the upstream path used.
 func TestExtractDeployment(t *testing.T) {
-	tests := []struct { //nolint:govet // fieldalignment: reorder would break API/readability
+	tests := []struct {
 		name string
 		rec  common.Recommendation
 		want string
@@ -524,7 +524,7 @@ func TestExtractDeployment(t *testing.T) {
 // DatabaseDetails (RDS engine), CacheDetails (ElastiCache engine),
 // ComputeDetails (EC2 platform), and unset/other Details (blank).
 func TestExtractEngine(t *testing.T) {
-	tests := []struct { //nolint:govet // fieldalignment: reorder would break API/readability
+	tests := []struct {
 		name string
 		rec  common.Recommendation
 		want string
@@ -554,7 +554,7 @@ func TestExtractEngine(t *testing.T) {
 // as an empty cell so users can distinguish "no upfront due" from "actual
 // $0 upfront", consistent with the rest of the optional CSV columns.
 func TestFormatCurrencyOrBlank(t *testing.T) {
-	tests := []struct { //nolint:govet // fieldalignment: reorder would break API/readability
+	tests := []struct {
 		name string
 		in   float64
 		want string

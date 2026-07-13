@@ -231,7 +231,7 @@ func getAllServices() []common.ServiceType {
 }
 
 // createServiceClient creates the appropriate service client for a service.
-func createServiceClient(service common.ServiceType, cfg aws.Config) provider.ServiceClient { //nolint:gocritic // hugeParam: by-value per calling convention
+func createServiceClient(service common.ServiceType, cfg aws.Config) provider.ServiceClient {
 	switch service {
 	case common.ServiceRDS:
 		return rds.NewClient(cfg)
@@ -263,7 +263,7 @@ func createServiceClient(service common.ServiceType, cfg aws.Config) provider.Se
 // cfg.TargetCoverage when set (>0), else cfg.Coverage. Use this when
 // emitting human-facing labels (purchase IDs, audit-log fields) so the label
 // reflects the value that drove the sizing, not the unused default.
-func effectiveSizingPct(cfg Config) float64 { //nolint:gocritic // hugeParam: by-value per calling convention
+func effectiveSizingPct(cfg Config) float64 {
 	if cfg.TargetCoverage > 0 {
 		return cfg.TargetCoverage
 	}
@@ -302,7 +302,7 @@ func extractEngineLabel(details interface{}) string {
 // sizingPct is the percentage that actually drove the sizing decision (see
 // effectiveSizingPct); it appears in the ID as e.g. "80pct" purely for human
 // readability and audit traceability.
-func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, sizingPct float64) string { //nolint:gocritic // hugeParam: by-value per calling convention
+func generatePurchaseID(rec common.Recommendation, region string, _ int, isDryRun bool, sizingPct float64) string {
 	// Generate a short UUID suffix (first 8 characters) for uniqueness
 	uuidSuffix := uuid.New().String()[:8]
 	timestamp := time.Now().Format("20060102-150405")

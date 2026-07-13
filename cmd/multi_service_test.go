@@ -641,9 +641,9 @@ func TestMultiServiceConfig(t *testing.T) {
 				Coverage: 0.0,
 			},
 		},
-		PaymentOption: "no-upfront", //nolint:govet // unusedwrite: field set for test completeness
-		TermYears:     3,            //nolint:govet // unusedwrite: field set for test completeness
-		DryRun:        true,         //nolint:govet // unusedwrite: field set for test completeness
+		PaymentOption: "no-upfront",
+		TermYears:     3,
+		DryRun:        true,
 	}
 
 	// Test enabled services count
