@@ -176,8 +176,8 @@ func TestDiscoverRegionsForService(t *testing.T) {
 func TestFormatServices(t *testing.T) {
 	tests := []struct {
 		name     string
-		services []common.ServiceType
 		expected string
+		services []common.ServiceType
 	}{
 		{
 			name:     "Empty list",
@@ -242,9 +242,9 @@ func TestApplyCommonCoverage(t *testing.T) {
 
 	tests := []struct {
 		name              string
+		expectedInstances []int
 		coverage          float64
 		expectedCount     int
-		expectedInstances []int
 	}{
 		{
 			name:              "100% coverage",
@@ -337,7 +337,7 @@ func TestCreateCancelledResults(t *testing.T) {
 		assert.False(t, result.Success)
 		assert.Equal(t, recs[i], result.Recommendation)
 		assert.NotNil(t, result.Error)
-		assert.Contains(t, result.Error.Error(), "cancelled")
+		assert.Contains(t, result.Error.Error(), "canceled")
 		assert.Contains(t, result.CommitmentID, "us-west-2")
 	}
 }
@@ -463,9 +463,9 @@ func TestAdjustRecsForDuplicatesError(t *testing.T) {
 
 func TestGroupRecommendationsByServiceRegion(t *testing.T) {
 	tests := []struct {
+		expectedGroups  map[common.ServiceType]map[string]int
 		name            string
 		recommendations []common.Recommendation
-		expectedGroups  map[common.ServiceType]map[string]int // service -> region -> count
 	}{
 		{
 			name: "Single service single region",
@@ -532,10 +532,10 @@ func TestGroupRecommendationsByServiceRegion(t *testing.T) {
 
 func TestGenerateCSVFilename(t *testing.T) {
 	tests := []struct {
-		name     string
-		isDryRun bool
-		cfg      Config
 		check    func(t *testing.T, filename string)
+		name     string
+		cfg      Config
+		isDryRun bool
 	}{
 		{
 			name:     "Dry run mode generates dryrun filename",
@@ -582,7 +582,7 @@ func TestPrintRunMode(t *testing.T) {
 	printRunMode(false)
 }
 
-func TestPrintPaymentAndTerm(t *testing.T) {
+func TestPrintPaymentAndTerm(t *testing.T) { //nolint:unparam // param intentional for interface consistency/future use
 	// Capture output by disabling logger
 	// Logger output disabled for testing
 

@@ -386,13 +386,13 @@ func TestValidateGCPProjectID(t *testing.T) {
 // Tests for storeAzureCredentials function.
 func TestStoreAzureCredentials(t *testing.T) {
 	tests := []struct {
+		mockSetup     func(*MockSecretsStore)
+		validateStore func(*testing.T, *MockSecretsStore)
+		creds         AzureCredentials
 		name          string
 		stackName     string
-		creds         AzureCredentials
-		mockSetup     func(*MockSecretsStore)
-		wantErr       bool
 		wantErrMsg    string
-		validateStore func(*testing.T, *MockSecretsStore)
+		wantErr       bool
 	}{
 		{
 			name:      "Successfully store valid credentials",
@@ -565,13 +565,13 @@ func TestStoreGCPCredentials(t *testing.T) {
 	}`
 
 	tests := []struct {
+		mockSetup     func(*MockSecretsStore)
+		validateStore func(*testing.T, *MockSecretsStore)
 		name          string
 		stackName     string
 		credsJSON     string
-		mockSetup     func(*MockSecretsStore)
-		wantErr       bool
 		wantErrMsg    string
-		validateStore func(*testing.T, *MockSecretsStore)
+		wantErr       bool
 	}{
 		{
 			name:      "Successfully store valid GCP credentials",

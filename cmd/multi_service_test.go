@@ -23,8 +23,8 @@ func TestRunToolMultiService_Validation(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name        string
 		setupVars   func()
+		name        string
 		expectPanic bool
 	}{
 		{
@@ -208,12 +208,12 @@ func TestProcessServiceWithMocks(t *testing.T) {
 	}()
 
 	tests := []struct {
+		setupFunc   func()
 		name        string
 		service     common.ServiceType
-		isDryRun    bool
 		testRegions []string
 		mockRecs    []common.Recommendation
-		setupFunc   func()
+		isDryRun    bool
 	}{
 		{
 			name:        "RDS dry run with recommendations",
@@ -589,9 +589,9 @@ func TestGenerateCSVFilenameHelper(t *testing.T) {
 		name        string
 		service     common.ServiceType
 		payment     string
+		expectParts []string
 		term        int
 		dryRun      bool
-		expectParts []string
 	}{
 		{
 			name:        "RDS dry run",
@@ -641,9 +641,9 @@ func TestMultiServiceConfig(t *testing.T) {
 				Coverage: 0.0,
 			},
 		},
-		PaymentOption: "no-upfront",
-		TermYears:     3,
-		DryRun:        true,
+		PaymentOption: "no-upfront", //nolint:govet // unusedwrite: field set for test completeness
+		TermYears:     3,            //nolint:govet // unusedwrite: field set for test completeness
+		DryRun:        true,         //nolint:govet // unusedwrite: field set for test completeness
 	}
 
 	// Test enabled services count
@@ -719,7 +719,7 @@ func applyCoverageToRecommendations(recs []common.Recommendation, coverage float
 	return recs[:targetCount]
 }
 
-func generateCSVFilenameTestHelper(service common.ServiceType, payment string, term int, dryRun bool) string {
+func generateCSVFilenameTestHelper(service common.ServiceType, payment string, term int, dryRun bool) string { //nolint:unparam // param intentional for interface consistency/future use
 	mode := "purchase"
 	if dryRun {
 		mode = "dryrun"
@@ -764,10 +764,10 @@ type ServiceConfig struct {
 func TestApplyFilters_RegionFiltering(t *testing.T) {
 	tests := []struct {
 		name           string
+		currentRegion  string
 		recs           []common.Recommendation
 		includeRegions []string
 		excludeRegions []string
-		currentRegion  string
 		expectedCount  int
 	}{
 		{
@@ -1520,12 +1520,12 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 	defer saved.restore()
 
 	tests := []struct {
+		setupFilters    func()
 		name            string
 		recommendations []common.Recommendation
 		coverage        float64
-		setupFilters    func()
-		expectedMin     int // minimum expected recommendations
-		expectedMax     int // maximum expected recommendations
+		expectedMin     int
+		expectedMax     int
 	}{
 		{
 			name: "100% coverage no filters",
@@ -1617,10 +1617,10 @@ elasticache,us-west-2,redis,cache.t3.micro,All Upfront,12,1,123456789012
 	_ = tmpFile.Close()
 
 	tests := []struct {
-		name         string
 		setupConfig  func()
-		expectPanic  bool
 		validateFunc func(t *testing.T)
+		name         string
+		expectPanic  bool
 	}{
 		{
 			name: "Dry run mode",

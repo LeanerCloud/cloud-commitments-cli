@@ -25,14 +25,14 @@ func calculateServiceStats(service common.ServiceType, recs []common.Recommendat
 	}
 
 	regionSet := make(map[string]bool)
-	for _, rec := range recs {
+	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
 		regionSet[rec.Region] = true
 		stats.InstancesProcessed += rec.Count
 		stats.TotalEstimatedSavings += rec.EstimatedSavings
 	}
 	stats.RegionsProcessed = len(regionSet)
 
-	for _, result := range results {
+	for _, result := range results { //nolint:gocritic // rangeValCopy: acceptable value copy
 		if result.Success {
 			stats.SuccessfulPurchases++
 		} else {
@@ -56,7 +56,7 @@ func printServiceSummary(service common.ServiceType, stats ServiceProcessingStat
 }
 
 // printMultiServiceSummary prints the final summary for all services.
-func printMultiServiceSummary(allRecommendations []common.Recommendation, allResults []common.PurchaseResult, serviceStats map[common.ServiceType]ServiceProcessingStats, isDryRun bool) {
+func printMultiServiceSummary(allRecommendations []common.Recommendation, allResults []common.PurchaseResult, serviceStats map[common.ServiceType]ServiceProcessingStats, isDryRun bool) { //nolint:unparam // param intentional for interface consistency/future use
 	printSummaryHeader(isDryRun)
 
 	spStats, riStats, riAggregates := separateAndAggregateStats(serviceStats)
@@ -206,7 +206,7 @@ func printArcheraPitch() {
 }
 
 // printSavingsPlansSection prints the Savings Plans summary section.
-func printSavingsPlansSection(allRecommendations []common.Recommendation, spStats ServiceProcessingStats) {
+func printSavingsPlansSection(allRecommendations []common.Recommendation, spStats ServiceProcessingStats) { //nolint:unparam // param intentional for interface consistency/future use
 	AppLogger.Println("\n📊 SAVINGS PLANS:")
 	AppLogger.Println("--------------------------------------------------")
 

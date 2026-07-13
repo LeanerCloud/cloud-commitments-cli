@@ -12,10 +12,10 @@ import (
 
 func TestValidateNumericRanges(t *testing.T) {
 	tests := []struct {
-		name      string
 		setupFunc func()
-		wantErr   bool
+		name      string
 		errMsg    string
+		wantErr   bool
 	}{
 		{
 			name: "valid coverage percentage",
@@ -118,10 +118,10 @@ func TestValidateNumericRanges(t *testing.T) {
 
 func TestValidatePaymentAndTerm(t *testing.T) {
 	tests := []struct {
-		name      string
 		setupFunc func()
-		wantErr   bool
+		name      string
 		errMsg    string
+		wantErr   bool
 	}{
 		{
 			name: "valid payment option - no-upfront",
@@ -214,8 +214,8 @@ func TestValidatePaymentAndTerm(t *testing.T) {
 func TestContainsService(t *testing.T) {
 	tests := []struct {
 		name     string
-		services []common.ServiceType
 		service  common.ServiceType
+		services []common.ServiceType
 		want     bool
 	}{
 		{
@@ -259,10 +259,10 @@ func TestValidateFilePaths(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	tests := []struct {
-		name      string
 		setupFunc func() func()
-		wantErr   bool
+		name      string
 		errMsg    string
+		wantErr   bool
 	}{
 		{
 			name: "valid CSV output path",
@@ -357,11 +357,11 @@ func TestValidateFilePaths(t *testing.T) {
 func TestValidateNoConflicts(t *testing.T) {
 	tests := []struct {
 		name     string
+		itemType string
+		errMsg   string
 		include  []string
 		exclude  []string
-		itemType string
 		wantErr  bool
-		errMsg   string
 	}{
 		{
 			name:     "no conflicts",
@@ -431,14 +431,11 @@ func TestValidateNoConflicts(t *testing.T) {
 // this package is more friction than value).
 func TestValidateTargetCoverage(t *testing.T) {
 	tests := []struct {
-		name      string
-		target    float64
-		coverage  float64
-		wantErr   bool
-		errSubstr string
-		// useCobraCmd controls whether the test builds a real cobra command
-		// with --coverage marked as Changed, exercising the precedence-log
-		// gate. False keeps the nil-cmd shortcut for pure range checks.
+		name        string
+		errSubstr   string
+		target      float64
+		coverage    float64
+		wantErr     bool
 		useCobraCmd bool
 	}{
 		{name: "disabled (zero) is valid", target: 0, coverage: 80, wantErr: false},
@@ -498,9 +495,9 @@ func TestValidateTargetCoverage(t *testing.T) {
 func TestValidateCoverageLookbackDays(t *testing.T) {
 	tests := []struct {
 		name      string
+		errSubstr string
 		days      int
 		wantErr   bool
-		errSubstr string
 	}{
 		{name: "default 30 is valid", days: 30, wantErr: false},
 		{name: "1 day is valid", days: 1, wantErr: false},

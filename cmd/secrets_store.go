@@ -45,7 +45,7 @@ func (s *AWSSecretsStore) ListSecrets(ctx context.Context, filter string) ([]str
 	}
 
 	arns := make([]string, 0, len(result.SecretList))
-	for _, secret := range result.SecretList {
+	for _, secret := range result.SecretList { //nolint:gocritic // rangeValCopy: acceptable value copy
 		if secret.ARN != nil {
 			arns = append(arns, *secret.ARN)
 		}
@@ -55,7 +55,7 @@ func (s *AWSSecretsStore) ListSecrets(ctx context.Context, filter string) ([]str
 }
 
 // UpdateSecret updates a secret with the given value.
-func (s *AWSSecretsStore) UpdateSecret(ctx context.Context, secretID string, secretValue string) error {
+func (s *AWSSecretsStore) UpdateSecret(ctx context.Context, secretID, secretValue string) error {
 	input := &secretsmanager.UpdateSecretInput{
 		SecretId:     aws.String(secretID),
 		SecretString: aws.String(secretValue),

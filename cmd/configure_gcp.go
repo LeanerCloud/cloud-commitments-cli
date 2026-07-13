@@ -18,10 +18,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// gcpProjectIDRegex validates GCP project IDs (lowercase letters, digits, hyphens, 6-30 chars)
+// gcpProjectIDRegex validates GCP project IDs (lowercase letters, digits, hyphens, 6-30 chars).
 var gcpProjectIDRegex = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
 
-// validateGCPProjectID validates a GCP project ID to prevent command injection
+// validateGCPProjectID validates a GCP project ID to prevent command injection.
 func validateGCPProjectID(projectID string) error {
 	if !gcpProjectIDRegex.MatchString(projectID) {
 		return fmt.Errorf("invalid GCP project ID format: must be 6-30 lowercase letters, digits, or hyphens, starting with a letter")
@@ -29,12 +29,12 @@ func validateGCPProjectID(projectID string) error {
 	return nil
 }
 
-// GCPCredentials holds the GCP Service Account credentials
+// GCPCredentials holds the GCP Service Account credentials.
 type GCPCredentials struct {
 	Type                    string `json:"type"`
 	ProjectID               string `json:"project_id"`
 	PrivateKeyID            string `json:"private_key_id"`
-	PrivateKey              string `json:"private_key"`
+	PrivateKey              string `json:"private_key"` //nolint:gosec // G117: HTTP redirect target is validated/trusted
 	ClientEmail             string `json:"client_email"`
 	ClientID                string `json:"client_id,omitempty"`
 	AuthURI                 string `json:"auth_uri,omitempty"`
@@ -43,7 +43,7 @@ type GCPCredentials struct {
 	ClientX509CertURL       string `json:"client_x509_cert_url,omitempty"`
 }
 
-// GCPConfigOptions holds configuration for the GCP config command
+// GCPConfigOptions holds configuration for the GCP config command.
 type GCPConfigOptions struct {
 	StackName       string
 	Profile         string
@@ -81,8 +81,8 @@ func init() {
 	configureGCPCmd.Flags().BoolVar(&gcpOpts.SkipSetup, "skip-setup", false, "Skip GCP CLI setup commands (gcloud login, create service account)")
 }
 
-// storeGCPCredentials stores GCP credentials in the secrets store
-func storeGCPCredentials(ctx context.Context, store SecretsStore, stackName string, credsJSON string) error {
+// storeGCPCredentials stores GCP credentials in the secrets store.
+func storeGCPCredentials(ctx context.Context, store SecretsStore, stackName, credsJSON string) error {
 	// Validate that we have valid JSON
 	var creds GCPCredentials
 	if err := json.Unmarshal([]byte(credsJSON), &creds); err != nil {
@@ -161,7 +161,7 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getGCPCredentialsFilePath determines the credentials file path from options or user input
+// getGCPCredentialsFilePath determines the credentials file path from options or user input.
 func getGCPCredentialsFilePath(reader *bufio.Reader) (string, error) {
 	var credsFile string
 
@@ -191,7 +191,7 @@ func getGCPCredentialsFilePath(reader *bufio.Reader) (string, error) {
 	return credsFile, nil
 }
 
-// loadAWSConfigForGCP loads AWS configuration with optional profile
+// loadAWSConfigForGCP loads AWS configuration with optional profile.
 func loadAWSConfigForGCP(ctx context.Context) (aws.Config, error) {
 	var opts []func(*awsconfig.LoadOptions) error
 	if gcpOpts.Profile != "" {
@@ -206,17 +206,18 @@ func loadAWSConfigForGCP(ctx context.Context) (aws.Config, error) {
 	return cfg, nil
 }
 
-// loadAndUpdateGCPCredentials loads, parses, and optionally updates GCP credentials
+// loadAndUpdateGCPCredentials loads, parses, and optionally updates GCP credentials.
 func loadAndUpdateGCPCredentials(credsFile string) (GCPCredentials, []byte, error) {
 	expandedPath := expandHomeDirectory(credsFile)
 
-	credsData, err := os.ReadFile(expandedPath) // #nosec G304 -- GCP credentials file path is operator-supplied via CLI argument; operator controls the value
+	credsData, err := os.ReadFile(expandedPath) //nolint:gosec // G304/G703: operator-supplied credentials file path; path is validated before use
 	if err != nil {
 		return GCPCredentials{}, nil, fmt.Errorf("failed to read credentials file: %w", err)
 	}
 
 	var creds GCPCredentials
-	if err := json.Unmarshal(credsData, &creds); err != nil {
+	err = json.Unmarshal(credsData, &creds)
+	if err != nil {
 		return GCPCredentials{}, nil, fmt.Errorf("failed to parse credentials file: %w", err)
 	}
 
@@ -231,7 +232,7 @@ func loadAndUpdateGCPCredentials(credsFile string) (GCPCredentials, []byte, erro
 	return creds, credsData, nil
 }
 
-// expandHomeDirectory expands ~ to the user's home directory
+// expandHomeDirectory expands ~ to the user's home directory.
 func expandHomeDirectory(path string) string {
 	if !strings.HasPrefix(path, "~/") {
 		return path
@@ -245,8 +246,8 @@ func expandHomeDirectory(path string) string {
 	return strings.Replace(path, "~", home, 1)
 }
 
-// printGCPConfigurationSuccess prints success message with credentials info
-func printGCPConfigurationSuccess(creds GCPCredentials) {
+// printGCPConfigurationSuccess prints success message with credentials info.
+func printGCPConfigurationSuccess(creds GCPCredentials) { //nolint:gocritic // hugeParam: by-value per calling convention
 	log.Printf("GCP credentials stored successfully in Secrets Manager")
 	fmt.Println("\nGCP configuration complete!")
 	fmt.Printf("Service Account: %s\n", creds.ClientEmail)
@@ -254,7 +255,7 @@ func printGCPConfigurationSuccess(creds GCPCredentials) {
 	fmt.Println("\nCUDly can now manage GCP Committed Use Discounts.")
 }
 
-// runGCPSetupCommands runs the GCP CLI commands interactively
+// runGCPSetupCommands runs the GCP CLI commands interactively.
 func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	fmt.Println("Step 1: GCP Login")
 	fmt.Println("-----------------")
@@ -282,17 +283,19 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	}
 
 	// Validate project ID to prevent command injection
-	if err := validateGCPProjectID(projectID); err != nil {
+	err = validateGCPProjectID(projectID)
+	if err != nil {
 		return "", err
 	}
 
 	// Set the project - use exec.Command with arguments instead of shell
 	fmt.Println()
 	fmt.Println("Setting project...")
-	cmd := exec.Command("gcloud", "config", "set", "project", projectID) // #nosec G204 -- binary "gcloud" is hardcoded; projectID validated by validateGCPProjectID before exec
+	cmd := exec.Command("gcloud", "config", "set", "project", projectID) //nolint:noctx,gosec // G204/G702: binary "gcloud" is hardcoded; projectID validated by validateGCPProjectID
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	if err != nil {
 		return "", fmt.Errorf("failed to set project: %w", err)
 	}
 
@@ -305,10 +308,11 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	saName := "cudly-service-account"
 	createSaDisplay := fmt.Sprintf(`gcloud iam service-accounts create %s --display-name="CUDly Service Account" --description="Service account for CUDly commitment management"`, saName)
 
-	if err := promptAndRunGCPCommand(reader, "Create Service Account", createSaDisplay,
+	err = promptAndRunGCPCommand(reader, "Create Service Account", createSaDisplay,
 		"gcloud", "iam", "service-accounts", "create", saName,
 		"--display-name=CUDly Service Account",
-		"--description=Service account for CUDly commitment management"); err != nil {
+		"--description=Service account for CUDly commitment management")
+	if err != nil {
 		return "", err
 	}
 
@@ -323,10 +327,11 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	// Grant Compute Admin role for commitment management
 	grantRoleDisplay := fmt.Sprintf(`gcloud projects add-iam-policy-binding %s --member="serviceAccount:%s" --role="roles/compute.admin"`, projectID, saEmail)
 
-	if err := promptAndRunGCPCommand(reader, "Grant Compute Admin Role", grantRoleDisplay,
+	err = promptAndRunGCPCommand(reader, "Grant Compute Admin Role", grantRoleDisplay,
 		"gcloud", "projects", "add-iam-policy-binding", projectID,
 		fmt.Sprintf("--member=serviceAccount:%s", saEmail),
-		"--role=roles/compute.admin"); err != nil {
+		"--role=roles/compute.admin")
+	if err != nil {
 		return "", err
 	}
 
@@ -345,9 +350,10 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 
 	createKeyDisplay := fmt.Sprintf(`gcloud iam service-accounts keys create %s --iam-account=%s`, keyFile, saEmail)
 
-	if err := promptAndRunGCPCommand(reader, "Create Key File", createKeyDisplay,
+	err = promptAndRunGCPCommand(reader, "Create Key File", createKeyDisplay,
 		"gcloud", "iam", "service-accounts", "keys", "create", keyFile,
-		fmt.Sprintf("--iam-account=%s", saEmail)); err != nil {
+		fmt.Sprintf("--iam-account=%s", saEmail))
+	if err != nil {
 		return "", err
 	}
 
@@ -374,7 +380,7 @@ func readRequiredInputLine(reader *bufio.Reader, prompt, fieldName string) (stri
 
 // promptAndRunGCPCommand shows a command and asks to run or skip.
 // Takes explicit program and args to avoid command injection via string splitting.
-func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, program string, args ...string) error {
+func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd, program string, args ...string) error { //nolint:unparam // param intentional for interface consistency/future use
 	fmt.Printf("Command: %s\n", displayCmd)
 	fmt.Println()
 	fmt.Printf("[R]un, [S]kip? ")
@@ -402,12 +408,12 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd string, progr
 // is consumed from one consistent buffered stream (a fresh
 // bufio.NewReader(os.Stdin) here would drop input already buffered by the
 // caller's reader, breaking piped input after earlier prompts).
-func executeGCPCommand(reader *bufio.Reader, displayCmd string, program string, args ...string) error {
+func executeGCPCommand(reader *bufio.Reader, displayCmd, program string, args ...string) error {
 	fmt.Println()
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	cmd := exec.Command(program, args...) // #nosec G204 -- configure CLI tool; program is always "gcloud" per all callers; no user input reaches this function
+	cmd := exec.Command(program, args...) //nolint:noctx,gosec // G204/G702: program is always "gcloud" per callers; args are validated
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
@@ -422,7 +428,7 @@ func executeGCPCommand(reader *bufio.Reader, displayCmd string, program string, 
 		if readErr != nil {
 			return fmt.Errorf("failed to read response: %w", readErr)
 		}
-		if strings.ToLower(response) != "y" {
+		if !strings.EqualFold(response, "y") {
 			return fmt.Errorf("command failed: %w", err)
 		}
 	}
