@@ -71,6 +71,13 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 // shutdownRequested is set to true when SIGINT is received during a purchase run.
 var shutdownRequested atomic.Bool
 
+// effectiveDryRun returns true when either DryRun is explicitly set or
+// ActualPurchase is not enabled. Both the non-CSV and CSV code paths use
+// this helper so the guard is consistent and defined in one place.
+func effectiveDryRun(cfg Config) bool {
+	return !cfg.ActualPurchase || cfg.DryRun
+}
+
 // runToolMultiService is the main entry point for processing multiple services.
 // It runs a two-phase pipeline: (1) fetch+filter all recommendations, then
 // (2) score, display, confirm, and purchase.
@@ -85,7 +92,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 		log.Fatalf("No valid services specified")
 	}
 
-	isDryRun := !cfg.ActualPurchase || cfg.DryRun
+	isDryRun := effectiveDryRun(cfg)
 
 	// Register SIGINT handler so a running purchase loop can be interrupted cleanly.
 	shutdownRequested.Store(false)
@@ -259,8 +266,7 @@ func buildServiceStats(recs []common.Recommendation, results []common.PurchaseRe
 
 // runToolFromCSV processes recommendations from a CSV input file.
 func runToolFromCSV(ctx context.Context, cfg Config) {
-	// Determine if this is a dry run
-	isDryRun := !cfg.ActualPurchase
+	isDryRun := effectiveDryRun(cfg)
 	printRunMode(isDryRun)
 
 	csvModeCoverage := determineCSVCoverage(cfg)
