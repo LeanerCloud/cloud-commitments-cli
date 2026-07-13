@@ -84,6 +84,25 @@ linters:
       - linters:
           - all
         path: .*_gen\.go
+      # revive var-naming: "api" is an intentional package name for the HTTP API
+      # layer; it is not a utility package and "avoid meaningless package names"
+      # is a false positive here. All 88+ files in internal/api use this name.
+      - linters:
+          - revive
+        path: internal/api/
+        text: "avoid meaningless package names"
+      # noctx: exec.Command calls in deploy/configure CLI helpers intentionally
+      # omit context (CommandRunner interface contract; operator-controlled inputs).
+      # Suppressed per-file rather than per-line so #nosec G204 can lead the comment.
+      - linters:
+          - noctx
+        path: (internal/deploy/docker|cmd/configure_gcp|cmd/configure_azure)\.go
+      # misspell: "cancelled" is the canonical DB column name (migration 000035).
+      # Allow the double-L spelling in the config package SQL files.
+      - linters:
+          - misspell
+        path: internal/config/(store_postgres|store_postgres_pgxmock_test|types)\.go
+        text: "cancelled"
     paths:
       - third_party$
       - builtin$

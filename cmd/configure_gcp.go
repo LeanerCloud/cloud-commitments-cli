@@ -210,7 +210,7 @@ func loadAWSConfigForGCP(ctx context.Context) (aws.Config, error) {
 func loadAndUpdateGCPCredentials(credsFile string) (GCPCredentials, []byte, error) {
 	expandedPath := expandHomeDirectory(credsFile)
 
-	credsData, err := os.ReadFile(expandedPath) //nolint:gosec // G304/G703: operator-supplied credentials file path; path is validated before use
+	credsData, err := os.ReadFile(expandedPath) // #nosec G304,G703 -- GCP credentials file path is operator-supplied via CLI argument; operator controls the value
 	if err != nil {
 		return GCPCredentials{}, nil, fmt.Errorf("failed to read credentials file: %w", err)
 	}
@@ -291,7 +291,7 @@ func runGCPSetupCommands(reader *bufio.Reader) (string, error) {
 	// Set the project - use exec.Command with arguments instead of shell
 	fmt.Println()
 	fmt.Println("Setting project...")
-	cmd := exec.Command("gcloud", "config", "set", "project", projectID) //nolint:noctx,gosec // G204/G702: binary "gcloud" is hardcoded; projectID validated by validateGCPProjectID
+	cmd := exec.Command("gcloud", "config", "set", "project", projectID) // #nosec G204,G702 -- binary "gcloud" is hardcoded; projectID validated by validateGCPProjectID before exec
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
@@ -413,7 +413,7 @@ func executeGCPCommand(reader *bufio.Reader, displayCmd, program string, args ..
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	cmd := exec.Command(program, args...) //nolint:noctx,gosec // G204/G702: program is always "gcloud" per callers; args are validated
+	cmd := exec.Command(program, args...) // #nosec G204,G702 -- configure CLI tool; program is always "gcloud" per all callers; no user input reaches this function
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

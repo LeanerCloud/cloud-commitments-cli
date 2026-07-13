@@ -341,7 +341,7 @@ func createAzureServicePrincipal(reader *bufio.Reader, subscriptionID string) er
 	if choice == "r" || choice == "run" || choice == "" {
 		fmt.Println()
 		fmt.Println(strings.Repeat("-", 60))
-		cmd := exec.Command("az", "ad", "sp", "create-for-rbac", //nolint:noctx,gosec // G204: binary "az" is hardcoded; subscriptionID validated by validateAzureUUID
+		cmd := exec.Command("az", "ad", "sp", "create-for-rbac", // #nosec G204,G702 -- binary "az" is hardcoded; subscriptionID validated by validateAzureUUID before exec
 			"--name", "CUDly",
 			"--role", "Reservations Administrator",
 			"--scopes", fmt.Sprintf("/subscriptions/%s", subscriptionID))
@@ -401,7 +401,7 @@ func executeExplicitCommand(reader *bufio.Reader, displayCmd, program string, ar
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	cmd := exec.Command(program, args...) //nolint:noctx // #nosec G204 -- interactive CLI setup; context not threaded through; program is always "az" per all callers
+	cmd := exec.Command(program, args...) // #nosec G204 -- configure CLI tool; program is always "az" (Azure CLI) per all callers; no user input reaches this function
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin
