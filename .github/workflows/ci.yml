@@ -59,7 +59,10 @@ jobs:
       - name: Check cyclomatic complexity
         run: |
           echo "Checking for functions with cyclomatic complexity over 10..."
-          COMPLEXITY_ISSUES=$(gocyclo -over 10 . 2>&1 || true)
+          # Exclude _test.go files to stay consistent with .golangci.yml, which
+          # excludes gocyclo on test files (test helpers/table-driven tests are
+          # allowed higher complexity). Production code is still gated at >10.
+          COMPLEXITY_ISSUES=$(gocyclo -over 10 -ignore "_test\.go" . 2>&1 || true)
           if [ -n "$COMPLEXITY_ISSUES" ]; then
             echo "❌ Found functions with cyclomatic complexity over 10:"
             echo "$COMPLEXITY_ISSUES"
