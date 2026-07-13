@@ -130,7 +130,7 @@ func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName st
 	}
 
 	// Marshal credentials to JSON
-	credJSON, err := json.Marshal(creds)
+	credJSON, err := json.Marshal(creds) // #nosec G117 -- intentional: marshaling Azure credential struct (contains ClientSecret field) for secure storage in the credential store
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
@@ -341,7 +341,7 @@ func createAzureServicePrincipal(reader *bufio.Reader, subscriptionID string) er
 	if choice == "r" || choice == "run" || choice == "" {
 		fmt.Println()
 		fmt.Println(strings.Repeat("-", 60))
-		cmd := exec.Command("az", "ad", "sp", "create-for-rbac",
+		cmd := exec.Command("az", "ad", "sp", "create-for-rbac", // #nosec G204 -- binary "az" is hardcoded; subscriptionID validated by validateAzureUUID before exec
 			"--name", "CUDly",
 			"--role", "Reservations Administrator",
 			"--scopes", fmt.Sprintf("/subscriptions/%s", subscriptionID))
@@ -401,7 +401,7 @@ func executeExplicitCommand(reader *bufio.Reader, displayCmd string, program str
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	cmd := exec.Command(program, args...)
+	cmd := exec.Command(program, args...) // #nosec G204 -- configure CLI tool; program is always "az" (Azure CLI) per all callers; no user input reaches this function
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

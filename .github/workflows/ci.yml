@@ -318,11 +318,16 @@ jobs:
           fi
 
       - name: Run gosec Security Scanner
-        uses: securego/gosec@4a3bd8af174872c778439083ded7adbf3747e770 # v2.26.1
-        with:
-          args: '-fmt sarif -out gosec-results.sarif ./...'
+        run: |
+          # Install pinned gosec using the job's existing setup-go (GO_VERSION 1.26.5).
+          # The securego/gosec Docker action bundles its own Go toolchain (1.26.1) which
+          # cannot satisfy the "go 1.26.5" module requirement in go.mod, causing it to
+          # load 0 files and exit 1 with a toolchain mismatch rather than real findings.
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
+          gosec -fmt sarif -out gosec-results.sarif ./...
 
       - name: Upload gosec results to GitHub Security
+        if: always()
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           sarif_file: gosec-results.sarif
