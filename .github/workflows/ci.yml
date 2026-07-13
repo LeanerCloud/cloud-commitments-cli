@@ -340,6 +340,13 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          # Pin the Trivy binary independently of the action SHA. v0.36.0 is
+          # the latest trivy-action release but bundles Trivy v0.70.0, which
+          # panics in adaptDefaultTags on terraform/environments/aws/main.tf
+          # (null default_tags vars). Fixed in Trivy >= v0.72.0. The action
+          # forwards this input to aquasecurity/setup-trivy, so both scan
+          # steps run the same pinned binary. Keep both steps on this version.
+          version: 'v0.72.0'
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
@@ -363,6 +370,9 @@ jobs:
           format: 'sarif'
           output: 'trivy-config-results.sarif'
           severity: 'CRITICAL,HIGH'
+          # Same pinned Trivy binary as the filesystem scan above (>= v0.72.0
+          # avoids the adaptDefaultTags panic on null default_tags vars).
+          version: 'v0.72.0'
 
       - name: Upload Trivy IaC results to GitHub Security
         if: always()
