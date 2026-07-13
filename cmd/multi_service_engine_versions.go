@@ -165,7 +165,8 @@ func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker
 	}
 
 	versions = make(map[string][]InstanceEngineVersion)
-	for _, dbInstance := range output.DBInstances { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range output.DBInstances {
+		dbInstance := output.DBInstances[_rvc]
 		instanceClass := aws.ToString(dbInstance.DBInstanceClass)
 		engine := aws.ToString(dbInstance.Engine)
 		engineVersion := aws.ToString(dbInstance.EngineVersion)

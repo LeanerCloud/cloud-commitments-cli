@@ -104,7 +104,8 @@ func discoverRegionsForService(ctx context.Context, client provider.Recommendati
 	}
 
 	regionSet := make(map[string]bool)
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		if rec.Region != "" {
 			regionSet[rec.Region] = true
 		}
@@ -166,7 +167,8 @@ func generateCSVFilename(isDryRun bool, cfg Config) string {
 // groupRecommendationsByServiceRegion groups recommendations by service and region.
 func groupRecommendationsByServiceRegion(recs []common.Recommendation) map[common.ServiceType]map[string][]common.Recommendation {
 	recsByServiceRegion := make(map[common.ServiceType]map[string][]common.Recommendation)
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		if _, ok := recsByServiceRegion[rec.Service]; !ok {
 			recsByServiceRegion[rec.Service] = make(map[string][]common.Recommendation)
 		}

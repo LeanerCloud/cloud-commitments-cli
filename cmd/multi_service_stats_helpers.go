@@ -20,7 +20,8 @@ type SPTypeBreakdown struct {
 func categorizeSPRecommendations(recommendations []common.Recommendation) SPTypeBreakdown {
 	breakdown := SPTypeBreakdown{}
 
-	for _, rec := range recommendations { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recommendations {
+		rec := recommendations[_rvc]
 		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				switch details.PlanType {
@@ -99,7 +100,8 @@ type SPSavingsByType struct {
 func collectSPSavings(recommendations []common.Recommendation) SPSavingsByType {
 	savings := SPSavingsByType{}
 
-	for _, rec := range recommendations { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recommendations {
+		rec := recommendations[_rvc]
 		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				switch details.PlanType {

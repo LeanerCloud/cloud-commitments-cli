@@ -180,7 +180,8 @@ func scoreAndDisplay(recs []common.Recommendation, cfg Config) scorer.ScoredResu
 
 // sumPassedRecs returns total instance count and total estimated savings for passed recs.
 func sumPassedRecs(recs []common.Recommendation) (total int, totalSavings float64) {
-	for _, r := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		r := recs[_rvc]
 		total += r.Count
 		totalSavings += r.EstimatedSavings
 	}
@@ -190,7 +191,8 @@ func sumPassedRecs(recs []common.Recommendation) (total int, totalSavings float6
 // executePurchasePipeline purchases each rec in the passed list (or dry-runs) and writes audit records.
 func executePurchasePipeline(ctx context.Context, awsCfg aws.Config, recs []common.Recommendation, isDryRun bool, runID string, cfg Config) []common.PurchaseResult {
 	results := make([]common.PurchaseResult, 0, len(recs))
-	for i, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for i := range recs {
+		rec := recs[i]
 		if shutdownRequested.Load() {
 			log.Printf("Shutdown requested — skipping %d remaining recommendations", len(recs)-i)
 			break
@@ -241,7 +243,8 @@ func purchaseSingleRec(ctx context.Context, awsCfg aws.Config, rec common.Recomm
 func buildServiceStats(recs []common.Recommendation, results []common.PurchaseResult) map[common.ServiceType]ServiceProcessingStats {
 	byService := make(map[common.ServiceType][]common.Recommendation)
 	resultsByService := make(map[common.ServiceType][]common.PurchaseResult)
-	for i, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for i := range recs {
+		rec := recs[i]
 		byService[rec.Service] = append(byService[rec.Service], rec)
 		if i < len(results) {
 			resultsByService[rec.Service] = append(resultsByService[rec.Service], results[i])
@@ -460,7 +463,8 @@ func processService(ctx context.Context, awsCfg aws.Config, recClient provider.R
 func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, region string, isDryRun bool, serviceClient provider.ServiceClient, cfg Config) []common.PurchaseResult {
 	results := make([]common.PurchaseResult, 0, len(recs))
 
-	for j, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for j := range recs {
+		rec := recs[j]
 		AppLogger.Printf("    [%d/%d] Processing: %s %s\n", j+1, len(recs), rec.Service, rec.ResourceType)
 		AppLogger.Printf("    💳 Purchasing %d instances\n", rec.Count)
 
@@ -472,7 +476,8 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 			if j == 0 {
 				totalInstances := CalculateTotalInstances(recs)
 				totalSavings := 0.0
-				for _, r := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+				for _rvc := range recs {
+					r := recs[_rvc]
 					totalSavings += r.EstimatedSavings
 				}
 

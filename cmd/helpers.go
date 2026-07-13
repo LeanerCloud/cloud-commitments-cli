@@ -107,7 +107,8 @@ func (c *AccountAliasCache) GetAccountAlias(ctx context.Context, accountID strin
 // CalculateTotalInstances calculates the total instance count across recommendations.
 func CalculateTotalInstances(recs []common.Recommendation) int {
 	total := 0
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		total += rec.Count
 	}
 	return total
@@ -131,7 +132,8 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 
 	ratio := coverage / 100.0
 	result := make([]common.Recommendation, 0, len(recs))
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		adjusted := rec
 
 		// For Savings Plans, reduce the hourly commitment instead of count.
@@ -251,7 +253,8 @@ func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64) []comm
 	var skipped int
 	unsupportedSeen := make(map[common.CommitmentType]bool)
 
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		adjusted, kept, missingSignal := applyTargetCoverageOne(rec, targetPct, unsupportedSeen)
 		if missingSignal {
 			skipped++
@@ -473,7 +476,8 @@ func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []com
 		return recs
 	}
 	result := make([]common.Recommendation, len(recs))
-	for i, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for i := range recs {
+		rec := recs[i]
 		result[i] = rec
 		result[i].Count = int(overrideCount)
 	}
@@ -489,7 +493,8 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 	result := make([]common.Recommendation, 0)
 	remaining := int(maxInstances)
 
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		if remaining <= 0 {
 			break
 		}
@@ -591,7 +596,8 @@ func (d *DuplicateChecker) filterRecentCommitments(existing []common.Commitment)
 	cutoffTime := time.Now().Add(-time.Duration(d.LookbackHours) * time.Hour)
 	recentExisting := make([]common.Commitment, 0)
 
-	for _, c := range existing { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range existing {
+		c := existing[_rvc]
 		if isRecentActiveCommitment(c, cutoffTime) {
 			recentExisting = append(recentExisting, c)
 		}
@@ -609,7 +615,8 @@ func isRecentActiveCommitment(c common.Commitment, cutoffTime time.Time) bool {
 func buildExistingCommitmentsMap(commitments []common.Commitment) map[string]int {
 	existingMap := make(map[string]int)
 
-	for _, c := range commitments { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range commitments {
+		c := commitments[_rvc]
 		normalizedEngine := normalizeEngineName(c.Engine)
 		key := fmt.Sprintf("%s|%s|%s", c.ResourceType, c.Region, normalizedEngine)
 		existingMap[key] += c.Count
@@ -626,7 +633,8 @@ func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existing
 	passed = make([]common.Recommendation, 0, len(recs))
 	filtered = make([]common.Recommendation, 0)
 
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		adjusted := adjustSingleRecommendation(rec, existingMap)
 		if adjusted.Count > 0 {
 			passed = append(passed, adjusted)

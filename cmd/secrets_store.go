@@ -45,7 +45,8 @@ func (s *AWSSecretsStore) ListSecrets(ctx context.Context, filter string) ([]str
 	}
 
 	arns := make([]string, 0, len(result.SecretList))
-	for _, secret := range result.SecretList { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range result.SecretList {
+		secret := result.SecretList[_rvc]
 		if secret.ARN != nil {
 			arns = append(arns, *secret.ARN)
 		}

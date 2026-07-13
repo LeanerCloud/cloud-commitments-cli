@@ -25,14 +25,16 @@ func calculateServiceStats(service common.ServiceType, recs []common.Recommendat
 	}
 
 	regionSet := make(map[string]bool)
-	for _, rec := range recs { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		regionSet[rec.Region] = true
 		stats.InstancesProcessed += rec.Count
 		stats.TotalEstimatedSavings += rec.EstimatedSavings
 	}
 	stats.RegionsProcessed = len(regionSet)
 
-	for _, result := range results { //nolint:gocritic // rangeValCopy: acceptable value copy
+	for _rvc := range results {
+		result := results[_rvc]
 		if result.Success {
 			stats.SuccessfulPurchases++
 		} else {
