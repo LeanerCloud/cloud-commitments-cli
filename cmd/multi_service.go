@@ -313,6 +313,9 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	allResults := make([]common.PurchaseResult, 0)
 	serviceResults := make([]common.PurchaseResult, 0)
 	serviceStats := make(map[common.ServiceType]ServiceProcessingStats)
+	// allAdjustedRecs accumulates post-dedup recommendations so the final summary
+	// reflects what was actually processed rather than the pre-dedup input slice.
+	allAdjustedRecs := make([]common.Recommendation, 0)
 
 	for service, regionRecs := range recsByServiceRegion {
 		// Reset service results for each service
@@ -346,6 +349,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 			recs = adjustedRecs
 
 			serviceRecs = append(serviceRecs, recs...)
+			allAdjustedRecs = append(allAdjustedRecs, recs...)
 
 			// Process purchases for this region
 			regionResults := processPurchaseLoop(ctx, recs, region, isDryRun, serviceClient, cfg)
@@ -371,8 +375,9 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 		AppLogger.Printf("\n📋 CSV report written to: %s\n", finalCSVOutput)
 	}
 
-	// Print final summary
-	printMultiServiceSummary(recs, allResults, serviceStats, isDryRun)
+	// Print final summary using the post-dedup slice so counts match what was
+	// actually processed, not the pre-dedup input passed into the outer loop.
+	printMultiServiceSummary(allAdjustedRecs, allResults, serviceStats, isDryRun)
 }
 
 // filterAndAdjustRecommendations applies filters, coverage, count override, and instance limits to recommendations.

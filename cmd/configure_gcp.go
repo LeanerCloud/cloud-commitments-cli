@@ -34,7 +34,7 @@ type GCPCredentials struct {
 	Type                    string `json:"type"`
 	ProjectID               string `json:"project_id"`
 	PrivateKeyID            string `json:"private_key_id"`
-	PrivateKey              string `json:"private_key"` //nolint:gosec // G117: HTTP redirect target is validated/trusted
+	PrivateKey              string `json:"private_key"` //nolint:gosec // G117: intentional serialization -- GCPCredentials is marshaled to store service-account private key in the operator's credential store; this is the expected usage
 	ClientEmail             string `json:"client_email"`
 	ClientID                string `json:"client_id,omitempty"`
 	AuthURI                 string `json:"auth_uri,omitempty"`

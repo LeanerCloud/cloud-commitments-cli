@@ -52,17 +52,6 @@ linters:
           pattern: (?i)passwd|pass|password|pwd|secret|token
     govet:
       enable-all: true
-      disable:
-        # fieldalignment fires on test table-struct literals where field order
-        # is chosen for readability, not memory layout. It also fires on public
-        # API structs where reordering would break documented field groupings.
-        # Disabling rather than suppressing per-instance since there is no
-        # legitimate code path where a test struct layout affects correctness.
-        - fieldalignment
-        # unusedwrite fires when test fixture struct fields are set for
-        # documentation completeness even if the specific test only reads a
-        # subset of fields. This is intentional test-clarity practice.
-        - unusedwrite
     misspell:
       locale: US
     revive:
@@ -95,6 +84,15 @@ linters:
           - gocyclo
           - gosec
         path: _test\.go
+      # fieldalignment: test table-struct literals prioritize readability over
+      # memory layout; public-API structs keep documented field groupings.
+      # unusedwrite: test fixture struct fields may be set for documentation
+      # completeness even when only a subset of fields is read by a given subtest.
+      # Both are scoped to test files so production unusedwrite bugs remain visible.
+      - linters:
+          - govet
+        text: "(fieldalignment|unusedwrite)"
+        path: _test\.go
       - linters:
           - errcheck
           - gosec
@@ -122,12 +120,13 @@ linters:
           - noctx
         path: _test\.go
       # misspell: "cancelled" is the canonical DB column name (migration 000035).
-      # Allow the double-L spelling in the config package SQL files and in the
+      # Allow the double-L spelling in the config package SQL files, in the
       # ladder package where RunStatusCancelled/TrancheStatusCancelled are the
-      # typed constants matching the DB value.
+      # typed constants matching the DB value, and in handler_history.go where
+      # both spellings are accepted until migration #1277 renames the column.
       - linters:
           - misspell
-        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|types)|pkg/ladder/(store|types_test))\.go
+        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|types)|pkg/ladder/(store|types_test)|internal/api/handler_history)\.go
         text: "cancelled"
     paths:
       - third_party$
