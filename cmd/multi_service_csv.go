@@ -245,8 +245,8 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 		return sorted[i].Recommendation.CommitmentCost > sorted[j].Recommendation.CommitmentCost
 	})
 
-	for _rvc := range sorted {
-		r := sorted[_rvc]
+	for i := range sorted {
+		r := sorted[i]
 		rec := r.Recommendation
 		errStr := ""
 		if r.Error != nil {
@@ -308,8 +308,8 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 	var totalCount int
 	var totalNU, totalUpfront, totalRecurring, totalSavings float64
 	hasRecurring := false
-	for _rvc := range results {
-		r := results[_rvc]
+	for i := range results {
+		r := results[i]
 		totalCount += r.Recommendation.Count
 		totalNU += float64(r.Recommendation.Count) * recommendations.RDSInstanceNUFromType(r.Recommendation.ResourceType)
 		totalUpfront += r.Recommendation.CommitmentCost

@@ -48,7 +48,7 @@ func readTrimmedLine(reader *bufio.Reader) (string, error) {
 type AzureCredentials struct {
 	TenantID       string `json:"tenant_id"`
 	ClientID       string `json:"client_id"`
-	ClientSecret   string `json:"client_secret"` //nolint:gosec // G117: HTTP redirect target is validated/trusted
+	ClientSecret   string `json:"client_secret"` //nolint:gosec // G117: intentional Azure client-secret field -- marshaled for secure storage in the operator's credential store; this is the expected usage
 	SubscriptionID string `json:"subscription_id"`
 }
 
@@ -58,7 +58,7 @@ type AzureConfigOptions struct {
 	Profile        string
 	TenantID       string
 	ClientID       string
-	ClientSecret   string //nolint:gosec // G117: HTTP redirect target is validated/trusted
+	ClientSecret   string //nolint:gosec // G117: intentional Azure client-secret configuration field -- stored for secure credential storage; this is the expected usage
 	SubscriptionID string
 	Interactive    bool
 	SkipSetup      bool

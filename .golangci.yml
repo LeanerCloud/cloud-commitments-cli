@@ -122,11 +122,12 @@ linters:
       # misspell: "cancelled" is the canonical DB column name (migration 000035).
       # Allow the double-L spelling in the config package SQL files, in the
       # ladder package where RunStatusCancelled/TrancheStatusCancelled are the
-      # typed constants matching the DB value, and in handler_history.go where
-      # both spellings are accepted until migration #1277 renames the column.
+      # typed constants matching the DB value, in handler_history.go where
+      # both spellings are accepted until migration #1277 renames the column,
+      # and in internal/mocks/stores.go where the mock default returns the DB value.
       - linters:
           - misspell
-        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|types)|pkg/ladder/(store|types_test)|internal/api/handler_history)\.go
+        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|types)|pkg/ladder/(store|types_test)|internal/api/handler_history|internal/mocks/stores)\.go
         text: "cancelled"
     paths:
       - third_party$

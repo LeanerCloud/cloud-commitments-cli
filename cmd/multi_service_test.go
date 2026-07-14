@@ -590,14 +590,12 @@ func TestGenerateCSVFilenameHelper(t *testing.T) {
 		service     common.ServiceType
 		payment     string
 		expectParts []string
-		term        int
 		dryRun      bool
 	}{
 		{
 			name:        "RDS dry run",
 			service:     common.ServiceRDS,
 			payment:     "no-upfront",
-			term:        36,
 			dryRun:      true,
 			expectParts: []string{"rds", "no-upfront", "dryrun"},
 		},
@@ -605,7 +603,6 @@ func TestGenerateCSVFilenameHelper(t *testing.T) {
 			name:        "EC2 actual purchase",
 			service:     common.ServiceEC2,
 			payment:     "all-upfront",
-			term:        12,
 			dryRun:      false,
 			expectParts: []string{"ec2", "all-upfront", "purchase"},
 		},
@@ -613,7 +610,7 @@ func TestGenerateCSVFilenameHelper(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filename := generateCSVFilenameTestHelper(tt.service, tt.payment, tt.term, tt.dryRun)
+			filename := generateCSVFilenameTestHelper(tt.service, tt.payment, tt.dryRun)
 
 			for _, part := range tt.expectParts {
 				assert.Contains(t, filename, part)
@@ -719,7 +716,7 @@ func applyCoverageToRecommendations(recs []common.Recommendation, coverage float
 	return recs[:targetCount]
 }
 
-func generateCSVFilenameTestHelper(service common.ServiceType, payment string, term int, dryRun bool) string { //nolint:unparam // param intentional for interface consistency/future use
+func generateCSVFilenameTestHelper(service common.ServiceType, payment string, dryRun bool) string {
 	mode := "purchase"
 	if dryRun {
 		mode = "dryrun"
