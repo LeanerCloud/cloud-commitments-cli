@@ -595,6 +595,10 @@ the dashboard.
 
 ## Development
 
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for the full development
+guide, including the local Docker environment, database migrations, hot
+reload, and debugging workflows.
+
 ### Prerequisites
 
 - Go 1.23 or later
