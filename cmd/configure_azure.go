@@ -248,7 +248,9 @@ func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredential
 
 	if creds.ClientSecret == "" {
 		fmt.Print("Client Secret (password): ")
-		secret, err := term.ReadPassword(syscall.Stdin)
+		// int cast: syscall.Stdin is already int on Unix but syscall.Handle on
+		// Windows; term.ReadPassword takes int, so the cast keeps Windows builds working.
+		secret, err := term.ReadPassword(int(syscall.Stdin)) //nolint:unconvert // no-op on Unix (int), required on Windows (syscall.Handle)
 		if err != nil {
 			return fmt.Errorf("failed to read secret: %w", err)
 		}

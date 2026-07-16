@@ -131,7 +131,7 @@ linters:
       # existing UK convention. Allow both spellings in the files listed below.
       - linters:
           - misspell
-        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|store_postgres_ladder|types)|pkg/ladder/(store|types_test)|internal/api/(handler_history|handler_ri_exchange(_test)?|router_handlers_test|coverage_extras_test)|internal/mocks/stores|internal/purchase/scheduled_fire_test)\.go
+        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|store_postgres_ladder|types|interfaces)|pkg/ladder/(store|types_test)|internal/api/(handler_history|handler_ri_exchange(_test)?|router_handlers_test|coverage_extras_test)|internal/mocks/stores|internal/purchase/scheduled_fire_test)\.go
         text: "cancelled|initialised"
     paths:
       - third_party$
