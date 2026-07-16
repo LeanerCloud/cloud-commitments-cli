@@ -423,12 +423,16 @@ func fetchRecommendationsForRegion(
 		termStr = "3yr"
 	}
 
+	lookback := cfg.RecLookbackPeriod
+	if lookback == "" {
+		lookback = recommendations.DefaultRecLookbackPeriod
+	}
 	params := common.RecommendationParams{
 		Service:        service,
 		Region:         region,
 		PaymentOption:  cfg.PaymentOption,
 		Term:           termStr,
-		LookbackPeriod: "7d",
+		LookbackPeriod: lookback,
 		// Savings Plans specific filters
 		IncludeSPTypes: cfg.IncludeSPTypes,
 		ExcludeSPTypes: cfg.ExcludeSPTypes,

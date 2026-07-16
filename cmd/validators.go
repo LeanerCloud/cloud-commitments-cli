@@ -29,6 +29,19 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := validateRecLookbackPeriod(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateRecLookbackPeriod validates the --rec-lookback-period flag.
+func validateRecLookbackPeriod() error {
+	valid := map[string]bool{"7d": true, "30d": true, "60d": true}
+	if !valid[toolCfg.RecLookbackPeriod] {
+		return fmt.Errorf("invalid rec-lookback-period %q: must be one of 7d, 30d, 60d", toolCfg.RecLookbackPeriod)
+	}
 	return nil
 }
 

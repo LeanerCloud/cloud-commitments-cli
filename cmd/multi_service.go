@@ -117,6 +117,9 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 
 	accountCache := NewAccountAliasCache(awsCfg)
 	recClient := awsprovider.NewRecommendationsClient(awsCfg)
+	if adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter); ok && cfg.RecLookbackPeriod != "" {
+		adapter.SetRecLookbackPeriod(cfg.RecLookbackPeriod)
+	}
 	engineData := fetchEngineVersionData(ctx, cfg)
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
@@ -137,7 +140,14 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 		return
 	}
 
-	// Phase 3: confirm (skipped in dry-run).
+	// Phases 3-4: confirm, purchase, and produce summary outputs.
+	runPurchaseAndReport(ctx, awsCfg, scoredResult, isDryRun, cfg)
+}
+
+// runPurchaseAndReport handles the confirm, execute, and report phases of
+// the multi-service pipeline. It is a separate function to keep
+// runToolMultiService within the cyclomatic-complexity limit.
+func runPurchaseAndReport(ctx context.Context, awsCfg aws.Config, scoredResult scorer.ScoredResult, isDryRun bool, cfg Config) {
 	runID := uuid.New().String()
 	if !isDryRun {
 		totalInstances, totalSavings := sumPassedRecs(scoredResult.Passed)
@@ -147,10 +157,8 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 		}
 	}
 
-	// Phase 4: purchase each recommendation and write audit records.
 	allResults := executePurchasePipeline(ctx, awsCfg, scoredResult.Passed, isDryRun, runID, cfg)
 
-	// Produce summary outputs.
 	serviceStats := buildServiceStats(scoredResult.Passed, allResults)
 	finalCSVOutput := generateCSVFilename(isDryRun, cfg)
 	if err := writeMultiServiceCSVReport(allResults, finalCSVOutput); err != nil {
