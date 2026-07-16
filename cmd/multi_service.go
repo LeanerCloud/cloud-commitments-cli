@@ -83,7 +83,7 @@ func effectiveDryRun(cfg Config) bool {
 // (2) score, display, confirm, and purchase.
 func runToolMultiService(ctx context.Context, cfg Config) {
 	if cfg.CSVInput != "" {
-		runToolFromCSV(ctx, cfg)
+		runCSVPathOrFatal(ctx, cfg)
 		return
 	}
 
@@ -272,8 +272,20 @@ func buildServiceStats(recs []common.Recommendation, results []common.PurchaseRe
 	return stats
 }
 
+// runCSVPathOrFatal runs the CSV purchase path and exits fatally on error.
+// It isolates the error-to-fatal glue from runToolMultiService so that path
+// stays under the cyclomatic-complexity budget while runToolFromCSV remains
+// unit-testable via its returned error.
+func runCSVPathOrFatal(ctx context.Context, cfg Config) {
+	if err := runToolFromCSV(ctx, cfg); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
 // runToolFromCSV processes recommendations from a CSV input file.
-func runToolFromCSV(ctx context.Context, cfg Config) {
+// It returns an error instead of exiting so the orchestration glue is
+// unit-testable; the caller (runCSVPathOrFatal) turns errors fatal.
+func runToolFromCSV(ctx context.Context, cfg Config) error {
 	isDryRun := effectiveDryRun(cfg)
 	printRunMode(isDryRun)
 
@@ -284,7 +296,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	// Read recommendations from CSV
 	recs, err := loadRecommendationsFromCSV(cfg.CSVInput)
 	if err != nil {
-		log.Fatalf("Failed to read CSV file: %v", err)
+		return fmt.Errorf("failed to read CSV file: %w", err)
 	}
 
 	AppLogger.Printf("✅ Loaded %d recommendations from CSV\n", len(recs))
@@ -294,7 +306,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 
 	if len(recs) == 0 {
 		AppLogger.Println("⚠️  No recommendations to process after filtering")
-		return
+		return nil
 	}
 
 	// Load AWS configuration
@@ -305,7 +317,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	}
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, configOptions...)
 	if err != nil {
-		log.Fatalf("Failed to load AWS config: %v", err)
+		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
 	// Create account alias cache for lookup
@@ -386,6 +398,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) {
 	// Print final summary using the post-dedup slice so counts match what was
 	// actually processed, not the pre-dedup input passed into the outer loop.
 	printMultiServiceSummary(allAdjustedRecs, allResults, serviceStats, isDryRun)
+	return nil
 }
 
 // filterAndAdjustRecommendations applies filters, coverage, count override, and instance limits to recommendations.
