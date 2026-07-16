@@ -108,26 +108,19 @@ repos:
         types: [file]
 
       - id: gosec
-        name: Go security scanner
-        # Exclusion rationale:
-        # G101: False positives on variable names containing "password/secret/token"
-        # G104: Unchecked errors — covered by go vet and golangci-lint errcheck
-        # G115: Integer overflow — false positives on safe conversions (e.g. int to int32)
-        # G117: Use of unsafe pointer arithmetic — pre-existing in vendor/generated code
-        # G118: net/http serve without timeout — pre-existing; timeouts set at handler level
-        # G122: Use of unsafe operations — pre-existing in low-level helpers
-        # G204: Subprocess launched with variable — CLI tool needs dynamic commands
-        # G301: Directory created with permissions > 0750 — acceptable for dev tooling
-        # G304: File path from variable — CLI tool reads user-specified file paths
-        # G402: TLS MinVersion not set — handled by cloud SDK defaults
-        # G505: Import of crypto/sha1 — not used for security, only checksums
-        # G702: TLS InsecureSkipVerify — pre-existing in test helpers only
-        # G703: Errors unhandled in defer — pre-existing; deferred close errors logged separately
-        # G705: Errors unhandled in goroutine — pre-existing pattern
-        # G706: Errors ignored — pre-existing; covered by go vet errcheck
-        entry: bash -c 'gosec -quiet -exclude-dir=.legacy -exclude-dir=.dev-notes -exclude-dir=vendor -exclude=G101,G104,G115,G117,G118,G122,G204,G301,G304,G402,G505,G702,G703,G705,G706 ./...'
+        name: Go security scanner (per-module, per-changed-package)
+        # Scans only the Go packages that contain staged files, resolved to
+        # their owning module (root, pkg/, providers/aws, providers/azure,
+        # providers/gcp).  Fast: never whole-repo, always per-changed-package.
+        #
+        # gosec v2.28.0 is auto-installed to
+        # ~/.cache/pre-commit-gosec/v2.28.0/gosec on first use.
+        #
+        # Exclusion rationale and flag list live in scripts/gosec-hook.sh.
+        # Keep in sync with the exclude= flags there.
+        entry: bash scripts/gosec-hook.sh
         language: system
-        pass_filenames: false
+        pass_filenames: true
         files: \.go$
 
       - id: trivy-config
