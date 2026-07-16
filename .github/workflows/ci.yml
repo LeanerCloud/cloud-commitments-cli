@@ -318,11 +318,35 @@ jobs:
           fi
 
       - name: Run gosec Security Scanner
-        uses: securego/gosec@4a3bd8af174872c778439083ded7adbf3747e770 # v2.26.1
-        with:
-          args: '-fmt sarif -out gosec-results.sarif ./...'
+        run: |
+          # Install pinned gosec using the job's existing setup-go (GO_VERSION 1.26.5).
+          # The securego/gosec Docker action bundles its own Go toolchain (1.26.1) which
+          # cannot satisfy the "go 1.26.5" module requirement in go.mod, causing it to
+          # load 0 files and exit 1 with a toolchain mismatch rather than real findings.
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
+          # Multi-module repo: each ./... only walks the current module so scanning root
+          # alone silently misses pkg/ and providers/*. Mirror the govulncheck per-module
+          # loop, collect per-module SARIF, then merge for the upload step.
+          set -e
+          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+            tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
+            out="$RUNNER_TEMP/gosec-${tag}.sarif"
+            echo "==> gosec in $mod"
+            (cd "$mod" && gosec -fmt sarif -out "$out" ./...)
+            # Code scanning rejects a SARIF file whose runs share a category
+            # (github.blog changelog 2025-07-21), so give each module's run a
+            # unique automationDetails.id before merging.
+            jq --arg id "gosec-${tag}/" '.runs |= map(.automationDetails = {id: $id})' \
+              "$out" > "$out.tmp" && mv "$out.tmp" "$out"
+          done
+          # Merge per-module SARIF runs into one file for the upload step.
+          # jq is preinstalled on the GitHub Ubuntu runner image (no new deps).
+          jq -s '{version: "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", runs: [.[].runs[]]}' \
+            "$RUNNER_TEMP"/gosec-*.sarif > gosec-results.sarif
+          echo "Merged $(jq '.runs | length' gosec-results.sarif) SARIF runs"
 
       - name: Upload gosec results to GitHub Security
+        if: always()
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           sarif_file: gosec-results.sarif
@@ -335,17 +359,48 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
+          # Pin the Trivy binary independently of the action SHA. v0.36.0 is
+          # the latest trivy-action release but bundles Trivy v0.70.0, which
+          # panics in adaptDefaultTags on terraform/environments/aws/main.tf
+          # (null default_tags vars). Fixed in Trivy >= v0.72.0. The action
+          # forwards this input to aquasecurity/setup-trivy, so both scan
+          # steps run the same pinned binary. Keep both steps on this version.
+          version: 'v0.72.0'
 
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           sarif_file: 'trivy-results.sarif'
 
-      - name: Run tfsec (Terraform Security)
-        uses: aquasecurity/tfsec-action@b466648d6e39e7c75324f25d83891162a721f2d6 # v1.0.3
+      # Terraform IaC misconfiguration scanning. Replaces the deprecated
+      # aquasecurity/tfsec-action, whose bundled HCL parser rejects Terraform
+      # 1.5+ `check {}` blocks (e.g. terraform/modules/deployment-checks/main.tf)
+      # with a hard "scan failed" parse error that soft_fail does not suppress
+      # (soft_fail only downgrades findings, not scan errors). Trivy is tfsec's
+      # official successor, parses `check {}` blocks, and (like the fs scan
+      # above) uses the default exit-code 0 so misconfig findings are reported
+      # to the Security tab without gating the job -- matching tfsec's prior
+      # soft_fail: true behaviour while preserving Terraform IaC coverage.
+      - name: Run Trivy IaC misconfiguration scanner (Terraform)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          working_directory: terraform/
-          soft_fail: true
+          scan-type: 'config'
+          scan-ref: 'terraform/'
+          format: 'sarif'
+          output: 'trivy-config-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          # Same pinned Trivy binary as the filesystem scan above (>= v0.72.0
+          # avoids the adaptDefaultTags panic on null default_tags vars).
+          version: 'v0.72.0'
+
+      - name: Upload Trivy IaC results to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          sarif_file: 'trivy-config-results.sarif'
+          # Distinct category so this IaC analysis does not overwrite the
+          # filesystem Trivy analysis uploaded above (both report as "Trivy").
+          category: 'trivy-iac'
 
   # Snyk security scanning
   snyk-scan:

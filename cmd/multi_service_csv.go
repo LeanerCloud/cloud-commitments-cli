@@ -27,7 +27,7 @@ func determineCSVCoverage(cfg Config) float64 {
 
 // loadRecommendationsFromCSV reads and returns recommendations from a CSV file.
 func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error) {
-	file, err := os.Open(csvPath)
+	file, err := os.Open(csvPath) // #nosec G304 -- CLI tool: csvPath is an operator-supplied command-line argument
 	if err != nil {
 		return nil, fmt.Errorf("failed to open CSV file: %w", err)
 	}
@@ -195,7 +195,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 		return nil
 	}
 
-	file, err := os.Create(filepath)
+	file, err := os.Create(filepath) // #nosec G304 -- CLI tool: filepath is an operator-supplied output path argument
 	if err != nil {
 		return fmt.Errorf("failed to create CSV file: %w", err)
 	}

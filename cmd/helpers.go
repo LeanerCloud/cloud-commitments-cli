@@ -533,7 +533,7 @@ func ConfirmPurchase(totalInstances int, totalSavings float64, skipConfirmation 
 // CheckAuditLogWritable opens the audit log file in append mode to verify it is writable.
 // Returns an error if the path cannot be opened for writing.
 func CheckAuditLogWritable(path string) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600) // #nosec G304 -- audit log path is operator-configured; value is not reachable from user input
 	if err != nil {
 		return fmt.Errorf("audit log %q not writable: %w", path, err)
 	}
