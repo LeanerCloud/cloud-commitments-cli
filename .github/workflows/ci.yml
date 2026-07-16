@@ -333,6 +333,11 @@ jobs:
             out="$RUNNER_TEMP/gosec-${tag}.sarif"
             echo "==> gosec in $mod"
             (cd "$mod" && gosec -fmt sarif -out "$out" ./...)
+            # Code scanning rejects a SARIF file whose runs share a category
+            # (github.blog changelog 2025-07-21), so give each module's run a
+            # unique automationDetails.id before merging.
+            jq --arg id "gosec-${tag}/" '.runs |= map(.automationDetails = {id: $id})' \
+              "$out" > "$out.tmp" && mv "$out.tmp" "$out"
           done
           # Merge per-module SARIF runs into one file for the upload step.
           # jq is preinstalled on the GitHub Ubuntu runner image (no new deps).
