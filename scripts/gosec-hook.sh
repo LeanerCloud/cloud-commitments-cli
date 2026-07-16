@@ -5,8 +5,8 @@
 # files, resolved to their owning module.  Fast by design: never scans the whole
 # repo; each commit triggers at most one gosec invocation per affected module.
 #
-# Version pin: gosec v2.26.1 (matches the securego/gosec SHA pin in ci.yml).
-# Installed on first use to ~/.cache/pre-commit-gosec/v2.26.1/gosec; never
+# Version pin: gosec v2.28.0 (matches the CI pin in ci.yml, bumped by #1384).
+# Installed on first use to ~/.cache/pre-commit-gosec/v2.28.0/gosec; never
 # modifies the system-wide gosec binary.
 #
 # Called by pre-commit with pass_filenames: true and files: \.go$.
@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-GOSEC_VERSION="2.26.1"
+GOSEC_VERSION="2.28.0"
 GOSEC_BIN="${HOME}/.cache/pre-commit-gosec/v${GOSEC_VERSION}/gosec"
 
 GOSEC_EXCLUDE="G101,G104,G115,G117,G118,G122,G204,G301,G304,G402,G505,G702,G703,G705,G706"
@@ -51,7 +51,7 @@ ensure_gosec() {
         local installed_ver
         installed_ver=$(go version -m "$GOSEC_BIN" 2>/dev/null \
             | awk '$1=="mod" && $2~/gosec/{print $3}')
-        # installed_ver is e.g. "v2.26.1"; compare against "v$GOSEC_VERSION".
+        # installed_ver is e.g. "v2.28.0"; compare against "v$GOSEC_VERSION".
         if [[ "$installed_ver" != "v${GOSEC_VERSION}" ]]; then
             echo "pre-commit/gosec: cached binary is ${installed_ver:-unknown}, need v${GOSEC_VERSION}; reinstalling" >&2
             need_install=1

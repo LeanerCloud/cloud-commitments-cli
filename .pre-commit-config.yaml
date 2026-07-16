@@ -113,8 +113,8 @@ repos:
         # their owning module (root, pkg/, providers/aws, providers/azure,
         # providers/gcp).  Fast: never whole-repo, always per-changed-package.
         #
-        # gosec v2.26.1 is auto-installed to
-        # ~/.cache/pre-commit-gosec/v2.26.1/gosec on first use.
+        # gosec v2.28.0 is auto-installed to
+        # ~/.cache/pre-commit-gosec/v2.28.0/gosec on first use.
         #
         # Exclusion rationale and flag list live in scripts/gosec-hook.sh.
         # Keep in sync with the exclude= flags there.
