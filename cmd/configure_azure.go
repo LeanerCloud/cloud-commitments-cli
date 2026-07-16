@@ -53,7 +53,7 @@ func readTrimmedLine(reader *bufio.Reader) (string, error) {
 type AzureCredentials struct {
 	TenantID       string `json:"tenant_id"`
 	ClientID       string `json:"client_id"`
-	ClientSecret   string `json:"client_secret"`
+	ClientSecret   string `json:"client_secret"` // #nosec G117 -- operator-supplied credential input read from the user's own Azure service principal; marshaled only to store in AWS Secrets Manager, never a hardcoded secret and never logged (verified)
 	SubscriptionID string `json:"subscription_id"`
 }
 
@@ -63,7 +63,7 @@ type AzureConfigOptions struct {
 	Profile        string
 	TenantID       string
 	ClientID       string
-	ClientSecret   string
+	ClientSecret   string // #nosec G117 -- operator-supplied credential input from a CLI flag or interactive prompt; never a hardcoded secret and never logged (verified)
 	SubscriptionID string
 	Interactive    bool
 	SkipSetup      bool

@@ -77,7 +77,7 @@ const azureSPRoleName = "Reservations Administrator"
 // subsequent configure step.
 type azureSPResult struct {
 	AppID        string // application (client) ID
-	ClientSecret string // generated password / client secret
+	ClientSecret string // #nosec G117 -- generated SP password (client secret): SDK-produced, surfaced once to the interactive operator on stdout to copy (mirrors az ad sp create-for-rbac); never a hardcoded secret and never persisted to logs (verified)
 	TenantID     string // Azure AD tenant ID
 }
 

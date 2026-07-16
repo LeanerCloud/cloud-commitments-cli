@@ -40,7 +40,7 @@ type GCPCredentials struct {
 	Type                    string `json:"type"`
 	ProjectID               string `json:"project_id"`
 	PrivateKeyID            string `json:"private_key_id"`
-	PrivateKey              string `json:"private_key"`
+	PrivateKey              string `json:"private_key"` // #nosec G117 -- operator-supplied credential input read from the user's own GCP service-account key file; marshaled only to store in AWS Secrets Manager, never a hardcoded secret and never logged (verified)
 	ClientEmail             string `json:"client_email"`
 	ClientID                string `json:"client_id,omitempty"`
 	AuthURI                 string `json:"auth_uri,omitempty"`
@@ -216,7 +216,7 @@ func loadAWSConfigForGCP(ctx context.Context) (aws.Config, error) {
 func loadAndUpdateGCPCredentials(credsFile string) (GCPCredentials, []byte, error) {
 	expandedPath := filepath.Clean(expandHomeDirectory(credsFile))
 
-	// #nosec G304 -- expandedPath is the operator's own GCP service-account key file, supplied via the --credentials-file flag or the interactive prompt of this local `configure-gcp` command; it is cleaned above and is trusted operator input, not attacker-controlled
+	// #nosec G304 G703 -- expandedPath is the operator's own GCP service-account key file, supplied via the --credentials-file flag or the interactive prompt of this local `configure-gcp` command; filepath.Clean applied above and it is trusted operator input, not attacker-controlled
 	credsData, err := os.ReadFile(expandedPath)
 	if err != nil {
 		return GCPCredentials{}, nil, fmt.Errorf("failed to read credentials file: %w", err)
