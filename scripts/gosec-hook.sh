@@ -38,8 +38,10 @@ GOSEC_BIN="${HOME}/.cache/pre-commit-gosec/v${GOSEC_VERSION}/gosec"
 GOSEC_EXCLUDE="G101,G104,G115,G117,G118,G122,G204,G301,G304,G402,G505,G702,G703,G705,G706"
 
 # Module roots in longest-prefix order (so "providers/azure" is checked before
-# a hypothetical "providers" root).
-MODULE_DIRS="providers/azure providers/aws providers/gcp pkg"
+# a hypothetical "providers" root). Must mirror the per-module loop in
+# .github/workflows/ci.yml (root, pkg, providers/{aws,azure,gcp}, tests/e2e)
+# so a changed file under tests/e2e is scanned from within its own module.
+MODULE_DIRS="tests/e2e providers/azure providers/aws providers/gcp pkg"
 
 # ---- helpers ----------------------------------------------------------------
 
