@@ -328,26 +328,17 @@ jobs:
           # alone silently misses pkg/ and providers/*. Mirror the govulncheck per-module
           # loop, collect per-module SARIF, then merge for the upload step.
           set -e
-          sarifs=""
           for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
             tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
             out="$RUNNER_TEMP/gosec-${tag}.sarif"
             echo "==> gosec in $mod"
             (cd "$mod" && gosec -fmt sarif -out "$out" ./...)
-            sarifs="$sarifs $out"
           done
-          GOSEC_SARIFS="$sarifs" python3 -c '
-import json, os, pathlib
-sarif_files = os.environ["GOSEC_SARIFS"].split()
-merged = {"version": "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", "runs": []}
-for f in sarif_files:
-    p = pathlib.Path(f)
-    if p.exists() and p.stat().st_size > 0:
-        data = json.loads(p.read_text())
-        merged["runs"].extend(data.get("runs", []))
-pathlib.Path("gosec-results.sarif").write_text(json.dumps(merged, indent=2))
-print("Merged", len(merged["runs"]), "SARIF runs from", len(sarif_files), "modules")
-'
+          # Merge per-module SARIF runs into one file for the upload step.
+          # jq is preinstalled on the GitHub Ubuntu runner image (no new deps).
+          jq -s '{version: "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", runs: [.[].runs[]]}' \
+            "$RUNNER_TEMP"/gosec-*.sarif > gosec-results.sarif
+          echo "Merged $(jq '.runs | length' gosec-results.sarif) SARIF runs"
 
       - name: Upload gosec results to GitHub Security
         if: always()
