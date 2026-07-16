@@ -33,67 +33,42 @@ const (
 
 // Config holds all configuration for the RI helper tool.
 type Config struct {
-	Providers []string
-	Regions   []string
-	Services  []string
-	Coverage  float64
-	// TargetCoverage, when > 0, switches sizing from --coverage's
-	// rec.Count-scaling to under-buy against historical hourly usage:
-	// each rec is sized to floor(avg * TargetCoverage/100), leaving
-	// (100-TargetCoverage)% of historical demand on-demand. Mutually
-	// exclusive with --coverage (target wins, with an info log). See
-	// cmd/helpers.go: ApplyTargetCoverage.
-	TargetCoverage         float64
-	ActualPurchase         bool
-	CSVOutput              string
+	AuditLog               string
 	CSVInput               string
-	AllServices            bool
+	IdempotencyWindow      string
+	ValidationProfile      string
+	Profile                string
 	PaymentOption          string
-	TermYears              int
+	CSVOutput              string
+	Regions                []string
+	Services               []string
+	ExcludeAccounts        []string
+	Providers              []string
 	IncludeRegions         []string
 	ExcludeRegions         []string
 	IncludeInstanceTypes   []string
 	ExcludeInstanceTypes   []string
 	IncludeEngines         []string
-	ExcludeEngines         []string
 	IncludeAccounts        []string
-	ExcludeAccounts        []string
-	SkipConfirmation       bool
-	MaxInstances           int32
+	ExcludeEngines         []string
+	ExcludeSPTypes         []string
+	IncludeSPTypes         []string
+	MaxBreakEvenMonths     int
+	TargetCoverage         float64
+	Coverage               float64
+	MinPoolSize            float64
+	RebuyWindowDays        int
+	TermYears              int
+	CoverageLookbackDays   int
+	MinCount               int
+	MinSavingsPct          float64
 	OverrideCount          int32
-	Profile                string
-	ValidationProfile      string
+	MaxInstances           int32
 	IncludeExtendedSupport bool
-	// Savings Plans specific filters
-	IncludeSPTypes []string
-	ExcludeSPTypes []string
-	// Purchase pipeline settings
-	AuditLog           string
-	DryRun             bool
-	IdempotencyWindow  string
-	MinSavingsPct      float64
-	MaxBreakEvenMonths int
-	MinCount           int
-	// CoverageLookbackDays is the number of calendar days of historical
-	// demand fed to GetReservationCoverage when computing the existing-RI
-	// coverage map for --target-coverage sizing. A longer window smooths
-	// seasonal spikes; a shorter one matches a narrow billing-period export
-	// from the AWS console coverage report. Default 30, matching the CE
-	// UI default.
-	CoverageLookbackDays int
-	// RebuyWindowDays, when > 0, treats existing RIs whose remaining term
-	// is at most this many days as already uncovered, so --target-coverage
-	// recommends replacements before they expire. Zero (default) keeps the
-	// strict per-pool subtraction — existing coverage is fully trusted
-	// regardless of when it expires.
-	RebuyWindowDays int
-	// MinPoolSize, when > 0, drops RI recommendations for pools whose
-	// AverageInstancesUsedPerHour is below this threshold. Used to avoid
-	// the integer-arithmetic over-cover problem on tiny pools (avg < 5
-	// can't approximate target=80% without buying enough RIs to hit
-	// 100% coverage). Zero (default) keeps all pools. SPs and recs
-	// without a per-hour signal pass through unfiltered.
-	MinPoolSize float64
+	AllServices            bool
+	ActualPurchase         bool
+	DryRun                 bool
+	SkipConfirmation       bool
 }
 
 func main() {

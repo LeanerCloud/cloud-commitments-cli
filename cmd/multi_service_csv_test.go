@@ -68,8 +68,8 @@ func TestDetermineCSVCoverage(t *testing.T) {
 func TestWriteMultiServiceCSVReport(t *testing.T) {
 	tests := []struct {
 		name     string
-		results  []common.PurchaseResult
 		filename string
+		results  []common.PurchaseResult
 		wantErr  bool
 	}{
 		{
@@ -573,11 +573,11 @@ func TestFormatCurrencyOrBlank(t *testing.T) {
 // Tests for loadRecommendationsFromCSV function.
 func TestLoadRecommendationsFromCSV(t *testing.T) {
 	tests := []struct {
+		validate    func(t *testing.T, recs []common.Recommendation)
 		name        string
 		csvContent  string
-		wantErr     bool
 		errContains string
-		validate    func(t *testing.T, recs []common.Recommendation)
+		wantErr     bool
 	}{
 		{
 			name: "Valid CSV with all fields",

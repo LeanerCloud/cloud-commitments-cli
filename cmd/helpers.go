@@ -42,9 +42,9 @@ type AccountAliasGetter interface {
 
 // AccountAliasCache caches account ID to alias mappings.
 type AccountAliasCache struct {
-	mu        sync.RWMutex
-	cache     map[string]string
 	orgClient OrganizationsAPI
+	cache     map[string]string
+	mu        sync.RWMutex
 }
 
 // NewAccountAliasCache creates a new account alias cache.
@@ -107,7 +107,8 @@ func (c *AccountAliasCache) GetAccountAlias(ctx context.Context, accountID strin
 // CalculateTotalInstances calculates the total instance count across recommendations.
 func CalculateTotalInstances(recs []common.Recommendation) int {
 	total := 0
-	for _, rec := range recs {
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		total += rec.Count
 	}
 	return total
@@ -131,7 +132,8 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 
 	ratio := coverage / 100.0
 	result := make([]common.Recommendation, 0, len(recs))
-	for _, rec := range recs {
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		adjusted := rec
 
 		// For Savings Plans, reduce the hourly commitment instead of count.
@@ -143,7 +145,7 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				newDetails := *details // Copy the struct
-				newDetails.HourlyCommitment = newDetails.HourlyCommitment * ratio
+				newDetails.HourlyCommitment *= ratio
 				adjusted = common.ScaleRecommendationCosts(adjusted, ratio)
 				adjusted.Details = &newDetails
 			} else {
@@ -251,7 +253,8 @@ func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64) []comm
 	var skipped int
 	unsupportedSeen := make(map[common.CommitmentType]bool)
 
-	for _, rec := range recs {
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		adjusted, kept, missingSignal := applyTargetCoverageOne(rec, targetPct, unsupportedSeen)
 		if missingSignal {
 			skipped++
@@ -438,7 +441,7 @@ func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common
 	}
 	ratio := targetPct / 100.0
 	newDetails := *details // copy
-	newDetails.HourlyCommitment = newDetails.HourlyCommitment * ratio
+	newDetails.HourlyCommitment *= ratio
 	adjusted := common.ScaleRecommendationCosts(rec, ratio)
 	adjusted.Details = &newDetails
 	// Shrinking commitment raises projected utilization by 1/ratio
@@ -473,7 +476,8 @@ func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []com
 		return recs
 	}
 	result := make([]common.Recommendation, len(recs))
-	for i, rec := range recs {
+	for i := range recs {
+		rec := recs[i]
 		result[i] = rec
 		result[i].Count = int(overrideCount)
 	}
@@ -489,7 +493,8 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 	result := make([]common.Recommendation, 0)
 	remaining := int(maxInstances)
 
-	for _, rec := range recs {
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		if remaining <= 0 {
 			break
 		}
@@ -512,7 +517,7 @@ func ConfirmPurchase(totalInstances int, totalSavings float64, skipConfirmation 
 		return true
 	}
 
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) { //nolint:gosec // G115: uintptr->int for file descriptor; FD values are always small positive integers
 		log.Printf("stdin is not a terminal and --yes was not set; skipping purchase")
 		return false
 	}
@@ -559,7 +564,7 @@ func NewDuplicateChecker(hours int) *DuplicateChecker {
 // This checks for recently purchased RIs (within LookbackHours) to avoid duplicate purchases.
 // Note: This is designed to prevent re-purchasing something you just bought, not to prevent
 // purchasing RIs in other accounts that happen to have the same characteristics.
-func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, []common.Recommendation, error) {
+func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) (passed, filtered []common.Recommendation, err error) {
 	existing, err := client.GetExistingCommitments(ctx)
 	if err != nil {
 		return recs, nil, err
@@ -577,7 +582,7 @@ func (d *DuplicateChecker) AdjustRecommendationsForExisting(ctx context.Context,
 	existingMap := buildExistingCommitmentsMap(recentExisting)
 	log.Printf("    [DuplicateChecker] Existing map has %d unique keys", len(existingMap))
 
-	passed, filtered := adjustRecommendationsAgainstExisting(recs, existingMap)
+	passed, filtered = adjustRecommendationsAgainstExisting(recs, existingMap)
 
 	if len(filtered) > 0 {
 		log.Printf("    [DuplicateChecker] Result: %d recommendations kept out of %d (avoided %d duplicates)",
@@ -591,7 +596,8 @@ func (d *DuplicateChecker) filterRecentCommitments(existing []common.Commitment)
 	cutoffTime := time.Now().Add(-time.Duration(d.LookbackHours) * time.Hour)
 	recentExisting := make([]common.Commitment, 0)
 
-	for _, c := range existing {
+	for _rvc := range existing {
+		c := existing[_rvc]
 		if isRecentActiveCommitment(c, cutoffTime) {
 			recentExisting = append(recentExisting, c)
 		}
@@ -609,7 +615,8 @@ func isRecentActiveCommitment(c common.Commitment, cutoffTime time.Time) bool {
 func buildExistingCommitmentsMap(commitments []common.Commitment) map[string]int {
 	existingMap := make(map[string]int)
 
-	for _, c := range commitments {
+	for _rvc := range commitments {
+		c := commitments[_rvc]
 		normalizedEngine := normalizeEngineName(c.Engine)
 		key := fmt.Sprintf("%s|%s|%s", c.ResourceType, c.Region, normalizedEngine)
 		existingMap[key] += c.Count
@@ -622,11 +629,12 @@ func buildExistingCommitmentsMap(commitments []common.Commitment) map[string]int
 
 // adjustRecommendationsAgainstExisting adjusts recommendations based on existing commitments.
 // Returns (passed, filtered) where filtered contains recs whose count was reduced to zero.
-func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existingMap map[string]int) ([]common.Recommendation, []common.Recommendation) {
-	passed := make([]common.Recommendation, 0, len(recs))
-	filtered := make([]common.Recommendation, 0)
+func adjustRecommendationsAgainstExisting(recs []common.Recommendation, existingMap map[string]int) (passed, filtered []common.Recommendation) {
+	passed = make([]common.Recommendation, 0, len(recs))
+	filtered = make([]common.Recommendation, 0)
 
-	for _, rec := range recs {
+	for _rvc := range recs {
+		rec := recs[_rvc]
 		adjusted := adjustSingleRecommendation(rec, existingMap)
 		if adjusted.Count > 0 {
 			passed = append(passed, adjusted)
@@ -724,7 +732,7 @@ func normalizeEngineName(engine string) string {
 }
 
 // AdjustRecommendationsForExistingRIs is an alias for AdjustRecommendationsForExisting.
-func (d *DuplicateChecker) AdjustRecommendationsForExistingRIs(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) ([]common.Recommendation, []common.Recommendation, error) {
+func (d *DuplicateChecker) AdjustRecommendationsForExistingRIs(ctx context.Context, recs []common.Recommendation, client provider.ServiceClient) (passed, filtered []common.Recommendation, err error) {
 	return d.AdjustRecommendationsForExisting(ctx, recs, client)
 }
 

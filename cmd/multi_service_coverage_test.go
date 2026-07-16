@@ -272,9 +272,9 @@ func TestAdjustRecommendationForExcludedVersions_AdditionalCases(t *testing.T) {
 	}
 
 	tests := []struct {
+		instanceVersions map[string][]InstanceEngineVersion
 		name             string
 		rec              common.Recommendation
-		instanceVersions map[string][]InstanceEngineVersion
 		expectedCount    int
 	}{
 		{
@@ -370,10 +370,10 @@ func TestValidateFlags_Coverage(t *testing.T) {
 	defer func() { toolCfg = origCfg }()
 
 	tests := []struct {
-		name        string
 		setupCfg    func()
-		expectError bool
+		name        string
 		errorMsg    string
+		expectError bool
 	}{
 		{
 			name: "Valid configuration",

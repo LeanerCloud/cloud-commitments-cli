@@ -45,7 +45,7 @@ func (m *multiPageRDSMajorVersionsMock) DescribeDBMajorEngineVersions(
 }
 
 // rdsMajorVersion builds a minimal DBMajorEngineVersion for tests.
-func rdsMajorVersion(engine, major string) rdstypes.DBMajorEngineVersion {
+func rdsMajorVersion(engine, major string) rdstypes.DBMajorEngineVersion { //nolint:unparam // param intentional for interface consistency/future use
 	return rdstypes.DBMajorEngineVersion{
 		Engine:             aws.String(engine),
 		MajorEngineVersion: aws.String(major),

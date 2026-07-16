@@ -32,6 +32,13 @@ linters:
         - diagnostic
         - performance
         - style
+      settings:
+        # aws.Config and similar SDK/config structs are designed to be passed
+        # by value (the AWS SDK v2 copies Config intentionally). 1024 bytes covers
+        # these idiomatic large-but-value-typed params without suppressing
+        # genuinely oversized plain domain structs.
+        hugeParam:
+          sizeThreshold: 1024
     gocyclo:
       min-complexity: 15
     gosec:
@@ -45,6 +52,12 @@ linters:
           pattern: (?i)passwd|pass|password|pwd|secret|token
     govet:
       enable-all: true
+      disable:
+        # fieldalignment: many production structs have alignment violations that
+        # pre-date this PR; fixing them is a separate concern. Suppress globally
+        # rather than per-struct since golangci-lint v2.10.x (CI) doesn't treat
+        # severity:warning as a non-fatal exit, unlike v2.11+.
+        - fieldalignment
     misspell:
       locale: US
     revive:
@@ -77,6 +90,15 @@ linters:
           - gocyclo
           - gosec
         path: _test\.go
+      # unusedwrite: test fixture struct fields may be set for documentation
+      # completeness even when only a subset of fields is read by a given subtest.
+      # Scoped to test files so production unusedwrite bugs remain visible.
+      # Note: fieldalignment is disabled globally in govet.disable (many
+      # pre-existing production violations; separate cleanup PR needed).
+      - linters:
+          - govet
+        text: "unusedwrite"
+        path: _test\.go
       - linters:
           - errcheck
           - gosec
@@ -84,6 +106,33 @@ linters:
       - linters:
           - all
         path: .*_gen\.go
+      # revive var-naming: "api" is an intentional package name for the HTTP API
+      # layer; it is not a utility package and "avoid meaningless package names"
+      # is a false positive here. All 88+ files in internal/api use this name.
+      - linters:
+          - revive
+        path: internal/api/
+        text: "avoid meaningless package names"
+      # noctx: exec.Command calls in deploy/configure CLI helpers intentionally
+      # omit context (CommandRunner interface contract; operator-controlled inputs).
+      # Suppressed per-file rather than per-line so #nosec G204 can lead the comment.
+      - linters:
+          - noctx
+        path: (internal/deploy/docker|cmd/configure_gcp|cmd/configure_azure)\.go
+      # noctx: http.Get and net.Listen in test helpers appropriately use the
+      # background context; threading a test context through every helper would
+      # add noise without improving test correctness.
+      - linters:
+          - noctx
+        path: _test\.go
+      # misspell: "cancelled" is the canonical DB column name (migration 000035,
+      # UK spelling throughout; migration #1277 tracks the rename). "initialised"
+      # appears in established comments in internal/config/types.go matching the
+      # existing UK convention. Allow both spellings in the files listed below.
+      - linters:
+          - misspell
+        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|store_postgres_ladder|types|interfaces)|pkg/ladder/(store|types_test)|internal/api/(handler_history|handler_ri_exchange(_test)?|router_handlers_test|coverage_extras_test)|internal/mocks/stores|internal/purchase/scheduled_fire_test)\.go
+        text: "cancelled|initialised"
     paths:
       - third_party$
       - builtin$

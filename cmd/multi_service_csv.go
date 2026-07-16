@@ -32,8 +32,8 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 		return nil, fmt.Errorf("failed to open CSV file: %w", err)
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
-			log.Printf("Warning: failed to close CSV file %s: %v", csvPath, err)
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close CSV file %s: %v", csvPath, closeErr)
 		}
 	}()
 
@@ -49,12 +49,12 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	colIdx := buildColumnIndexMap(header)
 
 	// Parse all records
-	recommendations, err := parseCSVRecords(reader, colIdx)
+	parsed, err := parseCSVRecords(reader, colIdx)
 	if err != nil {
 		return nil, err
 	}
 
-	return recommendations, nil
+	return parsed, nil
 }
 
 // buildColumnIndexMap creates a map from column names to indices.
@@ -68,7 +68,7 @@ func buildColumnIndexMap(header []string) map[string]int {
 
 // parseCSVRecords reads and parses all CSV records.
 func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recommendation, error) {
-	var recommendations []common.Recommendation
+	var recs []common.Recommendation
 
 	for {
 		record, err := reader.Read()
@@ -92,10 +92,10 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 			return nil, err
 		}
 
-		recommendations = append(recommendations, rec)
+		recs = append(recs, rec)
 	}
 
-	return recommendations, nil
+	return recs, nil
 }
 
 // parseCSVRecord parses a single CSV record into a Recommendation.
@@ -245,7 +245,8 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 		return sorted[i].Recommendation.CommitmentCost > sorted[j].Recommendation.CommitmentCost
 	})
 
-	for _, r := range sorted {
+	for i := range sorted {
+		r := sorted[i]
 		rec := r.Recommendation
 		errStr := ""
 		if r.Error != nil {
@@ -307,7 +308,8 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 	var totalCount int
 	var totalNU, totalUpfront, totalRecurring, totalSavings float64
 	hasRecurring := false
-	for _, r := range results {
+	for i := range results {
+		r := results[i]
 		totalCount += r.Recommendation.Count
 		totalNU += float64(r.Recommendation.Count) * recommendations.RDSInstanceNUFromType(r.Recommendation.ResourceType)
 		totalUpfront += r.Recommendation.CommitmentCost

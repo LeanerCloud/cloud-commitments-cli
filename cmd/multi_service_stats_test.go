@@ -175,10 +175,10 @@ func TestPrintServiceSummary(t *testing.T) {
 
 func TestPrintMultiServiceSummary(t *testing.T) {
 	tests := []struct {
+		stats    map[common.ServiceType]ServiceProcessingStats
 		name     string
 		recs     []common.Recommendation
 		results  []common.PurchaseResult
-		stats    map[common.ServiceType]ServiceProcessingStats
 		isDryRun bool
 	}{
 		{
@@ -264,10 +264,10 @@ func TestPrintMultiServiceSummary(t *testing.T) {
 
 func TestPrintSavingsPlansSection(t *testing.T) {
 	tests := []struct {
+		checkOutput     func(t *testing.T, output string)
 		name            string
 		recommendations []common.Recommendation
 		stats           ServiceProcessingStats
-		checkOutput     func(t *testing.T, output string)
 	}{
 		{
 			name: "Prints Compute Savings Plans",
@@ -406,11 +406,11 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 
 func TestPrintComparisonSection(t *testing.T) {
 	tests := []struct {
+		riStats         map[common.ServiceType]ServiceProcessingStats
+		checkOutput     func(t *testing.T, output string)
 		name            string
 		recommendations []common.Recommendation
-		riStats         map[common.ServiceType]ServiceProcessingStats
 		riSavings       float64
-		checkOutput     func(t *testing.T, output string)
 	}{
 		{
 			name: "Comparison with EC2 RIs and EC2 Instance SP",
@@ -508,10 +508,10 @@ func TestPrintComparisonSection(t *testing.T) {
 func TestPrintFinalMessage(t *testing.T) {
 	tests := []struct {
 		name       string
-		isDryRun   bool
-		riSuccess  int
 		wantOutput []string
 		notWanted  []string
+		riSuccess  int
+		isDryRun   bool
 	}{
 		{
 			name:      "Dry run shows no Archera pitch",

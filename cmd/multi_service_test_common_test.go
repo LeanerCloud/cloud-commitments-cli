@@ -151,9 +151,9 @@ func (m *MockOrganizationsClient) DescribeAccount(ctx context.Context, params *o
 
 // TestAccountAliasCache is a test-friendly version of AccountAliasCache.
 type TestAccountAliasCache struct {
-	mu        sync.RWMutex
-	cache     map[string]string
 	orgClient OrganizationsClientAPI
+	cache     map[string]string
+	mu        sync.RWMutex
 }
 
 // GetAccountAlias returns the account alias for an account ID (same logic as production).

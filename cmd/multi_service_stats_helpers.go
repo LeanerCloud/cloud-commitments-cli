@@ -20,7 +20,8 @@ type SPTypeBreakdown struct {
 func categorizeSPRecommendations(recommendations []common.Recommendation) SPTypeBreakdown {
 	breakdown := SPTypeBreakdown{}
 
-	for _, rec := range recommendations {
+	for _rvc := range recommendations {
+		rec := recommendations[_rvc]
 		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				switch details.PlanType {
@@ -99,7 +100,8 @@ type SPSavingsByType struct {
 func collectSPSavings(recommendations []common.Recommendation) SPSavingsByType {
 	savings := SPSavingsByType{}
 
-	for _, rec := range recommendations {
+	for _rvc := range recommendations {
+		rec := recommendations[_rvc]
 		if common.IsSavingsPlan(rec.Service) {
 			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
 				switch details.PlanType {
@@ -145,11 +147,11 @@ func collectRISavings(riStats map[common.ServiceType]ServiceProcessingStats) RIS
 
 // ComparisonOptions holds the calculated savings for different purchasing options.
 type ComparisonOptions struct {
+	BestComputeSPName string
 	Option1Savings    float64
 	Option2Savings    float64
 	Option3Savings    float64
 	BestComputeSP     float64
-	BestComputeSPName string
 	HasDatabaseSP     bool
 }
 

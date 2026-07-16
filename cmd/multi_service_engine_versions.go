@@ -28,9 +28,9 @@ type InstanceEngineVersion struct {
 
 // EngineLifecycleInfo stores lifecycle support information for a major engine version.
 type EngineLifecycleInfo struct {
-	LifecycleSupportName      string
 	LifecycleSupportStartDate time.Time
 	LifecycleSupportEndDate   time.Time
+	LifecycleSupportName      string
 }
 
 // MajorEngineVersionInfo stores support information for a major engine version.
@@ -157,20 +157,21 @@ func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionNam
 }
 
 // queryRDSInstancesPage queries a single page of RDS instances.
-func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker *string, regionName string) (map[string][]InstanceEngineVersion, *string, error) {
+func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker *string, regionName string) (versions map[string][]InstanceEngineVersion, nextMarker *string, err error) {
 	input := &awsrds.DescribeDBInstancesInput{Marker: marker}
 	output, err := rdsClient.DescribeDBInstances(ctx, input)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	localVersions := make(map[string][]InstanceEngineVersion)
-	for _, dbInstance := range output.DBInstances {
+	versions = make(map[string][]InstanceEngineVersion)
+	for _rvc := range output.DBInstances {
+		dbInstance := output.DBInstances[_rvc]
 		instanceClass := aws.ToString(dbInstance.DBInstanceClass)
 		engine := aws.ToString(dbInstance.Engine)
 		engineVersion := aws.ToString(dbInstance.EngineVersion)
 
-		localVersions[instanceClass] = append(localVersions[instanceClass], InstanceEngineVersion{
+		versions[instanceClass] = append(versions[instanceClass], InstanceEngineVersion{
 			Engine:        engine,
 			EngineVersion: engineVersion,
 			InstanceClass: instanceClass,
@@ -178,12 +179,11 @@ func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker
 		})
 	}
 
-	var nextMarker *string
 	if output.Marker != nil && aws.ToString(output.Marker) != "" {
 		nextMarker = output.Marker
 	}
 
-	return localVersions, nextMarker, nil
+	return
 }
 
 // queryMajorEngineVersions queries AWS for major engine version lifecycle support information.
