@@ -214,8 +214,9 @@ func loadAWSConfigForGCP(ctx context.Context) (aws.Config, error) {
 
 // loadAndUpdateGCPCredentials loads, parses, and optionally updates GCP credentials.
 func loadAndUpdateGCPCredentials(credsFile string) (GCPCredentials, []byte, error) {
-	expandedPath := expandHomeDirectory(credsFile)
+	expandedPath := filepath.Clean(expandHomeDirectory(credsFile))
 
+	// #nosec G304 -- expandedPath is the operator's own GCP service-account key file, supplied via the --credentials-file flag or the interactive prompt of this local `configure-gcp` command; it is cleaned above and is trusted operator input, not attacker-controlled
 	credsData, err := os.ReadFile(expandedPath)
 	if err != nil {
 		return GCPCredentials{}, nil, fmt.Errorf("failed to read credentials file: %w", err)
@@ -436,6 +437,7 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 
 	// Reserve the destination file first (fails if it already exists), so we
 	// never mint a remote key we cannot persist locally.
+	// #nosec G304 -- keyFile is the sole caller's fixed path filepath.Join(os.UserHomeDir(), "cudly-gcp-key.json"); a constant filename under the operator's own home dir, program-controlled and not attacker input
 	f, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to reserve key file %s: %w", keyFile, err)
@@ -571,7 +573,7 @@ func gcpStepSelectProject(ctx context.Context, reader *bufio.Reader) (string, er
 	// (writes to ~/.config/gcloud/properties) with no cloud-API equivalent.
 	fmt.Println()
 	fmt.Println("Setting gcloud project context (local config)...")
-	//nolint:gosec // G204: local gcloud config write, hardcoded args + validated projectID, no shell
+	// #nosec G204 G702 -- local gcloud config write: fixed argv ("gcloud config set project"), projectID pre-validated by validateGCPProjectID (strict regex) just above, passed as a discrete argv element with no shell, so it cannot inject
 	cmd := exec.Command("gcloud", "config", "set", "project", projectID)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -738,7 +740,7 @@ func executeGCPCommand(reader *bufio.Reader, displayCmd, program string, args ..
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	//nolint:gosec // G204: interactive operator auth (gcloud auth login), hardcoded args, no shell
+	// #nosec G204 -- interactive operator auth (gcloud auth login): program and args are hardcoded literals from the caller (runGCPSetupCommands passes "gcloud","auth","login"), no shell, not attacker-controlled
 	cmd := exec.Command(program, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

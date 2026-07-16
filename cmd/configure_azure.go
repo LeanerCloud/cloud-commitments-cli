@@ -536,7 +536,7 @@ func executeExplicitCommand(reader *bufio.Reader, displayCmd, program string, ar
 	fmt.Printf("Executing: %s\n", displayCmd)
 	fmt.Println(strings.Repeat("-", 60))
 
-	//nolint:gosec // G204: interactive operator auth (az login), hardcoded args, no shell
+	// #nosec G204 -- interactive operator auth (az login): program and args are hardcoded literals from the caller (runAzureSetupCommands passes "az","login"), no shell, not attacker-controlled
 	cmd := exec.Command(program, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
