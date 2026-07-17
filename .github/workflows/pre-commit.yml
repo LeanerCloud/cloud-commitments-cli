@@ -242,7 +242,18 @@ jobs:
         # residual flakes that token alone cannot eliminate.
         uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
         env:
-          SKIP: terraform_validate
+          # SKIP the `gosec` pre-commit hook in CI: it is designed to scan
+          # only the changed packages of a local commit, but `pre-commit run
+          # --all-files` (this CI job) feeds it EVERY .go file across all six
+          # modules at once, and gosec's whole-repo analysis exhausts the
+          # runner's memory — the job dies with "The runner has received a
+          # shutdown signal" at this step on every run. gosec is NOT dropped:
+          # the dedicated `Security Scanning` job in ci.yml runs gosec v2.28.0
+          # per-module (SARIF) as the authoritative gate, so this only removes
+          # the duplicate that OOMs CI — the same dedup rationale as the
+          # already-skipped `terraform_validate` (covered by Validate Terraform).
+          # Local developers still get the fast per-changed-package gosec hook.
+          SKIP: terraform_validate,gosec
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           timeout_minutes: 10
