@@ -326,10 +326,18 @@ func (g *graphSPProvisioner) AssignRole(ctx context.Context, scope, principalID,
 					"https://learn.microsoft.com/en-us/azure/role-based-access-control/troubleshooting): %w",
 				principalID, g.retryBudget, err)
 		}
-		// Context cancellation is terminal: do not continue retrying.
+		// Context cancellation is terminal: do not continue retrying. Wrap
+		// ctx.Err() with the propagation guidance so the operator learns the
+		// assignment may just need more time rather than seeing a bare
+		// "context deadline exceeded" (errors.Is still matches the cause).
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf(
+				"stopped waiting for service principal %q to propagate to ARM "+
+					"before the role assignment completed: %w -- Azure AD role "+
+					"propagation can take up to ~10 minutes; re-run configure-azure "+
+					"to retry (https://learn.microsoft.com/en-us/azure/role-based-access-control/troubleshooting)",
+				principalID, ctx.Err())
 		case <-time.After(delay):
 		}
 		delay = min(delay*2, roleAssignRetryMax)

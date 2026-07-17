@@ -272,13 +272,10 @@ const gcpSDKCallTimeout = 60 * time.Second
 // Metadata Server.
 //
 // NOTE: "gcloud auth login" (wizard Step 1) updates the gcloud user session but
-// does NOT automatically populate the ADC cache. If the operator intends to use
-// these SDK calls after Step 1, they should also run:
-//
-//	gcloud auth application-default login
-//
-// The wizard Step 3 onwards calls this function; if ADC is not available the
-// calls fail loud with a hint to run "gcloud auth application-default login".
+// does NOT populate the ADC cache; the wizard's Step 1b
+// ("gcloud auth application-default login") does that. If ADC is still not
+// available (e.g. the operator skipped Step 1b) these calls fail loud with a
+// hint to run "gcloud auth application-default login".
 func newGCPAPIOption(ctx context.Context) (option.ClientOption, error) {
 	ts, err := google.DefaultTokenSource(ctx,
 		"https://www.googleapis.com/auth/cloud-platform",
@@ -423,18 +420,68 @@ func addMemberToPolicyBinding(policy *cloudresourcemanager.Policy, member, role 
 	return true
 }
 
+// gcpKeyProvisioner abstracts the IAM service-account key operations used by
+// writeServiceAccountKey. It exists so the reserve / mint / decode / write /
+// rollback flow can be unit-tested with a mock without hitting GCP (mirrors
+// azureSPProvisioner in configure_azure_sp.go).
+type gcpKeyProvisioner interface {
+	// CreateKey mints a new JSON key for saEmail and returns the key resource
+	// name and the base64-encoded private key material.
+	CreateKey(ctx context.Context, saEmail string) (keyName, privateKeyData string, err error)
+	// DeleteKey deletes the key identified by keyName. It is the compensating
+	// action used to avoid orphaning a freshly minted key on a local failure.
+	DeleteKey(ctx context.Context, keyName string) error
+}
+
+// iamKeyProvisioner is the production gcpKeyProvisioner backed by the IAM API v1.
+type iamKeyProvisioner struct {
+	svc *iamv1.Service
+}
+
+func (k *iamKeyProvisioner) CreateKey(ctx context.Context, saEmail string) (keyName, privateKeyData string, err error) {
+	resource := fmt.Sprintf("projects/-/serviceAccounts/%s", saEmail)
+	key, err := k.svc.Projects.ServiceAccounts.Keys.Create(resource, &iamv1.CreateServiceAccountKeyRequest{
+		PrivateKeyType: "TYPE_GOOGLE_CREDENTIALS_FILE",
+	}).Context(ctx).Do()
+	if err != nil {
+		return "", "", err
+	}
+	return key.Name, key.PrivateKeyData, nil
+}
+
+func (k *iamKeyProvisioner) DeleteKey(ctx context.Context, keyName string) error {
+	_, err := k.svc.Projects.ServiceAccounts.Keys.Delete(keyName).Context(ctx).Do()
+	return err
+}
+
 // createGCPServiceAccountKey creates a JSON key for the given service account
 // and writes it to keyFile. This replaces
 // "gcloud iam service-accounts keys create <file> --iam-account=<sa>".
-//
-// To avoid orphaning a live IAM key on a local failure, it reserves the
-// destination file with exclusive-create semantics BEFORE minting the remote
-// key, and deletes the freshly created remote key if decoding or writing the
-// key material fails.
 func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) error {
 	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
 	defer cancel()
 
+	opt, err := newGCPAPIOption(ctx)
+	if err != nil {
+		return err
+	}
+
+	svc, err := iamv1.NewService(ctx, opt)
+	if err != nil {
+		return fmt.Errorf("failed to create IAM client: %w", err)
+	}
+
+	return writeServiceAccountKey(ctx, &iamKeyProvisioner{svc: svc}, saEmail, keyFile)
+}
+
+// writeServiceAccountKey reserves keyFile with exclusive-create semantics
+// BEFORE minting the remote key (so it never mints a key it cannot persist
+// locally), then mints the key via p, decodes the base64 material and writes it
+// to keyFile. If decoding or writing fails after the remote key is minted it
+// deletes the remote key so it does not linger as an active, unused credential.
+// Extracted from createGCPServiceAccountKey so the reserve / mint / rollback
+// flow is unit-testable with a mock (no GCP credentials).
+func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, keyFile string) error {
 	// Reserve the destination file first (fails if it already exists), so we
 	// never mint a remote key we cannot persist locally.
 	// #nosec G304 -- keyFile is the sole caller's fixed path filepath.Join(os.UserHomeDir(), "cudly-gcp-key.json"); a constant filename under the operator's own home dir, program-controlled and not attacker input
@@ -451,20 +498,7 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 		}
 	}()
 
-	opt, err := newGCPAPIOption(ctx)
-	if err != nil {
-		return err
-	}
-
-	svc, err := iamv1.NewService(ctx, opt)
-	if err != nil {
-		return fmt.Errorf("failed to create IAM client: %w", err)
-	}
-
-	resource := fmt.Sprintf("projects/-/serviceAccounts/%s", saEmail)
-	key, err := svc.Projects.ServiceAccounts.Keys.Create(resource, &iamv1.CreateServiceAccountKeyRequest{
-		PrivateKeyType: "TYPE_GOOGLE_CREDENTIALS_FILE",
-	}).Context(ctx).Do()
+	keyName, privateKeyData, err := p.CreateKey(ctx, saEmail)
 	if err != nil {
 		return fmt.Errorf("failed to create service account key: %w", err)
 	}
@@ -475,14 +509,14 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 		// Use a fresh context: the parent may already be canceled/expired.
 		delCtx, delCancel := context.WithTimeout(context.Background(), gcpSDKCallTimeout)
 		defer delCancel()
-		if _, delErr := svc.Projects.ServiceAccounts.Keys.Delete(key.Name).Context(delCtx).Do(); delErr != nil {
-			return fmt.Errorf("%w; additionally failed to delete the orphaned remote key %s: %w", cause, key.Name, delErr)
+		if delErr := p.DeleteKey(delCtx, keyName); delErr != nil {
+			return fmt.Errorf("%w; additionally failed to delete the orphaned remote key %s: %w", cause, keyName, delErr)
 		}
 		return cause
 	}
 
 	// PrivateKeyData is base64-encoded JSON.
-	decoded, err := base64.StdEncoding.DecodeString(key.PrivateKeyData)
+	decoded, err := base64.StdEncoding.DecodeString(privateKeyData)
 	if err != nil {
 		return deleteRemoteKey(fmt.Errorf("failed to decode key data: %w", err))
 	}
@@ -496,12 +530,13 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 
 // runGCPSetupCommands guides the operator through GCP setup.
 //
-// Step 1 (gcloud auth login): performed via the GCP CLI. This is an
-// interactive browser-based OAuth flow that cannot be replicated through SDK
-// calls on behalf of an operator who does not yet have a credential. It
-// updates the gcloud user session but does NOT populate the ADC cache needed
-// by subsequent SDK calls. Operators must also run
-// "gcloud auth application-default login" if they want to use ADC.
+// Step 1 (gcloud auth login) and Step 1b (gcloud auth application-default
+// login): performed via the GCP CLI. Both are interactive browser-based OAuth
+// flows that cannot be replicated through SDK calls on behalf of an operator
+// who does not yet have a credential. Step 1 establishes the gcloud user
+// session; Step 1b populates the Application Default Credentials (ADC) cache
+// that every SDK-based step below authenticates through. Both are run in one
+// pass so a fresh operator completes setup without re-running the wizard.
 //
 // Step 2 (list projects): performed via the Cloud Resource Manager SDK v1,
 // using Application Default Credentials (ADC). Fails loud if ADC is not
@@ -536,32 +571,59 @@ func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader) (string, err
 	return gcpStepCreateKey(ctx, reader, saEmail)
 }
 
-// gcpStepLogin runs "gcloud auth login" interactively.
+// gcpStepLogin runs the two interactive gcloud logins the wizard needs:
+// "gcloud auth login" (user session) and "gcloud auth application-default
+// login" (ADC cache). Both are browser-based OAuth flows with no SDK
+// equivalent. The ADC login is required because the SDK-based steps below
+// (list projects, create service account, grant role, create key) authenticate
+// through Application Default Credentials, which "gcloud auth login" alone does
+// NOT populate -- so without it a fresh operator would hard-abort at Step 2.
 func gcpStepLogin(reader *bufio.Reader) error {
 	fmt.Println("Step 1: GCP Login")
 	fmt.Println("-----------------")
-	fmt.Println("This will open a browser window for GCP authentication.")
-	fmt.Println("After logging in, also run: gcloud auth application-default login")
-	fmt.Println("(required for the SDK-based steps below)")
+	fmt.Println("This opens a browser window for GCP authentication (user session).")
 	fmt.Println()
-	return promptAndRunGCPCommand(reader, "GCP Login", "gcloud auth login", "gcloud", "auth", "login")
+	if err := promptAndRunGCPCommand(reader, "GCP Login", "gcloud auth login", "gcloud", "auth", "login"); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("Step 1b: GCP Application Default Credentials Login")
+	fmt.Println("-------------------------------------------------")
+	fmt.Println("This opens a browser window to populate the Application Default")
+	fmt.Println("Credentials (ADC) cache used by the SDK-based steps below")
+	fmt.Println("(list projects, create service account, grant role, create key).")
+	fmt.Println()
+	return promptAndRunGCPCommand(reader, "GCP ADC Login",
+		"gcloud auth application-default login",
+		"gcloud", "auth", "application-default", "login")
 }
 
-// gcpStepSelectProject lists projects and prompts for a project ID.
+// gcpStepSelectProject optionally lists projects and prompts for a project ID.
+// The listing is behind a [R]un/[S]kip prompt so an operator who already knows
+// their project ID can proceed even if the SDK listing would fail; when RUN it
+// fails loud (no CLI fallback), instructing the operator to run
+// "gcloud auth application-default login" first.
 func gcpStepSelectProject(ctx context.Context, reader *bufio.Reader) (string, error) {
 	fmt.Println()
 	fmt.Println("Step 2: Select Project")
 	fmt.Println("----------------------")
-	fmt.Println("Listing your GCP projects via SDK (Application Default Credentials)...")
-	fmt.Println()
 
-	if err := listGCPProjects(ctx); err != nil {
-		return "", fmt.Errorf("failed to list GCP projects via SDK: %w\n"+
-			"Ensure Application Default Credentials are set: run 'gcloud auth application-default login' first", err)
+	run, err := promptRunOrSkipListing(reader, "the GCP project listing (via SDK)")
+	if err != nil {
+		return "", err
+	}
+	if run {
+		fmt.Println("Listing your GCP projects via SDK (Application Default Credentials)...")
+		fmt.Println()
+		if err = listGCPProjects(ctx); err != nil {
+			return "", fmt.Errorf("failed to list GCP projects via SDK: %w\n"+
+				"Ensure Application Default Credentials are set: run 'gcloud auth application-default login' first", err)
+		}
+		fmt.Println()
 	}
 
-	fmt.Println()
-	projectID, err := readRequiredInputLine(reader, "Enter your Project ID from above: ", "project ID")
+	projectID, err := readRequiredInputLine(reader, "Enter your Project ID: ", "project ID")
 	if err != nil {
 		return "", err
 	}

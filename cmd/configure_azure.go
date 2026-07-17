@@ -49,6 +49,26 @@ func readTrimmedLine(reader *bufio.Reader) (string, error) {
 	return strings.TrimSpace(input), nil
 }
 
+// promptRunOrSkipListing asks whether to run an interactive SDK listing step
+// (e.g. list subscriptions / projects) or skip straight to entering the ID.
+// It returns true to run the listing and false to skip. Skipping is a
+// deliberate operator choice for someone who already knows their ID; the
+// listing still fails loud WHEN RUN (skip is not a silent fallback on error).
+// Empty input or "r"/"run" runs the listing; "s"/"skip" skips it.
+func promptRunOrSkipListing(reader *bufio.Reader, what string) (bool, error) {
+	fmt.Printf("[R]un %s, or [S]kip to enter the ID directly? ", what)
+	choice, err := readTrimmedLine(reader)
+	if err != nil {
+		return false, fmt.Errorf("failed to read choice: %w", err)
+	}
+	switch strings.ToLower(choice) {
+	case "s", "skip":
+		return false, nil
+	default:
+		return true, nil
+	}
+}
+
 // AzureCredentials holds the Azure Service Principal credentials.
 type AzureCredentials struct {
 	TenantID       string `json:"tenant_id"`
@@ -84,7 +104,7 @@ You can provide credentials via flags or interactively:
 
 To create an Azure Service Principal manually:
   az login
-  az ad sp create-for-rbac --name "CUDly" --role "Reservation Administrator" --scopes /subscriptions/<subscription-id>`,
+  az ad sp create-for-rbac --name "CUDly" --role "Reservations Administrator" --scopes /subscriptions/<subscription-id>`,
 	RunE: runConfigureAzure,
 }
 
@@ -369,27 +389,39 @@ func azureStepLogin(reader *bufio.Reader) error {
 	return promptAndRunExplicitCommand(reader, "Azure Login", "az login", "az", "login")
 }
 
-// azureStepListSubscriptions lists subscriptions via SDK and prompts the
-// operator to enter their subscription ID. It fails loud (no CLI fallback): if
-// the Azure CLI credential cannot authenticate, it returns an error
-// instructing the operator to run "az login" first.
+// listAzureSubscriptionsWithTimeout runs the SDK subscription listing under a
+// bounded timeout so a hung ARM call cannot stall the wizard.
+func listAzureSubscriptionsWithTimeout(ctx context.Context) error {
+	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return listAzureSubscriptions(listCtx)
+}
+
+// azureStepListSubscriptions optionally lists subscriptions via SDK and prompts
+// the operator to enter their subscription ID. The listing is behind a
+// [R]un/[S]kip prompt so an operator who already knows their subscription ID
+// can proceed even if the SDK listing would fail; when RUN it fails loud (no
+// CLI fallback), instructing the operator to run "az login" first.
 func azureStepListSubscriptions(ctx context.Context, reader *bufio.Reader) (string, error) {
 	fmt.Println()
 	fmt.Println("Step 2: Get Subscription ID")
 	fmt.Println("---------------------------")
-	fmt.Println("Listing your Azure subscriptions via SDK (Azure CLI credential)...")
-	fmt.Println()
 
-	listCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	if err := listAzureSubscriptions(listCtx); err != nil {
-		return "", fmt.Errorf("failed to list Azure subscriptions via SDK: %w\n"+
-			"Ensure you are authenticated: run 'az login' (Step 1) before continuing", err)
+	run, err := promptRunOrSkipListing(reader, "the Azure subscription listing (via SDK)")
+	if err != nil {
+		return "", err
+	}
+	if run {
+		fmt.Println("Listing your Azure subscriptions via SDK (Azure CLI credential)...")
+		fmt.Println()
+		if err = listAzureSubscriptionsWithTimeout(ctx); err != nil {
+			return "", fmt.Errorf("failed to list Azure subscriptions via SDK: %w\n"+
+				"Ensure you are authenticated: run 'az login' (Step 1) before continuing", err)
+		}
+		fmt.Println()
 	}
 
-	fmt.Println()
-	fmt.Print("Enter your Subscription ID from above: ")
+	fmt.Print("Enter your Subscription ID: ")
 	subscriptionID, err := readTrimmedLine(reader)
 	if err != nil {
 		return "", fmt.Errorf("failed to read subscription ID: %w", err)
@@ -453,7 +485,14 @@ func azureStepCreateServicePrincipal(ctx context.Context, reader *bufio.Reader, 
 		return nil
 	}
 
-	spCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// The step budget must exceed roleAssignRetryBudget (3 min) plus the
+	// pre-assignment overhead (tenant resolution + the application / password /
+	// service-principal / role-definition Graph calls) so the PrincipalNotFound
+	// retry loop in AssignRole gets its full propagation budget. A tighter
+	// budget would cut the retry short via ctx cancellation, then the rollback
+	// would delete the just-created application and reset the AAD replication
+	// clock on every re-run. See roleAssignRetryBudget in configure_azure_sp.go.
+	spCtx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
 
 	tenantID, err := resolveAzureTenantID(spCtx, subscriptionID)
