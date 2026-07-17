@@ -51,7 +51,7 @@ func rdsMajorVersion(engine, major string) rdstypes.DBMajorEngineVersion { //nol
 		MajorEngineVersion: aws.String(major),
 		SupportedEngineLifecycles: []rdstypes.SupportedEngineLifecycle{
 			{
-				LifecycleSupportName:      "open-source-rds-extended-support",
+				LifecycleSupportName:      rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport,
 				LifecycleSupportStartDate: aws.Time(time.Now().AddDate(-1, 0, 0)),
 				LifecycleSupportEndDate:   aws.Time(time.Now().AddDate(2, 0, 0)),
 			},

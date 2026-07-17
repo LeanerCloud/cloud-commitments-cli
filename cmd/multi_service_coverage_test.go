@@ -246,7 +246,7 @@ func TestIsInExtendedSupport_EdgeCases(t *testing.T) {
 			MajorEngineVersion: "5.7",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 					LifecycleSupportStartDate: pastDate,
 					LifecycleSupportEndDate:   futureDate,
 				},
@@ -257,7 +257,7 @@ func TestIsInExtendedSupport_EdgeCases(t *testing.T) {
 			MajorEngineVersion: "8.0",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-standard-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsStandardSupport),
 					LifecycleSupportStartDate: now.AddDate(-2, 0, 0),
 					LifecycleSupportEndDate:   futureDate,
 				},
@@ -318,7 +318,7 @@ func TestAdjustRecommendationForExcludedVersions_AdditionalCases(t *testing.T) {
 			MajorEngineVersion: "5.7",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 					LifecycleSupportStartDate: pastDate,
 					LifecycleSupportEndDate:   futureDate,
 				},

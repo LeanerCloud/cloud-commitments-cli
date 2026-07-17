@@ -399,11 +399,17 @@ func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]Majo
 	// Check if current date falls within extended support period
 	now := time.Now()
 	for _, lifecycle := range info.SupportedEngineLifecycles {
-		if lifecycle.LifecycleSupportName == "open-source-rds-extended-support" {
-			// Check if we're past the start date of extended support
-			if now.After(lifecycle.LifecycleSupportStartDate) || now.Equal(lifecycle.LifecycleSupportStartDate) {
-				return true
-			}
+		if lifecycle.LifecycleSupportName != string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport) {
+			continue
+		}
+		// Not in extended support before its start date
+		if now.Before(lifecycle.LifecycleSupportStartDate) {
+			continue
+		}
+		// Past the end date means extended support is over; a zero end date
+		// is open-ended (issue #1182)
+		if lifecycle.LifecycleSupportEndDate.IsZero() || now.Before(lifecycle.LifecycleSupportEndDate) {
+			return true
 		}
 	}
 

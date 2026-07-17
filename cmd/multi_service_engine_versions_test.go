@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
+	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -134,7 +135,7 @@ func TestAdjustRecommendationForExcludedVersions(t *testing.T) {
 					MajorEngineVersion: "5.7",
 					SupportedEngineLifecycles: []EngineLifecycleInfo{
 						{
-							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 							LifecycleSupportStartDate: time.Now().AddDate(0, -6, 0),
 							LifecycleSupportEndDate:   time.Now().AddDate(3, 0, 0),
 						},
@@ -213,7 +214,7 @@ func TestAdjustRecommendationForExcludedVersions_MultipleVersionsInExtendedSuppo
 			MajorEngineVersion: "5.6",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 					LifecycleSupportStartDate: time.Now().AddDate(0, -12, 0),
 					LifecycleSupportEndDate:   time.Now().AddDate(2, 0, 0),
 				},
@@ -224,7 +225,7 @@ func TestAdjustRecommendationForExcludedVersions_MultipleVersionsInExtendedSuppo
 			MajorEngineVersion: "5.7",
 			SupportedEngineLifecycles: []EngineLifecycleInfo{
 				{
-					LifecycleSupportName:      "open-source-rds-extended-support",
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 					LifecycleSupportStartDate: time.Now().AddDate(0, -6, 0),
 					LifecycleSupportEndDate:   time.Now().AddDate(3, 0, 0),
 				},
@@ -518,7 +519,7 @@ func TestIsInExtendedSupport(t *testing.T) {
 					MajorEngineVersion: "5.7",
 					SupportedEngineLifecycles: []EngineLifecycleInfo{
 						{
-							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 							LifecycleSupportStartDate: pastDate,
 							LifecycleSupportEndDate:   futureDate,
 						},
@@ -537,7 +538,7 @@ func TestIsInExtendedSupport(t *testing.T) {
 					MajorEngineVersion: "8.0",
 					SupportedEngineLifecycles: []EngineLifecycleInfo{
 						{
-							LifecycleSupportName:      "open-source-rds-standard-support",
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsStandardSupport),
 							LifecycleSupportStartDate: now.AddDate(-2, 0, 0),
 							LifecycleSupportEndDate:   futureDate,
 						},
@@ -575,7 +576,7 @@ func TestIsInExtendedSupport(t *testing.T) {
 					MajorEngineVersion: "5.7",
 					SupportedEngineLifecycles: []EngineLifecycleInfo{
 						{
-							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 							LifecycleSupportStartDate: futureDate,
 							LifecycleSupportEndDate:   futureDate.AddDate(1, 0, 0),
 						},
@@ -594,9 +595,46 @@ func TestIsInExtendedSupport(t *testing.T) {
 					MajorEngineVersion: "11.19",
 					SupportedEngineLifecycles: []EngineLifecycleInfo{
 						{
-							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 							LifecycleSupportStartDate: now,
 							LifecycleSupportEndDate:   futureDate,
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name:    "Extended support already ended",
+			engine:  "mysql",
+			version: "5.7.44",
+			versionInfo: map[string]MajorEngineVersionInfo{
+				"mysql:5.7": {
+					Engine:             "mysql",
+					MajorEngineVersion: "5.7",
+					SupportedEngineLifecycles: []EngineLifecycleInfo{
+						{
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
+							LifecycleSupportStartDate: now.AddDate(-3, 0, 0),
+							LifecycleSupportEndDate:   pastDate,
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name:    "Zero end date treated as open-ended",
+			engine:  "mysql",
+			version: "5.7.44",
+			versionInfo: map[string]MajorEngineVersionInfo{
+				"mysql:5.7": {
+					Engine:             "mysql",
+					MajorEngineVersion: "5.7",
+					SupportedEngineLifecycles: []EngineLifecycleInfo{
+						{
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
+							LifecycleSupportStartDate: pastDate,
 						},
 					},
 				},
@@ -613,7 +651,7 @@ func TestIsInExtendedSupport(t *testing.T) {
 					MajorEngineVersion: "5.7",
 					SupportedEngineLifecycles: []EngineLifecycleInfo{
 						{
-							LifecycleSupportName:      "open-source-rds-extended-support",
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
 							LifecycleSupportStartDate: pastDate,
 							LifecycleSupportEndDate:   futureDate,
 						},
