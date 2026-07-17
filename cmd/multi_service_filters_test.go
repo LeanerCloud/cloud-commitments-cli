@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"testing"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
@@ -412,4 +414,63 @@ func TestShouldIncludeAccount(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestShouldIncludePoolSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		avg      float64
+		minPool  float64
+		expected bool
+	}{
+		{"filter disabled (0)", 0.5, 0, true},
+		{"avg=0 passes through", 0, 2.0, true},
+		{"avg below threshold", 1.5, 2.0, false},
+		{"avg equal to threshold", 2.0, 2.0, true},
+		{"avg above threshold", 3.0, 2.0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := common.Recommendation{AverageInstancesUsedPerHour: tt.avg}
+			cfg := Config{MinPoolSize: tt.minPool}
+			assert.Equal(t, tt.expected, shouldIncludePoolSize(&rec, &cfg))
+		})
+	}
+}
+
+// TestApplyFilters_PoolSizeLogs verifies that applyFilters emits per-rec and
+// summary log lines when --min-pool-size drops recommendations.
+func TestApplyFilters_PoolSizeLogs(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+
+	// Capture log output.
+	var buf bytes.Buffer
+	origFlags := log.Flags()
+	origWriter := log.Writer()
+	log.SetOutput(&buf)
+	log.SetFlags(0) // strip timestamps so the assertions are stable
+	defer func() {
+		log.SetOutput(origWriter)
+		log.SetFlags(origFlags)
+	}()
+
+	recs := []common.Recommendation{
+		{Service: "rds", Region: "us-east-1", ResourceType: "db.t3.micro", AverageInstancesUsedPerHour: 0.8, Count: 1},
+		{Service: "rds", Region: "us-east-1", ResourceType: "db.r5.large", AverageInstancesUsedPerHour: 3.5, Count: 2},
+	}
+	cfg := Config{MinPoolSize: 2.0}
+
+	result := applyFilters(recs, &cfg, nil, nil, "")
+
+	// Only the rec above threshold passes through.
+	assert.Len(t, result, 1)
+	assert.Equal(t, "db.r5.large", result[0].ResourceType)
+
+	output := buf.String()
+	// Per-rec line present.
+	assert.Contains(t, output, "--min-pool-size=2.0 dropped rds/us-east-1/db.t3.micro (avg=0.80 < threshold)")
+	// Summary line present.
+	assert.Contains(t, output, "--min-pool-size dropped 1 recommendation(s)")
 }
