@@ -131,7 +131,14 @@ repos:
         # installs trivy v0.69.3 via the workflow step in
         # .github/workflows/pre-commit.yml, so PRs are always scanned
         # regardless of a developer's local setup.
-        entry: bash -c 'trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs terraform/environments/aws --skip-dirs .claude .'
+        #
+        # `**/.terraform` is skipped because it is a gitignored, generated
+        # local cache (downloaded provider schemas + cached plan snapshots
+        # from `terraform init`) — never committed and never present in CI
+        # (which checks out from git), so findings there are local-only
+        # false positives on third-party provider cache, not on our source.
+        # The actual terraform module source files are still fully scanned.
+        entry: bash -c 'trivy config --severity HIGH,CRITICAL --exit-code 1 --skip-dirs terraform/environments/aws --skip-dirs "**/.terraform" --skip-dirs .claude .'
         language: system
         pass_filenames: false
 
