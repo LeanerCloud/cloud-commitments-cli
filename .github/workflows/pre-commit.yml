@@ -74,6 +74,46 @@ jobs:
             "https://raw.githubusercontent.com/terraform-linters/tflint/${TFLINT_VERSION}/install_linux.sh"
           bash /tmp/tflint-install.sh
 
+      # Cache the tflint ruleset plugins (aws/azurerm/google) that
+      # `tflint --init` downloads from the GitHub Releases API. Without
+      # this cache EVERY run re-downloads all three plugins and is exposed
+      # to transient GitHub release-API 503s — a sustained 503 outrode the
+      # GITHUB_TOKEN auth + 3-attempt pre-commit retry below and reddened
+      # this job repo-wide (blocking every PR). Keyed on .tflint.hcl so a
+      # plugin-version bump re-downloads; restore-keys seeds a warm start.
+      - name: Cache tflint plugins
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.tflint.d/plugins
+          key: tflint-plugins-${{ runner.os }}-${{ hashFiles('.tflint.hcl') }}
+          restore-keys: |
+            tflint-plugins-${{ runner.os }}-
+
+      # Pre-populate the plugin cache with a dedicated, authenticated,
+      # retried `tflint --init` BEFORE pre-commit runs. On a cache hit this
+      # is a fast no-op (tflint skips download when the pinned plugin
+      # versions are already present — no API call, so immune to the 503).
+      # On a cache miss (version bump / cold cache) the retry loop rides
+      # out transient release-API 503s at the init level instead of
+      # re-running every hook via the coarse outer retry. GITHUB_TOKEN
+      # raises the release-API limit above the 60/hr anonymous ceiling.
+      - name: Initialize tflint plugins
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if tflint --init --config="${GITHUB_WORKSPACE}/.tflint.hcl"; then
+              echo "tflint --init succeeded (attempt ${attempt})"
+              exit 0
+            fi
+            wait=$((attempt * 20))
+            echo "tflint --init failed (attempt ${attempt}/6); retrying in ${wait}s..." >&2
+            sleep "${wait}"
+          done
+          echo "tflint --init failed after 6 attempts — GitHub release API likely unavailable" >&2
+          exit 1
+
       # Cache the installed tool binaries (gosec, gocyclo). Keyed on the
       # pinned version strings so a tool-version bump still triggers a
       # fresh install. Both binaries land in ~/go/bin which setup-go@v6
