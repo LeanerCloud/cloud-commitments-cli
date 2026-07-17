@@ -151,10 +151,20 @@ jobs:
         # of those tags makes install bail silently after detecting the
         # version. v0.69.3 ships the standard `trivy_<ver>_Linux-64bit.tar.gz`
         # asset.
+        #
+        # The installer itself is fetched from the same pinned release tag
+        # (not the mutable `main` branch) and downloaded to a file before
+        # execution, matching the tflint step above: a malicious or
+        # accidental change to install.sh on main can't silently execute
+        # on this CI runner, and `curl -fsSL` makes transport errors fail
+        # loudly instead of piping an HTML error page into sh.
+        env:
+          TRIVY_VERSION: v0.69.3
         run: |
-          set -eo pipefail
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b /usr/local/bin v0.69.3
+          set -euo pipefail
+          curl -fsSL -o /tmp/trivy-install.sh \
+            "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh"
+          sh /tmp/trivy-install.sh -b /usr/local/bin "${TRIVY_VERSION}"
 
       - name: Install git-secrets
         # Pinned to a release tag rather than master HEAD. After install
