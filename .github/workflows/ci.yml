@@ -325,7 +325,7 @@ jobs:
           # Install pinned gosec using the job's existing setup-go.
           # The securego/gosec Docker action bundles its own Go toolchain which
           # cannot satisfy the module's go directive, causing a toolchain mismatch.
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.26.1
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
           # Multi-module repo: each ./... only walks the current module so scanning root
           # alone silently misses pkg/ and providers/*. Mirror the govulncheck per-module
           # loop, collect per-module SARIF, then merge for the upload step.
