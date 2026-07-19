@@ -18,13 +18,16 @@
 
 ## File Organization
 
-- NEVER save to root folder — use the directories below
-- Use `/src` for source code files
-- Use `/tests` for test files
-- Use `/docs` for documentation and markdown files
-- Use `/config` for configuration files
-- Use `/scripts` for utility scripts
-- Use `/examples` for example code
+- NEVER save working files to the root folder; use the directories below
+- `cmd/`: CLI and server entry points (main packages)
+- `internal/`: backend application code (API, auth, purchase, scheduler, ...)
+- `pkg/`: shared library code (separate Go module, see Go Module Notes)
+- `providers/`: cloud provider integrations (AWS, Azure, GCP)
+- `frontend/`: TypeScript web frontend (webpack + jest)
+- `terraform/`, `cloudformation/`, `arm/`, `iac/`: infrastructure as code
+- `docs/`: documentation and markdown files
+- `scripts/`: utility scripts
+- `tests/`: end-to-end tests (Go unit tests live next to the code they test)
 
 ## Project Architecture
 
@@ -52,15 +55,23 @@
 
 ## Build & Test
 
+The root of the repo is a Go project; the npm scripts live in `frontend/`.
+
 ```bash
-# Build
-npm run build
+# Build (backend, from the repo root)
+go build ./...        # or: make build
 
-# Test
-npm test
+# Test (backend)
+go test ./...         # or: make test-unit
 
-# Lint
-npm run lint
+# Lint (backend)
+make lint             # golangci-lint; also: make vet, make fmt
+
+# Frontend (run from frontend/)
+cd frontend && npm ci
+npm run build         # webpack production build
+npm test              # jest --coverage
+npm run lint          # eslint src/**/*.ts
 ```
 
 - ALWAYS run tests after making code changes
