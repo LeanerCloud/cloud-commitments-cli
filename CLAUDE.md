@@ -77,6 +77,15 @@ npm run lint          # eslint src/**/*.ts
 - ALWAYS run tests after making code changes
 - ALWAYS verify build succeeds before committing
 
+## Known Issues
+
+The `known_issues/` directory tracks deferred tech debt and surfaced bugs.
+When a referenced GitHub issue is closed, move the corresponding doc to
+`known_issues/resolved/` (do not delete it) so the rationale is preserved.
+Do this in the same PR that closes the issue. A full sweep of the directory
+should happen at the start of each sprint. Full convention and entry format
+are in `CONTRIBUTING.md` under "Known Issues Sweep".
+
 ## Security Rules
 
 - NEVER hardcode API keys, secrets, or credentials in source files

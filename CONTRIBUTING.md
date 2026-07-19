@@ -238,6 +238,74 @@ the first page. Now properly iterates all pages.
 - [ ] No sensitive data in code or commits
 - [ ] Changes are backwards compatible (or breaking changes documented)
 
+## Known Issues Sweep
+
+The `known_issues/` directory tracks open tech debt, deferred fixes, and
+surfaced bugs that are out of scope for the current PR. To stay useful, it
+needs periodic housekeeping.
+
+### Entry format
+
+Each file must begin with a `# Known Issues: <topic>` heading followed by an
+audit-status line:
+
+```text
+> **Audit status (<YYYY-MM-DD>):** `<N> needs triage · <M> resolved`
+```
+
+Subsequent sections use `## SEVERITY: Short title` (e.g. `## MEDIUM: ...`) and
+include at minimum: **Files** (affected paths), **Description**, **Why
+deferred**, and **Status**.
+
+### When to ADD an entry
+
+- Tech debt or a follow-up bug is discovered during a PR review but is
+  explicitly out of scope for that PR.
+- A test is marked flaky and a root-cause fix is deferred.
+- A deliberate deferral is made (e.g. "fix after the current refactor lands").
+
+Create a new file `known_issues/<NN>_<slug>.md` (sequential number, lowercase
+slug) and open a corresponding GitHub issue so it can be tracked and closed.
+
+### When to REMOVE (archive) an entry
+
+An entry is stale when its corresponding GitHub issue is **closed** OR when the
+entry has had **no recurrence for more than 6 months** and no open issue
+references it. Do not delete stale files; move them to `known_issues/resolved/`
+so the rationale is preserved for future readers.
+
+### Who runs the sweep and when
+
+Any contributor working in a file covered by a `known_issues/` doc should
+check whether that doc's referenced issue is still open; archive it if not.
+
+A dedicated sweep over the whole directory should happen:
+
+- At the start of each sprint (or monthly if sprints are not used).
+- After any PR that explicitly closes multiple issues.
+- When a new contributor is onboarding and doing a codebase walkthrough.
+
+To perform a sweep:
+
+```bash
+# List docs referencing a specific issue number
+grep -rl "#<issue-number>" known_issues/
+
+# Cross-check all referenced issues in bulk
+grep -h "closes #\|Fixes #\|#[0-9]\+" known_issues/*.md \
+  | grep -oE '#[0-9]+' | sort -u \
+  | xargs -I{} gh issue view {} --json state,number,title --jq '[.number,.state,.title]'
+```
+
+Move resolved docs to `known_issues/resolved/`:
+
+```bash
+git mv known_issues/<file>.md known_issues/resolved/
+```
+
+Include the archive in the same PR that closes the underlying issue, or in a
+dedicated `chore(docs): archive resolved known_issues` commit.
+
 ## Security
 
 ### Reporting Vulnerabilities
