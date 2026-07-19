@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,19 +169,25 @@ func TestGetAccountAliasConcurrency(t *testing.T) {
 
 	cache := NewAccountAliasCacheWithClient(mockOrg)
 
-	// Test concurrent access to ensure proper locking
-	done := make(chan bool, 10)
-	for i := 0; i < 10; i++ {
+	// Test concurrent access to ensure proper locking. Worker goroutines must
+	// not call assert/require directly; funnel results back and assert on the
+	// test goroutine after wg.Wait().
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+	results := make(chan string, numGoroutines)
+	for i := 0; i < numGoroutines; i++ {
 		go func() {
-			result := cache.GetAccountAlias(ctx, "123456789012")
-			assert.Equal(t, "Test Account", result)
-			done <- true
+			defer wg.Done()
+			results <- cache.GetAccountAlias(ctx, "123456789012")
 		}()
 	}
 
-	// Wait for all goroutines to complete
-	for i := 0; i < 10; i++ {
-		<-done
+	// Wait for all goroutines to complete, then assert on the test goroutine.
+	wg.Wait()
+	close(results)
+	for result := range results {
+		assert.Equal(t, "Test Account", result)
 	}
 
 	// Mock should only be called once due to double-checked locking in GetAccountAlias
