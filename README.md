@@ -134,7 +134,7 @@ go install github.com/LeanerCloud/CUDly/cmd@latest
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-s, --services` | Comma-separated service list (rds,elasticache,ec2,opensearch,redshift,memorydb,savingsplans) | rds |
+| `-s, --services` | Comma-separated service list. Per-RI services: `rds`, `elasticache`, `ec2`, `opensearch`, `redshift`, `memorydb`. Per-plan-type Savings Plans: `savings-plans-compute`, `savings-plans-ec2instance`, `savings-plans-sagemaker`, `savings-plans-database`. Fan-out aliases: `savingsplans`, `savings-plans`, and `sp` expand to all four SP plan types. | rds |
 | `--all-services` | Process all supported services | false |
 
 ### Purchase Configuration
@@ -161,28 +161,28 @@ go install github.com/LeanerCloud/CUDly/cmd@latest
 
 ### Execution Control
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--purchase` | Execute actual purchases (dry-run by default) | false |
-| `--yes` | Skip confirmation prompts | false |
-| `-i, --input-csv` | Input CSV file with recommendations | - |
-| `-o, --output` | Output CSV file path | auto-generated |
+| Flag              | Description                                   | Default        |
+| ----------------- | --------------------------------------------- | -------------- |
+| `--purchase`      | Execute actual purchases (dry-run by default) | false          |
+| `--yes`           | Skip confirmation prompts                     | false          |
+| `-i, --input-csv` | Input CSV file with recommendations           | -              |
+| `-o, --output`    | Output CSV file path                          | auto-generated |
 
 ### Filtering
 
-| Flag | Description |
-|------|-------------|
-| `--include-regions` | Only include these regions |
-| `--exclude-regions` | Exclude these regions |
-| `--include-instance-types` | Only include these instance types |
-| `--exclude-instance-types` | Exclude these instance types |
-| `--include-engines` | Only include these database engines |
-| `--exclude-engines` | Exclude these database engines |
-| `--include-accounts` | Only include these account names |
-| `--exclude-accounts` | Exclude these account names |
-| `--include-extended-support` | Include instances on extended support engine versions (see below) |
-| `--include-sp-types` | Only include these Savings Plan types (Compute, EC2Instance, SageMaker, Database) |
-| `--exclude-sp-types` | Exclude these Savings Plan types |
+| Flag                         | Description                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------- |
+| `--include-regions`          | Only include these regions                                                        |
+| `--exclude-regions`          | Exclude these regions                                                             |
+| `--include-instance-types`   | Only include these instance types                                                 |
+| `--exclude-instance-types`   | Exclude these instance types                                                      |
+| `--include-engines`          | Only include these database engines                                               |
+| `--exclude-engines`          | Exclude these database engines                                                    |
+| `--include-accounts`         | Only include these account names                                                  |
+| `--exclude-accounts`         | Exclude these account names                                                       |
+| `--include-extended-support` | Include instances on extended support engine versions (see below)                 |
+| `--include-sp-types`         | Only include these Savings Plan types (Compute, EC2Instance, SageMaker, Database) |
+| `--exclude-sp-types`         | Exclude these Savings Plan types                                                  |
 
 ### Extended Support Filtering
 
@@ -210,9 +210,9 @@ For example, if you purchase 5 db.r6g.large RIs and run CUDly again within 24 ho
 
 ### Authentication
 
-| Flag | Description |
-|------|-------------|
-| `--profile` | AWS profile to use |
+| Flag                   | Description                              |
+| ---------------------- | ---------------------------------------- |
+| `--profile`            | AWS profile to use                       |
 | `--validation-profile` | AWS profile for instance type validation |
 
 ## Usage Examples
@@ -283,28 +283,43 @@ Only process specific regions with instance limits:
 ### Example 6: Database Savings Plans Only
 
 ```bash
-# Get only Database Savings Plans recommendations
-./cudly --services savingsplans \
-  --include-sp-types Database \
+# Get only Database Savings Plans recommendations using the per-plan-type slug
+./cudly --services savings-plans-database \
   --term 1 \
   --coverage 80
 ```
 
-### Example 7: Exclude SageMaker Savings Plans
+### Example 7: Compute + EC2 Instance Savings Plans
 
 ```bash
-# Get all Savings Plans except SageMaker
-./cudly --services savingsplans \
-  --exclude-sp-types SageMaker \
-  --term 3
+# Pick exactly the SP plan-types you want by listing per-plan-type slugs
+./cudly --services savings-plans-compute,savings-plans-ec2instance \
+  --term 3 \
+  --coverage 80
 ```
+
+### Example 8: All Savings Plans via Fan-out Alias
+
+```bash
+# `savingsplans` (and `savings-plans`, `sp`) is shorthand that fans out to every SP
+# plan type -- equivalent to listing all four per-plan-type slugs.
+./cudly --services savingsplans \
+  --term 3 \
+  --coverage 80
+```
+
+> **Per-plan-type vs alias**: prefer the explicit per-plan-type slugs
+> (`savings-plans-compute`, `savings-plans-ec2instance`,
+> `savings-plans-sagemaker`, `savings-plans-database`) when you want
+> precise scope. Use the `savingsplans` / `savings-plans` / `sp` alias only when you
+> intentionally want all four SP plan types together.
 
 ## Coverage Percentage
 
 The coverage percentage controls what portion of recommendations to act on:
 
 | Coverage | Description | Use Case |
-|----------|-------------|----------|
+| -------- | ----------- | -------- |
 | 100% | All recommended instances | Maximum savings, stable workloads |
 | 75% | Three-quarters of recommendations | Balanced approach |
 | 50% | Half of recommendations | Conservative adoption |
@@ -683,7 +698,7 @@ go test ./providers/aws/...
 ### Project Structure
 
 | Directory | Purpose |
-|-----------|---------|
+| --------- | ------- |
 | `cmd/` | CLI implementation, flag parsing, orchestration |
 | `pkg/common/` | Cloud-agnostic types (Provider, Service, Commitment) |
 | `pkg/provider/` | Provider interface, registry, factory |
