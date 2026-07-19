@@ -86,6 +86,143 @@ Do this in the same PR that closes the issue. A full sweep of the directory
 should happen at the start of each sprint. Full convention and entry format
 are in `CONTRIBUTING.md` under "Known Issues Sweep".
 
+## Post-push CI watcher (MANDATORY — even for one-line fix commits)
+
+After **every** `git push` that publishes new commits to a PR branch on
+this repo (including follow-up CodeRabbit-nitpick fixes), launch a
+background watcher per workflow run **before** ending the turn. This is
+the project-level reinforcement of the global rule in
+`~/.claude/git-workflow.md` §Post-push CI watcher — CUDly's pre-commit
+job alone takes 9–15 min and is silently broken by routine changes
+(missing CI tools, pre-existing markdownlint debt, git-secrets
+allowlist drift), so leaving a push unwatched routinely lets CI
+failures sit overnight.
+
+Mechanics:
+
+1. After `git push`, list the runs the push triggered:
+
+   ```bash
+   gh run list --repo LeanerCloud/CUDly --commit "$(git rev-parse HEAD)" \
+     --limit 10 --json databaseId,workflowName,status
+   ```
+
+2. For each run still in `queued`/`in_progress`, launch one background
+   watcher script via `Bash` with `run_in_background: true` (do NOT use
+   foreground polling — the main session must stay unblocked). The
+   minimum viable watcher polls `gh run view <ID> --json status,conclusion`
+   every 30s and on completion either reports success or dumps the failed
+   step digest. A reusable template lives at
+   `.claude/scripts/watch-ci-run.sh` if present, or write a one-shot to
+   `/tmp/claude/watch-<sha>-<workflow>.sh`.
+
+3. If a watcher reports failure, the same session investigates and
+   pushes a fix on the same branch (which fires a fresh watcher round).
+   Decisions that need a human go to PR comments; everything else is
+   autonomous per the global rule.
+
+Forgetting this rule has been a recurring failure mode in this
+project. Before declaring a "pushed and done" turn complete, confirm
+at least one `ci-watch-*` background task is armed.
+
+## CodeRabbit loop — iterate to silence (MANDATORY)
+
+CodeRabbit reviews this repo on every push to a PR branch. The full
+rules live in `~/.claude/git-workflow.md` §"Post-PR review loop"
+(§§3, 3a) — read them. The minimum-viable loop for this project:
+
+1. After every push, ping `@coderabbitai review` on the PR (CR doesn't
+   always re-review automatically; the explicit ping makes it
+   deterministic).
+2. Wait for the review (60–120s polling, soft-handle 429s).
+3. Triage every Actionable / Outside-diff / Nitpick finding into:
+   actionable-fix-now, dismiss-with-justification-on-thread, or
+   genuine-nitpick-batch-into-one-fix-commit.
+4. Push the fix(es), comment on the PR summarising what was addressed
+   vs. dismissed (and why), end the comment with a fresh
+   `@coderabbitai review` ping.
+5. **Repeat until CR's most recent review has zero Actionable items
+   AND every Nitpick is either fixed or has a justification reply.**
+   "I fixed pass 1" is not loop-exit. CUDly PRs commonly run 3–6 CR
+   passes before settling.
+6. If a fix push triggers conflicts (`mergeStateStatus: DIRTY`), resolve
+   them per `~/.claude/git-workflow.md` §3a — `git rebase
+   origin/<base>`, atomic conflict resolution, `git push
+   --force-with-lease`, post a rebase note on the PR, then continue
+   the CR loop.
+
+Forgetting this rule leaves CR threads silently unresolved and pushes
+the triage burden onto the human reviewer.
+
+**When delegating PR work to a subagent**: the prompt MUST include the
+full CR loop, not stop at the first `@coderabbitai review` ping. A fork
+that pushes the PR, pings CR, then exits leaves the CR threads
+unresolved — same failure mode as forgetting the post-push CI watcher.
+The subagent's exit criteria must be: "CR's most recent review has zero
+Actionable items AND every Nitpick is either fixed or has a
+justification reply on the thread", not "PR opened and CR pinged". When
+in doubt, copy the iteration loop above (steps 2–6) into the fork
+prompt verbatim.
+
+## PR labeling — mirror closing-issue labels (MANDATORY)
+
+Every PR opened in this repo must carry the **same** triage labels as
+the issue it closes — `priority/*`, `severity/*`, `urgency/*`,
+`impact/*`, `effort/*`, `type/*`, plus `triaged` if the issue carries
+it. Skipping this leaves PRs invisible to the same priority queries
+that surface the issues, so an unlabeled PR is effectively
+unreviewable in priority order.
+
+Mechanics — fold into the **same `gh pr create` round**, before pinging
+CodeRabbit:
+
+```bash
+# Right after `gh pr create ...` returns the PR URL:
+# Derive PR_NUM from the current branch context (avoids brittle hand-copying).
+PR_NUM=$(gh pr view "$(git rev-parse --abbrev-ref HEAD)" --repo LeanerCloud/CUDly --json number --jq '.number')
+ISSUE_NUM=<the issue this PR closes>
+
+LABELS=$(gh issue view "$ISSUE_NUM" --repo LeanerCloud/CUDly --json labels \
+  --jq '[.labels[].name | select(test("^(priority|severity|urgency|impact|effort|type)/")) ]
+        + (if [.labels[].name] | any(. == "triaged") then ["triaged"] else [] end)
+        | join(",")')
+
+# Guard against empty $LABELS — gh pr edit --add-label "" fails, which would
+# silently break this MANDATORY flow. If the closing issue has no triage
+# labels in the selected classes, surface the gap deterministically instead.
+if [ -n "$LABELS" ]; then
+  gh pr edit "$PR_NUM" --repo LeanerCloud/CUDly --add-label "$LABELS"
+else
+  echo "WARN: issue #$ISSUE_NUM has no priority/severity/urgency/impact/effort/type labels"
+  echo "      Triage the issue first, then re-run the label-mirror step."
+  echo "      Surface this gap in the PR body or as a comment on issue #$ISSUE_NUM."
+fi
+
+# Verify
+gh pr view "$PR_NUM" --repo LeanerCloud/CUDly --json labels \
+  --jq '[.labels[].name] | sort | join(",")'
+```
+
+If the closing issue lacks the `triaged` label, do NOT apply
+`triaged` to the PR — that would lie. Surface the gap in the PR body
+(or as a comment on the issue) so the human can triage.
+
+If a label doesn't yet exist in the repo (rare — the label set is
+populated from the existing issue queue), `gh label create` it with
+the same color/description as a sibling label BEFORE applying.
+
+For PRs that close more than one issue (e.g., a PR that closes
+`#A` and `#B`): take the **highest** `priority/*` and `severity/*`
+across the issues; `union` the rest (`type/*`, `effort/*`, `impact/*`,
+etc.). The PR represents the work for both, so it should be
+discoverable under either filter.
+
+Forgetting this rule has the same shape as forgetting the post-push
+CI watcher: it silently breaks priority-ordered review and triage.
+Before declaring a "PR opened and done" turn complete, confirm the
+label set on the PR matches the closing issue's set (or the merged
+set for multi-close PRs).
+
 ## Security Rules
 
 - NEVER hardcode API keys, secrets, or credentials in source files
