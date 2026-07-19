@@ -822,8 +822,8 @@ func TestApplyFilters_RegionFiltering(t *testing.T) {
 		{
 			name: "Savings Plans bypass region filter",
 			recs: []common.Recommendation{
-				{Region: "us-east-1", ResourceType: "ComputeSP", Count: 1, Service: common.ServiceSavingsPlans},
-				{Region: "us-west-2", ResourceType: "ComputeSP", Count: 2, Service: common.ServiceSavingsPlans},
+				{Region: "us-east-1", ResourceType: "ComputeSP", Count: 1, Service: common.ServiceSavingsPlansAll},
+				{Region: "us-west-2", ResourceType: "ComputeSP", Count: 2, Service: common.ServiceSavingsPlansAll},
 			},
 			includeRegions: []string{},
 			excludeRegions: []string{},

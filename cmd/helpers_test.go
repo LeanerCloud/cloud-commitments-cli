@@ -315,7 +315,7 @@ func TestApplyCoverage(t *testing.T) {
 			name: "Savings Plans - reduces hourly commitment",
 			recs: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					Count:            1,
 					EstimatedSavings: 100,
 					Details: &common.SavingsPlanDetails{

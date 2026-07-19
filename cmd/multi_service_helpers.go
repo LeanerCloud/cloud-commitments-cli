@@ -58,7 +58,7 @@ func getServiceDisplayName(service common.ServiceType) string {
 // one-line change.
 func savingsPlanDisplayName(service common.ServiceType) (string, bool) {
 	labels := map[common.ServiceType]string{
-		common.ServiceSavingsPlans:            "Savings Plans",
+		common.ServiceSavingsPlansAll:         "Savings Plans",
 		common.ServiceSavingsPlansCompute:     "Compute Savings Plans",
 		common.ServiceSavingsPlansEC2Instance: "EC2 Instance Savings Plans",
 		common.ServiceSavingsPlansSageMaker:   "SageMaker Savings Plans",

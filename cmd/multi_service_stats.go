@@ -114,7 +114,7 @@ func separateAndAggregateStats(serviceStats map[common.ServiceType]ServiceProces
 	for service, stats := range serviceStats {
 		if common.IsSavingsPlan(service) {
 			if spStats.Service == "" {
-				spStats.Service = common.ServiceSavingsPlans
+				spStats.Service = common.ServiceSavingsPlansAll
 			}
 			if stats.RegionsProcessed > spStats.RegionsProcessed {
 				spStats.RegionsProcessed = stats.RegionsProcessed

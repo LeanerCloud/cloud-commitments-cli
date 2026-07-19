@@ -273,7 +273,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 			name: "Prints Compute Savings Plans",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 500.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType:         "Compute",
@@ -282,7 +282,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				},
 			},
 			stats: ServiceProcessingStats{
-				Service:                 common.ServiceSavingsPlans,
+				Service:                 common.ServiceSavingsPlansAll,
 				RecommendationsSelected: 1,
 				TotalEstimatedSavings:   500.0,
 			},
@@ -296,7 +296,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 			name: "Prints EC2 Instance Savings Plans",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 300.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType:         "EC2Instance",
@@ -305,7 +305,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				},
 			},
 			stats: ServiceProcessingStats{
-				Service:                 common.ServiceSavingsPlans,
+				Service:                 common.ServiceSavingsPlansAll,
 				RecommendationsSelected: 1,
 				TotalEstimatedSavings:   300.0,
 			},
@@ -318,7 +318,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 			name: "Prints Database Savings Plans",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 400.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType:         "Database",
@@ -327,7 +327,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				},
 			},
 			stats: ServiceProcessingStats{
-				Service:                 common.ServiceSavingsPlans,
+				Service:                 common.ServiceSavingsPlansAll,
 				RecommendationsSelected: 1,
 				TotalEstimatedSavings:   400.0,
 			},
@@ -340,7 +340,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 			name: "Prints SageMaker Savings Plans",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 250.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType:         "SageMaker",
@@ -349,7 +349,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				},
 			},
 			stats: ServiceProcessingStats{
-				Service:                 common.ServiceSavingsPlans,
+				Service:                 common.ServiceSavingsPlansAll,
 				RecommendationsSelected: 1,
 				TotalEstimatedSavings:   250.0,
 			},
@@ -362,7 +362,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 			name: "Prints multiple SP types with recommendations",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 500.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType:         "Compute",
@@ -370,7 +370,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 					},
 				},
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 600.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType:         "EC2Instance",
@@ -379,7 +379,7 @@ func TestPrintSavingsPlansSection(t *testing.T) {
 				},
 			},
 			stats: ServiceProcessingStats{
-				Service:                 common.ServiceSavingsPlans,
+				Service:                 common.ServiceSavingsPlansAll,
 				RecommendationsSelected: 2,
 				TotalEstimatedSavings:   1100.0,
 			},
@@ -416,7 +416,7 @@ func TestPrintComparisonSection(t *testing.T) {
 			name: "Comparison with EC2 RIs and EC2 Instance SP",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 600.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType: "EC2Instance",
@@ -440,7 +440,7 @@ func TestPrintComparisonSection(t *testing.T) {
 			name: "Comparison with Database RIs and Database SP",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 800.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType: "Database",
@@ -466,14 +466,14 @@ func TestPrintComparisonSection(t *testing.T) {
 			name: "Compute SP better than EC2 Instance SP",
 			recommendations: []common.Recommendation{
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 500.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType: "EC2Instance",
 					},
 				},
 				{
-					Service:          common.ServiceSavingsPlans,
+					Service:          common.ServiceSavingsPlansAll,
 					EstimatedSavings: 700.0,
 					Details: &common.SavingsPlanDetails{
 						PlanType: "Compute",

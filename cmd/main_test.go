@@ -241,12 +241,12 @@ func TestCreateServiceClient(t *testing.T) {
 			expectNil: false,
 		},
 		{
-			// Legacy umbrella slug is no longer dispatched to a client — the
+			// Umbrella sentinel is no longer dispatched to a client — the
 			// per-plan-type slugs above carry the actual work. Keep the case
 			// to lock the contract: createServiceClient returns nil for the
 			// umbrella so the caller knows to fan out.
-			name:      "Savings Plans umbrella service (legacy, returns nil)",
-			service:   common.ServiceSavingsPlans,
+			name:      "Savings Plans umbrella sentinel (returns nil)",
+			service:   common.ServiceSavingsPlansAll,
 			expectNil: true,
 		},
 		{
