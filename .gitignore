@@ -31,9 +31,10 @@ cmd.test
 # Log files
 *.log
 
-# Go workspace files
-go.work
-go.work.sum
+# Go workspace files -- go.work is committed (canonical module list).
+# go.work.local is gitignored for per-developer worktree additions.
+go.work.local
+go.work.local.sum
 
 # Dependency directories
 vendor/

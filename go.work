@@ -1,0 +1,10 @@
+go 1.26.5
+
+use (
+	.
+	./pkg
+	./providers/aws
+	./providers/azure
+	./providers/gcp
+	./tests/e2e
+)
