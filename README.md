@@ -311,6 +311,66 @@ The coverage percentage controls what portion of recommendations to act on:
 | 25% | Quarter of recommendations | Testing/validation |
 | 0% | Skip service entirely | Exclude from processing |
 
+## Per-Account Service Overrides
+
+Per-account service overrides let you tweak the global Settings → Purchasing
+defaults (term, payment, coverage) on a per-account, per-service basis.
+
+### When to use them
+
+Use overrides when an account's purchasing policy differs from the rest of
+your fleet:
+
+- **Dev/staging accounts**: prefer 1-year, no-upfront for RDS to keep
+  flexibility cheap, while production uses the global 3-year all-upfront.
+- **Workload-shape outliers**: an account that runs a steady ElastiCache
+  cluster can override to 3-year all-upfront for ElastiCache only, while
+  the same account inherits the global default for everything else.
+- **Pilot rollouts**: enable a new SP plan-type on one account first,
+  leave it disabled globally, then promote when proven.
+
+If every account should get the same change, edit the **global** Settings ->
+Purchasing card instead; that propagates without per-account work.
+
+### How to create an override (web UI)
+
+1. Open the dashboard → **Settings → Accounts**.
+2. Find the account row → click the row to expand it → click
+   **Service overrides**.
+3. The override modal opens. Pick the (provider, service) pair you want
+   to override and fill in any of `term`, `payment`, `coverage`,
+   `enabled`. Fields you leave blank inherit the global default (see
+   "What 'Inherit' means" below).
+4. Click **Save**. The override row appears under the account; the
+   recommendation engine reads it on the next refresh.
+
+> **All providers supported**: the override modal lists services for
+> the account's provider (AWS, Azure, GCP). The UI and the backend
+> both accept overrides for any provider.
+
+### How to edit an existing override
+
+- All override rows support **inline edit** of Term, Payment, Coverage, and
+  Enabled directly on the row. Each field persists immediately on change.
+- **Delete** removes the override entirely; the account falls back to
+  the global default for that (provider, service) pair.
+
+### What "Inherit" means
+
+A blank field on an override is **not stored** as a sentinel value. The
+PUT request omits the field, the row stays sparse, and the recommendation
+engine reads the global default at evaluation time. So if you set the
+global default from `3yr no-upfront` to `1yr no-upfront`, every override
+that left `term` blank starts producing 1-year recommendations
+automatically. Overrides that explicitly set `term: 3yr` keep that.
+
+### API parity
+
+The override modal targets the same endpoint as scripted setups:
+`PUT /api/accounts/{id}/service-overrides/{provider}/{service}`. Existing
+automation continues to work without change; the UI and the API write to
+the same `account_service_overrides` row.
+
 ## Safety Features
 
 CUDly includes multiple safety mechanisms to prevent unintended purchases:
