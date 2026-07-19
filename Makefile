@@ -2,13 +2,22 @@
         test-coverage full-test security-scan terraform-validate docker-build \
         fmt vet lint complexity complexity-report security-scan-go security-scan-docker \
         security-scan-terraform terraform-fmt terraform-fmt-check iac-arm docker-test pre-commit \
-        setup-git-secrets security-scan-snyk security-scan-all cost-estimate docker-compose-test \
+        setup-git-secrets security-scan-snyk security-scan-all ci docker-compose-test \
         install-dev-tools
 
 # Variables
 VERSION?=dev
 BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 GIT_SHA?=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+
+# Dev tool versions - keep in sync with the CI pins in
+# .github/workflows/ci.yml, pre-commit.yml and database-migration.yml
+GOLANGCI_LINT_VERSION?=v2.10.1
+GOSEC_VERSION?=v2.22.4
+GOCYCLO_VERSION?=v0.6.0
+MIGRATE_VERSION?=v4.19.1
+# staticcheck has no CI pin; it is used by scripts/security-scan.sh
+STATICCHECK_VERSION?=v0.7.0
 LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitSHA=$(GIT_SHA)"
 
 # Default target
@@ -32,7 +41,6 @@ help: ## Display available targets
 	@echo "  security-scan-all  - Run all security scanners including Snyk"
 	@echo "  setup-git-secrets  - Set up git-secrets for preventing credential leaks"
 	@echo "  terraform-validate - Validate Terraform configurations"
-	@echo "  cost-estimate      - Estimate infrastructure costs with Infracost"
 	@echo "  docker-build       - Build Docker image"
 	@echo "  docker-compose-test - Run E2E tests with docker-compose"
 	@echo "  ci                 - Run CI pipeline locally"
@@ -94,7 +102,7 @@ lint:
 	@if command -v golangci-lint > /dev/null; then \
 		golangci-lint run --timeout=5m; \
 	else \
-		echo "golangci-lint not installed. Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"; \
+		echo "golangci-lint not installed. Install: make install-dev-tools"; \
 	fi
 
 # Go vet
@@ -117,7 +125,7 @@ complexity:
 			echo "✅ All functions have acceptable cyclomatic complexity (≤10)"; \
 		fi \
 	else \
-		echo "gocyclo not installed. Install: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest"; \
+		echo "gocyclo not installed. Install: make install-dev-tools"; \
 		exit 1; \
 	fi
 
@@ -129,7 +137,7 @@ complexity-report:
 		echo ""; \
 		echo "📊 Top 20 most complex functions saved to: complexity-report.txt"; \
 	else \
-		echo "gocyclo not installed. Install: go install github.com/fzipp/gocyclo/cmd/gocyclo@latest"; \
+		echo "gocyclo not installed. Install: make install-dev-tools"; \
 	fi
 
 # Security scanning
@@ -141,7 +149,7 @@ security-scan-go:
 		gosec -fmt=json -out=gosec-report.json -exclude=G101,G104,G115,G204,G301,G304,G402,G505 ./...; \
 		echo "✓ Go security scan complete: gosec-report.json"; \
 	else \
-		echo "gosec not installed. Install: go install github.com/securego/gosec/v2/cmd/gosec@latest"; \
+		echo "gosec not installed. Install: make install-dev-tools"; \
 	fi
 
 security-scan-docker:
@@ -221,11 +229,6 @@ security-scan-snyk:
 security-scan-all: security-scan security-scan-snyk
 	@echo "✓ All security scans complete"
 
-# Cost estimation with Infracost
-cost-estimate:
-	@echo "Estimating infrastructure costs..."
-	@bash scripts/cost-estimate.sh
-
 # Docker Compose E2E tests
 docker-compose-test:
 	@echo "Running E2E tests with docker-compose..."
@@ -235,22 +238,21 @@ docker-compose-test:
 # Install development dependencies
 install-dev-tools:
 	@echo "Installing development tools..."
-	@echo "Installing golangci-lint..."
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	@echo "Installing gosec..."
-	@go install github.com/securego/gosec/v2/cmd/gosec@latest
-	@echo "Installing staticcheck..."
-	@go install honnef.co/go/tools/cmd/staticcheck@latest
-	@echo "Installing gocyclo..."
-	@go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
-	@echo "Installing golang-migrate..."
-	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@echo "Installing gosec $(GOSEC_VERSION)..."
+	@go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	@echo "Installing staticcheck $(STATICCHECK_VERSION)..."
+	@go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	@echo "Installing gocyclo $(GOCYCLO_VERSION)..."
+	@go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
+	@echo "Installing golang-migrate $(MIGRATE_VERSION)..."
+	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@$(MIGRATE_VERSION)
 	@echo "✓ Development tools installed"
 	@echo ""
 	@echo "Additional tools to install manually:"
 	@echo "  - trivy: https://aquasecurity.github.io/trivy/"
 	@echo "  - tfsec: https://aquasecurity.github.io/tfsec/"
-	@echo "  - infracost: https://www.infracost.io/docs/"
 	@echo "  - git-secrets: https://github.com/awslabs/git-secrets"
 	@echo "  - snyk: npm install -g snyk"
 	@echo "  - pre-commit: pip install pre-commit"
