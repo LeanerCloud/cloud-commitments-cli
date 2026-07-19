@@ -29,17 +29,6 @@ repos:
         name: Terraform format
       - id: terraform_validate
         name: Terraform validate
-        # Excluded: two orphan modules (not instantiated by any
-        # environment) whose resource bodies use `dynamic` blocks
-        # around scalar attributes — invalid HCL in any azurerm
-        # version. They were silently broken until terraform_validate
-        # started running in CI. Tracked separately; remove the
-        # exclusion as part of that cleanup.
-        exclude: |
-          (?x)^(
-            terraform/modules/compute/azure/cleanup-function/|
-            terraform/modules/registry/azure/
-          )
       - id: terraform_tflint
         name: Terraform lint
         args:
