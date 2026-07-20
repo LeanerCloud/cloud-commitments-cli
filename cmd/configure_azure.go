@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
-	"syscall"
 
 	"time"
 
@@ -273,7 +272,10 @@ func promptForAzureCredentialFields(reader *bufio.Reader, creds *AzureCredential
 
 	if creds.ClientSecret == "" {
 		fmt.Print("Client Secret (password): ")
-		secret, err := term.ReadPassword(syscall.Stdin)
+		// int(os.Stdin.Fd()) is portable: syscall.Stdin is an int on Unix but a
+		// Handle on Windows, so passing it to term.ReadPassword (which takes an
+		// int) breaks GOOS=windows builds.
+		secret, err := term.ReadPassword(int(os.Stdin.Fd())) // #nosec G115 -- OS file descriptors fit in int on every supported platform
 		if err != nil {
 			return fmt.Errorf("failed to read secret: %w", err)
 		}
