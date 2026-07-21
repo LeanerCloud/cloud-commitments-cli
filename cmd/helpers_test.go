@@ -383,6 +383,21 @@ func TestApplyCoverage_RICostScaling(t *testing.T) {
 	assert.Equal(t, 60.0, monthly)
 }
 
+func TestApplySizing_LegacyCoverageRecordsCountsFlooredToZero(t *testing.T) {
+	recs := []common.Recommendation{
+		{Service: common.ServiceEC2, Count: 1},
+		{Service: common.ServiceRDS, Count: 10},
+	}
+	drops := common.NewDropSummary()
+
+	out := applySizing(recs, Config{}, 10, drops)
+
+	require.Len(t, out, 1)
+	assert.Equal(t, 1, out[0].Count)
+	assert.Equal(t, 1, drops.Total())
+	assert.Contains(t, drops.FormatOneLine(), common.DropTargetSizedToZero)
+}
+
 func TestAdjustRecommendationsForExisting(t *testing.T) {
 	ctx := context.Background()
 
@@ -1028,7 +1043,7 @@ func TestApplyTargetCoverage_RI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			recs := []common.Recommendation{tt.rec}
-			out := ApplyTargetCoverage(recs, tt.target)
+			out := ApplyTargetCoverage(recs, tt.target, nil)
 			if tt.wantDropped {
 				if len(out) != 0 {
 					t.Fatalf("expected drop; got %d recs", len(out))
@@ -1079,7 +1094,7 @@ func TestApplyTargetCoverage_RI_CostScaling(t *testing.T) {
 	// n = floor(8 * 80/100) = 6. Ratio = 6/10 = 0.6 (cost scaling still
 	// uses rec.Count to convert AWS's quoted cost-for-rec.Count into
 	// cost-for-nTarget).
-	out := ApplyTargetCoverage([]common.Recommendation{rec}, 80)
+	out := ApplyTargetCoverage([]common.Recommendation{rec}, 80, nil)
 	require.Len(t, out, 1)
 	assert.Equal(t, 6, out[0].Count)
 	assert.InDelta(t, 600.0, out[0].CommitmentCost, 0.001, "CommitmentCost scales by nTarget/rec.Count")
@@ -1095,7 +1110,7 @@ func TestApplyTargetCoverage_RI_CostScaling(t *testing.T) {
 		monthly := 50.0
 		recWithMonthly := rec
 		recWithMonthly.RecurringMonthlyCost = &monthly
-		out := ApplyTargetCoverage([]common.Recommendation{recWithMonthly}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{recWithMonthly}, 80, nil)
 		require.Len(t, out, 1)
 		require.NotNil(t, out[0].RecurringMonthlyCost, "scaled pointer should be non-nil")
 		assert.InDelta(t, 30.0, *out[0].RecurringMonthlyCost, 0.001, "monthly cost scales by 6/10")
@@ -1107,7 +1122,7 @@ func TestApplyTargetCoverage_RI_CostScaling(t *testing.T) {
 		// AWS API didn't return RecurringStandardMonthlyCost (all-upfront,
 		// or field missing). The sized rec should also have nil so
 		// downstream renders "unknown" rather than zero.
-		out := ApplyTargetCoverage([]common.Recommendation{rec}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{rec}, 80, nil)
 		require.Len(t, out, 1)
 		assert.Nil(t, out[0].RecurringMonthlyCost, "nil input → nil output")
 	})
@@ -1198,7 +1213,7 @@ func TestApplyTargetCoverage_RI_ExistingCoverage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := ApplyTargetCoverage([]common.Recommendation{tt.rec}, tt.target)
+			out := ApplyTargetCoverage([]common.Recommendation{tt.rec}, tt.target, nil)
 			if tt.wantDropped {
 				assert.Len(t, out, 0, "expected drop")
 				return
@@ -1233,7 +1248,7 @@ func TestApplyTargetCoverage_SP(t *testing.T) {
 		// flag's intent is "leave 20% headroom", so the commitment shrinks
 		// to 80% of AWS rec. All cost-bearing fields scale by 0.8.
 		// Projected util = 95/0.80 = 118.75 clamped to 100.
-		out := ApplyTargetCoverage([]common.Recommendation{mkSP(95)}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{mkSP(95)}, 80, nil)
 		require.Len(t, out, 1)
 		assert.InDelta(t, 1.6, out[0].Details.(*common.SavingsPlanDetails).HourlyCommitment, 0.001)
 		assert.InDelta(t, 800.0, out[0].CommitmentCost, 0.001, "CommitmentCost scales by target/100")
@@ -1247,7 +1262,7 @@ func TestApplyTargetCoverage_SP(t *testing.T) {
 	t.Run("AWS below target — scale down by target (under-buy)", func(t *testing.T) {
 		// RecUtil=50, target=80. All cost-bearing fields shrink to 80%.
 		// Projected util = 50/0.80 = 62.5 (no clamp needed).
-		out := ApplyTargetCoverage([]common.Recommendation{mkSP(50)}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{mkSP(50)}, 80, nil)
 		require.Len(t, out, 1)
 		details := out[0].Details.(*common.SavingsPlanDetails)
 		assert.InDelta(t, 1.6, details.HourlyCommitment, 0.001)
@@ -1260,7 +1275,7 @@ func TestApplyTargetCoverage_SP(t *testing.T) {
 	})
 
 	t.Run("no signal → passed through unchanged", func(t *testing.T) {
-		out := ApplyTargetCoverage([]common.Recommendation{mkSP(0)}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{mkSP(0)}, 80, nil)
 		require.Len(t, out, 1)
 		// Original recommendation values intact.
 		assert.Equal(t, 2.0, out[0].Details.(*common.SavingsPlanDetails).HourlyCommitment)
@@ -1281,7 +1296,7 @@ func TestApplySizing(t *testing.T) {
 
 	t.Run("TargetCoverage > 0 → ApplyTargetCoverage", func(t *testing.T) {
 		cfg := Config{TargetCoverage: 80, Coverage: 100}
-		out := applySizing([]common.Recommendation{ri}, cfg, cfg.Coverage)
+		out := applySizing([]common.Recommendation{ri}, cfg, cfg.Coverage, nil)
 		require.Len(t, out, 1)
 		// avg=8, target=80%, existing=0%. gap=80.
 		// n = floor(8 * 80/100) = floor(6.4) = 6. ProjUtil = 8/6 = 133% → 100.
@@ -1291,7 +1306,7 @@ func TestApplySizing(t *testing.T) {
 
 	t.Run("TargetCoverage == 0 → ApplyCoverage", func(t *testing.T) {
 		cfg := Config{TargetCoverage: 0, Coverage: 50}
-		out := applySizing([]common.Recommendation{ri}, cfg, cfg.Coverage)
+		out := applySizing([]common.Recommendation{ri}, cfg, cfg.Coverage, nil)
 		require.Len(t, out, 1)
 		// ApplyCoverage(50) on count=10 → 5. ProjectedUtilization NOT set
 		// (zero) because we took the coverage branch.
@@ -1336,7 +1351,7 @@ func TestApplyTargetCoverage_RI_Target100(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out := ApplyTargetCoverage([]common.Recommendation{tt.rec}, 100)
+			out := ApplyTargetCoverage([]common.Recommendation{tt.rec}, 100, nil)
 			if tt.wantDropped {
 				assert.Len(t, out, 0, "expected drop at target=100 for avg=%.3f", tt.rec.AverageInstancesUsedPerHour)
 				return
@@ -1360,7 +1375,7 @@ func TestApplyTargetCoverage_SP_NoSignalGuards(t *testing.T) {
 			RecommendedUtilization: 50,
 			Details:                &common.SavingsPlanDetails{HourlyCommitment: 0},
 		}
-		out := ApplyTargetCoverage([]common.Recommendation{rec}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{rec}, 80, nil)
 		require.Len(t, out, 1, "$0 SP rec should still be in output (pass-through)")
 		// Pass-through — projection fields must NOT be set, savings unchanged.
 		assert.Equal(t, 0.0, out[0].ProjectedUtilization, "ProjectedUtilization must NOT be set for $0-commitment pass-through")
@@ -1381,9 +1396,61 @@ func TestApplyTargetCoverage_SP_NoSignalGuards(t *testing.T) {
 			RecommendedUtilization: 50,
 			Details:                common.ComputeDetails{Platform: "Linux/UNIX"}, // wrong type
 		}
-		out := ApplyTargetCoverage([]common.Recommendation{rec}, 80)
+		out := ApplyTargetCoverage([]common.Recommendation{rec}, 80, nil)
 		require.Len(t, out, 1)
 		assert.Equal(t, 0.0, out[0].ProjectedUtilization, "must NOT set projection when scaling failed")
 		assert.Equal(t, 1500.0, out[0].EstimatedSavings, "EstimatedSavings must remain unscaled when scaling failed")
 	})
+}
+
+// TestApplyTargetCoverage_DropTargetAlreadyMet verifies that when existing
+// coverage already meets or exceeds the target, the recommendation is
+// dropped and the drop is recorded in a non-nil DropSummary under the
+// DropTargetAlreadyMet category. If the drops.Add call for that branch
+// were removed, d.Total() would stay at 0 and the assertion below would fail.
+func TestApplyTargetCoverage_DropTargetAlreadyMet(t *testing.T) {
+	// ExistingCoveragePct=90 >= target=80: gapPct=80-90=-10 <= 0 -> drop.
+	rec := common.Recommendation{
+		Service:                     common.ServiceEC2,
+		Region:                      "us-east-1",
+		ResourceType:                "t3.medium",
+		Count:                       5,
+		CommitmentType:              common.CommitmentReservedInstance,
+		AverageInstancesUsedPerHour: 8.0,
+		ExistingCoveragePct:         90.0,
+	}
+
+	d := common.NewDropSummary()
+	out := ApplyTargetCoverage([]common.Recommendation{rec}, 80, d)
+
+	assert.Empty(t, out, "already-covered rec should be dropped")
+	assert.Equal(t, 1, d.Total(), "drop summary should record 1 drop")
+	assert.Contains(t, d.FormatOneLine(), common.DropTargetAlreadyMet,
+		"drop summary should name the target-already-met category")
+}
+
+// TestApplyTargetCoverage_DropTargetSizedToZero verifies that when the
+// floor(avg * gapPct / 100) formula produces 0, the recommendation is
+// dropped and the drop is recorded in a non-nil DropSummary under the
+// DropTargetSizedToZero category. If the drops.Add call for that branch
+// were removed, d.Total() would stay at 0 and the assertion below would fail.
+func TestApplyTargetCoverage_DropTargetSizedToZero(t *testing.T) {
+	// avg=0.4, target=80%, existing=0%: floor(0.4 * 80/100) = floor(0.32) = 0 -> drop.
+	rec := common.Recommendation{
+		Service:                     common.ServiceEC2,
+		Region:                      "us-east-1",
+		ResourceType:                "t3.micro",
+		Count:                       1,
+		CommitmentType:              common.CommitmentReservedInstance,
+		AverageInstancesUsedPerHour: 0.4,
+		ExistingCoveragePct:         0.0,
+	}
+
+	d := common.NewDropSummary()
+	out := ApplyTargetCoverage([]common.Recommendation{rec}, 80, d)
+
+	assert.Empty(t, out, "floor-to-zero rec should be dropped")
+	assert.Equal(t, 1, d.Total(), "drop summary should record 1 drop")
+	assert.Contains(t, d.FormatOneLine(), common.DropTargetSizedToZero,
+		"drop summary should name the target-sized-to-zero category")
 }

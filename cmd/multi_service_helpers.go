@@ -374,8 +374,8 @@ func processRegionRecommendations(
 	// Populate account names
 	populateRecommendationAccountNames(ctx, recs, accountCache)
 
-	// Apply filters
-	recs = applyRegionFilters(recs, engineData, region, cfg)
+	// Apply filters (drops not tracked on this legacy test-only path).
+	recs = applyRegionFilters(recs, engineData, region, cfg, nil)
 	if len(recs) == 0 {
 		AppLogger.Printf("  ℹ️  No recommendations after applying filters\n")
 		return result
@@ -384,8 +384,8 @@ func processRegionRecommendations(
 	// Apply coverage and overrides. This legacy path (test-only) doesn't
 	// fetch expiring commitments — expiry-aware sizing only runs via the
 	// main pipeline in fetchAndFilterRegionRecs, which has access to the
-	// regional service client at the right moment.
-	filteredRecs := applyCoverageAndOverrides(recs, cfg, coverageMap, nil)
+	// regional service client at the right moment. Drop tracking skipped (nil).
+	filteredRecs := applyCoverageAndOverrides(recs, cfg, coverageMap, nil, nil)
 
 	result.recommendations = filteredRecs
 
@@ -400,8 +400,8 @@ func processRegionRecommendations(
 		return result
 	}
 
-	// Check for duplicate RIs and apply instance limit
-	adjustedRecs := checkDuplicatesAndApplyLimit(ctx, filteredRecs, serviceClient, cfg)
+	// Check for duplicate RIs and apply instance limit. Drop tracking skipped (nil).
+	adjustedRecs := checkDuplicatesAndApplyLimit(ctx, filteredRecs, serviceClient, cfg, nil)
 
 	// Process purchases
 	regionResults := processPurchaseLoop(ctx, adjustedRecs, region, isDryRun, serviceClient, cfg)
@@ -462,9 +462,10 @@ func applyRegionFilters(
 	engineData engineVersionData,
 	region string,
 	cfg Config,
+	drops *common.DropSummary,
 ) []common.Recommendation {
 	originalCount := len(recs)
-	recs = applyFilters(recs, &cfg, engineData.instanceVersions, engineData.versionInfo, region)
+	recs = applyFilters(recs, &cfg, engineData.instanceVersions, engineData.versionInfo, region, drops)
 
 	if len(recs) < originalCount {
 		AppLogger.Printf("  🔍 After filters: %d recommendations (filtered out %d)\n", len(recs), originalCount-len(recs))
@@ -485,7 +486,10 @@ func applyRegionFilters(
 // ExistingCoveragePct further by the share of pool demand attributable to
 // RIs expiring within the window, so --target-coverage recommends
 // replacements before the cliff. Doesn't run if either input is empty.
-func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment) []common.Recommendation {
+//
+// drops accumulates per-reason drop counts for the end-of-run summary.
+// Pass nil to skip tracking.
+func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment, drops *common.DropSummary) []common.Recommendation {
 	recommendations.ApplyCoverageMapToRecommendations(recs, coverageMap)
 	if cfg.RebuyWindowDays > 0 && len(expiringCommitments) > 0 {
 		n := recommendations.AdjustExistingCoverageForExpiringCommitments(recs, expiringCommitments, cfg.RebuyWindowDays)
@@ -502,9 +506,13 @@ func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverag
 	var sizedRDS []common.Recommendation
 	rest := recs
 	if cfg.TargetCoverage > 0 {
-		sizedRDS, rest = recommendations.ApplyFamilyNUSizingRDS(recs, coverageMap, cfg.TargetCoverage)
+		var familyDrops recommendations.FamilyDropCounts
+		sizedRDS, rest, familyDrops = recommendations.ApplyFamilyNUSizingRDS(recs, coverageMap, cfg.TargetCoverage)
+		drops.Add(common.DropFamilyAlreadyAtTarget, familyDrops.AlreadyAtTarget)
+		drops.Add(common.DropFamilyNoNUSignal, familyDrops.NoNUSignal)
+		drops.Add(common.DropFamilySizedToZero, familyDrops.SizedToZero)
 	}
-	filteredRecs := applySizing(rest, cfg, cfg.Coverage)
+	filteredRecs := applySizing(rest, cfg, cfg.Coverage, drops)
 	filteredRecs = append(filteredRecs, sizedRDS...)
 	if cfg.TargetCoverage > 0 {
 		AppLogger.Printf("  🎯 Applying %.1f%% target-coverage: %d recommendations selected (%d via family-NU, %d via per-pool)\n",
@@ -522,15 +530,17 @@ func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverag
 }
 
 // checkDuplicatesAndApplyLimit checks for duplicate RIs and applies instance limits.
+// drops accumulates per-reason drop counts for the end-of-run summary; pass nil to skip.
 func checkDuplicatesAndApplyLimit(
 	ctx context.Context,
 	filteredRecs []common.Recommendation,
 	serviceClient provider.ServiceClient,
 	cfg Config,
+	drops *common.DropSummary,
 ) []common.Recommendation {
 	// Check for duplicate RIs to avoid double purchasing
 	duplicateChecker := NewDuplicateChecker(0)
-	adjustedRecs, _, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
+	adjustedRecs, dedupedOut, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
 	if err != nil {
 		AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v\n", err)
 		// Continue with original filteredRecs on error; adjustedRecs is not used in this branch.
@@ -541,6 +551,7 @@ func checkDuplicatesAndApplyLimit(
 		if originalInstances != adjustedInstances {
 			AppLogger.Printf("  🔍 Adjusted recommendations: %d instances → %d instances to avoid duplicate purchases\n", originalInstances, adjustedInstances)
 		}
+		drops.Add(common.DropDuplicateDedup, len(dedupedOut))
 		filteredRecs = adjustedRecs
 	}
 
@@ -559,7 +570,8 @@ func checkDuplicatesAndApplyLimit(
 // fetchAndFilterRegionRecs fetches, filters, applies coverage, and deduplicates
 // recommendations for a single service+region. No purchases are made.
 // coverageMap (when non-nil) feeds existing-pool coverage into the sizing
-// step for --target-coverage.
+// step for --target-coverage. drops accumulates per-reason drop counts for
+// the end-of-run summary; pass nil to skip tracking.
 func fetchAndFilterRegionRecs(
 	ctx context.Context,
 	awsCfg aws.Config,
@@ -571,6 +583,7 @@ func fetchAndFilterRegionRecs(
 	engineData engineVersionData,
 	cfg Config,
 	coverageMap recommendations.PoolCoverageMap,
+	drops *common.DropSummary,
 ) []common.Recommendation {
 	AppLogger.Printf("\n  📍 [%d/%d] Region: %s\n", regionIndex, totalRegions, region)
 
@@ -582,7 +595,7 @@ func fetchAndFilterRegionRecs(
 	AppLogger.Printf("  ✅ Found %d recommendations\n", len(recs))
 
 	populateRecommendationAccountNames(ctx, recs, accountCache)
-	recs = applyRegionFilters(recs, engineData, region, cfg)
+	recs = applyRegionFilters(recs, engineData, region, cfg, drops)
 	if len(recs) == 0 {
 		AppLogger.Printf("  ℹ️  No recommendations after applying filters\n")
 		return nil
@@ -608,11 +621,11 @@ func fetchAndFilterRegionRecs(
 		}
 	}
 
-	recs = applyCoverageAndOverrides(recs, cfg, coverageMap, expiringCommitments)
+	recs = applyCoverageAndOverrides(recs, cfg, coverageMap, expiringCommitments, drops)
 
 	// Deduplication: skip recs matching recently-purchased commitments.
 	if serviceClient != nil {
-		recs = checkDuplicatesAndApplyLimit(ctx, recs, serviceClient, cfg)
+		recs = checkDuplicatesAndApplyLimit(ctx, recs, serviceClient, cfg, drops)
 	}
 
 	return recs
@@ -621,7 +634,8 @@ func fetchAndFilterRegionRecs(
 // fetchAllRecs collects recommendations from all services and regions without
 // purchasing. coverageMap (when non-nil) populates Recommendation.ExistingCoveragePct
 // on each rec before sizing, so --target-coverage can subtract what's already
-// owned in the same pool.
+// owned in the same pool. The returned DropSummary accumulates per-reason
+// drop counts across every service and region for the end-of-run summary.
 func fetchAllRecs(
 	ctx context.Context,
 	awsCfg aws.Config,
@@ -631,8 +645,9 @@ func fetchAllRecs(
 	engineData engineVersionData,
 	cfg Config,
 	coverageMap recommendations.PoolCoverageMap,
-) []common.Recommendation {
+) ([]common.Recommendation, *common.DropSummary) {
 	all := make([]common.Recommendation, 0)
+	drops := common.NewDropSummary()
 	for _, service := range servicesToProcess {
 		AppLogger.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 		AppLogger.Printf("🔍 Fetching %s recommendations\n", getServiceDisplayName(service))
@@ -644,9 +659,9 @@ func fetchAllRecs(
 			continue
 		}
 		for i, region := range regions {
-			recs := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg, coverageMap)
+			recs := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg, coverageMap, drops)
 			all = append(all, recs...)
 		}
 	}
-	return all
+	return all, drops
 }

@@ -123,6 +123,12 @@ func CalculateTotalInstances(recs []common.Recommendation) int {
 // on-demand ratio) and stays unscaled. Pre-sizing values can still be
 // recovered: RecommendedCount holds AWS's pre-sized count for RIs.
 func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Recommendation {
+	return applyCoverage(recs, coverage, nil)
+}
+
+// applyCoverage applies legacy percentage sizing and optionally records
+// recommendations whose discrete RI count is reduced to zero.
+func applyCoverage(recs []common.Recommendation, coverage float64, drops *common.DropSummary) []common.Recommendation {
 	if coverage >= 100 {
 		return recs
 	}
@@ -170,6 +176,8 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 			adjusted = common.ScaleRecommendationCosts(adjusted, sizedRatio)
 			adjusted.Count = newCount
 			result = append(result, adjusted)
+		} else if drops != nil {
+			drops.Add(common.DropTargetSizedToZero, 1)
 		}
 	}
 	return result
@@ -241,7 +249,10 @@ func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Reco
 //
 // Recs of any other CommitmentType are passed through unmodified (warned
 // once per type per run).
-func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64) []common.Recommendation {
+// ApplyTargetCoverage applies the target coverage percentage to a slice of
+// recommendations. drops accumulates per-reason drop counts for the
+// end-of-run summary; pass nil to skip tracking.
+func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64, drops *common.DropSummary) []common.Recommendation {
 	if targetPct <= 0 || targetPct > 100 {
 		// Validation ensures we never get here in production, but be defensive
 		// so a buggy caller doesn't divide by zero.
@@ -253,14 +264,15 @@ func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64) []comm
 	var skipped int
 	unsupportedSeen := make(map[common.CommitmentType]bool)
 
-	for _rvc := range recs {
-		rec := recs[_rvc]
-		adjusted, kept, missingSignal := applyTargetCoverageOne(rec, targetPct, unsupportedSeen)
+	for i := range recs {
+		adjusted, kept, missingSignal, dropReason := applyTargetCoverageOne(recs[i], targetPct, unsupportedSeen)
 		if missingSignal {
 			skipped++
 		}
 		if kept {
 			result = append(result, adjusted)
+		} else if dropReason != "" {
+			drops.Add(dropReason, 1)
 		}
 	}
 
@@ -273,51 +285,53 @@ func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64) []comm
 }
 
 // applyTargetCoverageOne dispatches a single recommendation through the
-// appropriate branch. Returns (rec, kept, missingSignal):
+// appropriate branch. Returns (rec, kept, missingSignal, dropReason):
 //   - kept=true → caller appends `rec` (the adjusted or pass-through value).
 //   - kept=false → caller drops the rec (only the RI "target unreachable"
-//     branch returns this; an INFO log already fired).
+//     branches return this; an INFO log already fired).
 //   - missingSignal=true → counted toward the end-of-run skip summary.
+//   - dropReason is non-empty when kept=false and the drop has a named category.
 //
 // Split out of ApplyTargetCoverage to keep that function under gocyclo's
 // complexity threshold.
-func applyTargetCoverageOne(rec common.Recommendation, targetPct float64, unsupportedSeen map[common.CommitmentType]bool) (common.Recommendation, bool, bool) {
+func applyTargetCoverageOne(rec common.Recommendation, targetPct float64, unsupportedSeen map[common.CommitmentType]bool) (result common.Recommendation, kept, missingSignal bool, drop string) {
 	switch {
 	case common.IsSavingsPlan(rec.Service):
 		adjusted, ok := applyTargetCoverageSP(rec, targetPct)
 		if !ok {
 			// SP no-signal: pass through unchanged.
-			return rec, true, true
+			return rec, true, true, ""
 		}
-		return adjusted, true, false
+		return adjusted, true, false, ""
 	case rec.CommitmentType == common.CommitmentReservedInstance:
-		adjusted, ok := applyTargetCoverageRI(rec, targetPct)
+		adjusted, ok, dropReason := applyTargetCoverageRI(rec, targetPct)
 		if !ok {
 			// Distinguish "no signal" (pass through, count in summary) from
 			// "target unreachable" (drop with already-fired INFO log).
 			if rec.AverageInstancesUsedPerHour <= 0 {
-				return rec, true, true
+				return rec, true, true, ""
 			}
-			return rec, false, false
+			return rec, false, false, dropReason
 		}
-		return adjusted, true, false
+		return adjusted, true, false, ""
 	default:
 		if !unsupportedSeen[rec.CommitmentType] {
 			AppLogger.Printf("WARNING: --target-coverage not supported for CommitmentType=%q; passing recommendations through unchanged\n", rec.CommitmentType)
 			unsupportedSeen[rec.CommitmentType] = true
 		}
-		return rec, true, false
+		return rec, true, false, ""
 	}
 }
 
 // applyTargetCoverageRI is the RI branch of ApplyTargetCoverage. Returns
-// (adjusted, true) on success, (rec, false) when the rec should be passed
-// through unscaled (no signal) or dropped (target unreachable). Caller
-// distinguishes the two via rec.AverageInstancesUsedPerHour.
-func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common.Recommendation, bool) {
+// (adjusted, true, "") on success, (rec, false, dropReason) when the rec
+// should be passed through unscaled (no signal) or dropped (target
+// unreachable). Caller distinguishes no-signal from drop via
+// rec.AverageInstancesUsedPerHour and uses dropReason for the summary.
+func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (result common.Recommendation, ok bool, drop string) {
 	if rec.AverageInstancesUsedPerHour <= 0 {
 		// No signal — caller will pass through and count in the summary.
-		return rec, false
+		return rec, false, ""
 	}
 
 	avg := rec.AverageInstancesUsedPerHour
@@ -346,7 +360,7 @@ func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common
 		// pass through".
 		AppLogger.Printf("INFO: --target-coverage=%.1f%% already met by existing coverage %.1f%% for %s/%s/%s; dropped recommendation\n",
 			targetPct, rec.ExistingCoveragePct, rec.Service, rec.Region, rec.ResourceType)
-		return rec, false
+		return rec, false, common.DropTargetAlreadyMet
 	}
 	// Floor so we never over-shoot the target on integer-arithmetic edges.
 	// Strict-target semantics: 80% means "at most 80% coverage", not "at
@@ -366,7 +380,7 @@ func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common
 		// Returning (_, false) with avg > 0 signals "drop, don't pass through".
 		// applyTargetCoverageRI's caller branches on
 		// rec.AverageInstancesUsedPerHour to distinguish drop vs no-signal.
-		return rec, false
+		return rec, false, common.DropTargetSizedToZero
 	}
 
 	// Cost-bearing fields scale by the ratio of sized-to-original count, so the
@@ -402,7 +416,7 @@ func applyTargetCoverageRI(rec common.Recommendation, targetPct float64) (common
 	}
 	adjusted.ProjectedUtilization = projUtil
 	adjusted.ProjectedCoverage = projCov
-	return adjusted, true
+	return adjusted, true, ""
 }
 
 // applyTargetCoverageSP is the SP branch of ApplyTargetCoverage. Returns
@@ -463,11 +477,14 @@ func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common
 // (the main path passes cfg.Coverage; the CSV path passes csvModeCoverage,
 // which substitutes the default 80% with 100% so CSV-driven counts aren't
 // silently dropped).
-func applySizing(recs []common.Recommendation, cfg Config, coverage float64) []common.Recommendation {
+//
+// drops accumulates per-reason drop counts for the end-of-run summary.
+// Pass nil to skip tracking.
+func applySizing(recs []common.Recommendation, cfg Config, coverage float64, drops *common.DropSummary) []common.Recommendation {
 	if cfg.TargetCoverage > 0 {
-		return ApplyTargetCoverage(recs, cfg.TargetCoverage)
+		return ApplyTargetCoverage(recs, cfg.TargetCoverage, drops)
 	}
-	return ApplyCoverage(recs, coverage)
+	return applyCoverage(recs, coverage, drops)
 }
 
 // ApplyCountOverride overrides the count for all recommendations.
