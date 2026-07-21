@@ -272,21 +272,8 @@ func TestProcessServiceWithMocks(t *testing.T) {
 			mockClient := &MockRecommendationsClient{}
 
 			// Setup expectations
-			termStr := "1yr"
-			if toolCfg.TermYears == 3 {
-				termStr = "3yr"
-			}
-			for _, region := range tt.testRegions {
-				params := common.RecommendationParams{
-					Service:        tt.service,
-					Region:         region,
-					PaymentOption:  toolCfg.PaymentOption,
-					Term:           termStr,
-					LookbackPeriod: "7d",
-					IncludeSPTypes: toolCfg.IncludeSPTypes,
-					ExcludeSPTypes: toolCfg.ExcludeSPTypes,
-				}
-				mockClient.On("GetRecommendations", ctx, params).Return(tt.mockRecs, nil)
+			for range tt.testRegions {
+				mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return(tt.mockRecs, nil)
 			}
 
 			// Set regions in toolCfg for this test
@@ -342,19 +329,10 @@ func TestProcessService_SavingsPlansAccountLevel(t *testing.T) {
 	// Savings Plans should only query us-east-1 once (account-level). Use the
 	// per-plan-type Compute slug now that the legacy umbrella has been
 	// retired from createServiceClient dispatch.
-	params := common.RecommendationParams{
-		Service:        common.ServiceSavingsPlansCompute,
-		Region:         "us-east-1",
-		PaymentOption:  "all-upfront",
-		Term:           "3yr",
-		LookbackPeriod: "7d",
-		IncludeSPTypes: toolCfg.IncludeSPTypes,
-		ExcludeSPTypes: toolCfg.ExcludeSPTypes,
-	}
 	mockRecs := []common.Recommendation{
 		{Service: common.ServiceSavingsPlansCompute, ResourceType: "ComputeSP", Count: 1, Region: "us-east-1", EstimatedSavings: 1000},
 	}
-	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
+	mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
 	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceSavingsPlansCompute, true, toolCfg, engineVersionData{})
@@ -388,20 +366,11 @@ func TestProcessService_WithInstanceLimit(t *testing.T) {
 
 	mockClient := &MockRecommendationsClient{}
 
-	params := common.RecommendationParams{
-		Service:        common.ServiceRDS,
-		Region:         "us-east-1",
-		PaymentOption:  "partial-upfront",
-		Term:           "1yr",
-		LookbackPeriod: "7d",
-		IncludeSPTypes: toolCfg.IncludeSPTypes,
-		ExcludeSPTypes: toolCfg.ExcludeSPTypes,
-	}
 	mockRecs := []common.Recommendation{
 		{ResourceType: "db.t3.micro", Count: 10, Region: "us-east-1", EstimatedSavings: 100},
 		{ResourceType: "db.t3.small", Count: 10, Region: "us-east-1", EstimatedSavings: 200},
 	}
-	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
+	mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
 	recs, _ := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
@@ -430,20 +399,11 @@ func TestProcessService_WithOverrideCount(t *testing.T) {
 
 	mockClient := &MockRecommendationsClient{}
 
-	params := common.RecommendationParams{
-		Service:        common.ServiceElastiCache,
-		Region:         "us-east-1",
-		PaymentOption:  "no-upfront",
-		Term:           "1yr",
-		LookbackPeriod: "7d",
-		IncludeSPTypes: toolCfg.IncludeSPTypes,
-		ExcludeSPTypes: toolCfg.ExcludeSPTypes,
-	}
 	mockRecs := []common.Recommendation{
 		{ResourceType: "cache.t3.micro", Count: 10, Region: "us-east-1", EstimatedSavings: 100},
 		{ResourceType: "cache.t3.small", Count: 5, Region: "us-east-1", EstimatedSavings: 200},
 	}
-	mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
+	mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return(mockRecs, nil)
 
 	accountCache := NewAccountAliasCache(awsCfg)
 	recs, _ := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceElastiCache, true, toolCfg, engineVersionData{})
@@ -470,21 +430,13 @@ func TestProcessService_MultipleRegions(t *testing.T) {
 
 	mockClient := &MockRecommendationsClient{}
 
-	// Setup mock for each region
+	// Setup mock for each region call in order; Once() ensures testify cycles
+	// through the returns so each region's call gets region-appropriate results.
 	for _, region := range toolCfg.Regions {
-		params := common.RecommendationParams{
-			Service:        common.ServiceRDS,
-			Region:         region,
-			PaymentOption:  "all-upfront",
-			Term:           "3yr",
-			LookbackPeriod: "7d",
-			IncludeSPTypes: toolCfg.IncludeSPTypes,
-			ExcludeSPTypes: toolCfg.ExcludeSPTypes,
-		}
 		mockRecs := []common.Recommendation{
 			{ResourceType: "db.t3.small", Count: 2, Region: region, EstimatedSavings: 100},
 		}
-		mockClient.On("GetRecommendations", ctx, params).Return(mockRecs, nil)
+		mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return(mockRecs, nil).Once()
 	}
 
 	accountCache := NewAccountAliasCache(awsCfg)

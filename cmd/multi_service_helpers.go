@@ -438,7 +438,7 @@ func fetchRecommendationsForRegion(
 		ExcludeSPTypes: cfg.ExcludeSPTypes,
 	}
 
-	recs, err := recClient.GetRecommendations(ctx, params)
+	recs, err := recClient.GetRecommendations(ctx, &params)
 	if err != nil {
 		AppLogger.Printf("  ❌ Failed to fetch recommendations: %v\n", err)
 		return nil
