@@ -113,12 +113,12 @@ linters:
           - revive
         path: internal/api/
         text: "avoid meaningless package names"
-      # noctx: exec.Command calls in deploy/configure CLI helpers intentionally
+      # noctx: exec.Command calls in configure CLI helpers intentionally
       # omit context (CommandRunner interface contract; operator-controlled inputs).
       # Suppressed per-file rather than per-line so #nosec G204 can lead the comment.
       - linters:
           - noctx
-        path: (internal/deploy/docker|cmd/configure_gcp|cmd/configure_azure)\.go
+        path: (cmd/configure_gcp|cmd/configure_azure)\.go
       # noctx: http.Get and net.Listen in test helpers appropriately use the
       # background context; threading a test context through every helper would
       # add noise without improving test correctness.
