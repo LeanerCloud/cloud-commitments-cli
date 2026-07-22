@@ -96,6 +96,11 @@ frontend/dist/
 frontend/coverage/
 frontend/node_modules/
 
+# Frontend Playwright artefacts — generated per run, not committed
+frontend/playwright-report/
+frontend/test-results/
+frontend/tests-e2e/.cache/
+
 # Temporary files
 tmp/
 
