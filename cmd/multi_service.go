@@ -71,11 +71,14 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 // shutdownRequested is set to true when SIGINT is received during a purchase run.
 var shutdownRequested atomic.Bool
 
-// effectiveDryRun returns true when either DryRun is explicitly set or
-// ActualPurchase is not enabled. Both the non-CSV and CSV code paths use
-// this helper so the guard is consistent and defined in one place.
+// effectiveDryRun reports whether the run must stay in dry-run mode. A run is
+// dry-run unless the user opts into real purchases with --purchase; that single
+// flag is the only control. It defaults to false, so a bare invocation is a
+// dry run and moving money is always an explicit opt-in. Both the non-CSV and
+// CSV code paths use this helper so the guard is consistent and defined in one
+// place.
 func effectiveDryRun(cfg Config) bool {
-	return !cfg.ActualPurchase || cfg.DryRun
+	return !cfg.ActualPurchase
 }
 
 // runToolMultiService is the main entry point for processing multiple services.

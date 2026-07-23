@@ -49,8 +49,7 @@ All flags belong to the root command unless noted otherwise.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--dry-run` | | `true` | Show what would be purchased without buying. **Ignored in `--input-csv` mode**, where the dry-run decision is `!ActualPurchase` (i.e. only `--purchase` matters). See [purchase-safety.md](purchase-safety.md) for the interaction with `--purchase`. |
-| `--purchase` | | `false` | Execute real purchases. In the normal cloud-fetch path it must be combined with `--dry-run=false` (`--purchase` alone sets `ActualPurchase=true` but `DryRun` stays `true`, so the run remains a dry run). **Exception:** in `--input-csv` mode `--dry-run` is ignored and `--purchase` alone executes real purchases. See [purchase-safety.md](purchase-safety.md). |
+| `--purchase` | | `false` | Execute real purchases. This is the only purchase control: a bare run is always a dry run, and `--purchase` alone executes real purchases (identically in cloud-fetch and `--input-csv` modes). Still gated by the `--yes` / interactive confirmation prompt. See [purchase-safety.md](purchase-safety.md). |
 | `--yes` | | `false` | Skip the interactive confirmation prompt. Use with caution in automation. |
 | `--audit-log` | | `./cudly-audit.jsonl` | Path to the JSONL audit log file. Written for every recommendation (dry-run and real). See [purchase-safety.md](purchase-safety.md). |
 | `--idempotency-window` | | `24h` | Lookback window for duplicate purchase detection. Accepted as a Go duration string (not validated by the CLI; currently has no effect on CLI runs). See [purchase-safety.md](purchase-safety.md). |

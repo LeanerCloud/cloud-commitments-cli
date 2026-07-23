@@ -2,50 +2,35 @@
 
 CUDly is designed to be safe by default. Real purchases require multiple explicit opt-ins, and several mechanisms prevent duplicate or unintended buys.
 
-## The purchase decision: --dry-run and --purchase
+## The purchase decision: --purchase
 
 ```text
---dry-run   bool   default: true
 --purchase  bool   default: false
 ```
 
-There are two code paths with different rules:
+Whether a run executes real purchases is controlled by a single flag:
 
-- **Cloud-fetch mode** (the default, recommendations fetched from the cloud APIs):
+```text
+isDryRun = !ActualPurchase
+```
 
-  ```text
-  isDryRun = !ActualPurchase || DryRun
-  ```
+A bare invocation is always a dry run; passing `--purchase` is the one and only opt-in that moves money. This rule is identical in both cloud-fetch mode (the default) and CSV input mode (`--input-csv`).
 
-- **CSV input mode** (`--input-csv`): `--dry-run` is **ignored**:
+| `--purchase` | Result |
+|---|---|
+| (not set / false) | Dry run - nothing purchased |
+| `true` | Real purchases |
 
-  ```text
-  isDryRun = !ActualPurchase
-  ```
-
-  In CSV mode, `--purchase` alone is enough to execute real purchases.
-
-In plain terms, for cloud-fetch mode:
-
-| `--purchase` | `--dry-run` | Result |
-|---|---|---|
-| (not set / false) | (not set / true) | Dry run - nothing purchased |
-| `true` | (not set / true) | **Dry run** - `DryRun` default overrides `--purchase` |
-| `true` | `false` | Real purchases |
-| (not set / false) | `false` | Dry run - `ActualPurchase` is false, so `isDryRun` stays true |
-
-The footgun: in cloud-fetch mode, passing `--purchase` alone is not sufficient - you must also pass `--dry-run=false`. This is intentional: two flags must be flipped to move money.
-
-The reverse footgun: in `--input-csv` mode the two-flag protection does not apply. `--purchase` alone performs real purchases, and `--dry-run` has no effect. Treat any CSV-mode invocation that includes `--purchase` as a real purchase run.
+> **History:** earlier versions had a separate `--dry-run` flag. As a default-true flag it silently suppressed purchases even when `--purchase` was set (you had to pass `--purchase --dry-run=false` to actually buy - a footgun surfaced on #1364), and once its default was flipped to false it became a redundant "force dry-run even with `--purchase`" override that only muddied the contract. It has been removed in favour of the single `--purchase` control. Real purchases still require the `--yes` confirmation (or the interactive prompt) below, so moving money remains a deliberate act.
 
 ```bash
-# Correct way to execute real purchases (cloud-fetch mode):
-cudly --services rds --purchase --dry-run=false
+# Dry run (the default - nothing is purchased):
+cudly --services rds
 
-# Still a dry run (--dry-run defaults to true):
+# Execute real purchases (prompts for confirmation unless --yes is given):
 cudly --services rds --purchase
 
-# CSV mode: this executes REAL purchases (--dry-run is ignored):
+# CSV mode behaves identically:
 cudly --input-csv recs.csv --purchase
 ```
 
@@ -59,7 +44,7 @@ When running in purchase mode (`isDryRun=false`), cudly prints a summary of the 
 
 ```bash
 # Unattended purchase (use with care):
-cudly --services rds --purchase --dry-run=false --yes
+cudly --services rds --purchase --yes
 ```
 
 ## Audit log: --audit-log
@@ -81,7 +66,7 @@ cudly verifies that the audit log path is writable before making any cloud API c
 
 ```bash
 # Write audit records to a shared directory
-cudly --services rds --purchase --dry-run=false \
+cudly --services rds --purchase \
   --audit-log /var/log/cudly/audit.jsonl
 ```
 
@@ -142,4 +127,4 @@ Before any real purchase run:
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
-6. Note that `--idempotency-window` does not prevent double-buying in the CLI path; use `--dry-run` review and audit-log inspection to guard against retried runs.
+6. Note that `--idempotency-window` does not prevent double-buying in the CLI path; use a dry-run review (run without `--purchase`) and audit-log inspection to guard against retried runs.
