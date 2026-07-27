@@ -385,15 +385,12 @@ func formatNormalizedUnitsOrBlank(rec common.Recommendation) string {
 // operators need to see the deployment alongside the upfront figure to
 // confirm a $X upfront row is for the deployment they expect.
 //
-// Both value and pointer Details are accepted to mirror extractEngine
-// (parser path stores pointers; CSV-loader path constructs values).
+// DatabaseDetails is always a pointer: every producer (AWS, Azure, the CSV
+// loader, and the JSON codec used on the purchase-execution round trip)
+// constructs it that way -- see pkg/common/service_details_codec.go's
+// package doc for the invariant.
 func extractDeployment(rec common.Recommendation) string {
-	switch details := rec.Details.(type) {
-	case *common.DatabaseDetails:
-		if details != nil {
-			return details.AZConfig
-		}
-	case common.DatabaseDetails:
+	if details, ok := rec.Details.(*common.DatabaseDetails); ok && details != nil {
 		return details.AZConfig
 	}
 	return ""
@@ -404,25 +401,21 @@ func extractDeployment(rec common.Recommendation) string {
 // CacheDetails), Platform for EC2 (ComputeDetails), empty for SP and other
 // commitment types that don't carry an engine field.
 //
-// Both value and pointer Details are accepted because the parser stores
-// *DatabaseDetails / *CacheDetails / *ComputeDetails while the CSV-loader
-// path constructs the value forms; the dispatch in generatePurchaseID does
-// the same trick. Without the pointer cases the column silently blanks
-// every row coming from the live parser path.
+// DatabaseDetails/CacheDetails are always pointers (see extractDeployment's
+// godoc for the invariant). ComputeDetails is still accepted as a value
+// because the Azure compute client and the GCP compute-engine client both
+// construct it that way; without that case the column silently blanks every
+// Azure VM and GCP compute row.
 func extractEngine(rec common.Recommendation) string {
 	switch details := rec.Details.(type) {
 	case *common.DatabaseDetails:
 		if details != nil {
 			return details.Engine
 		}
-	case common.DatabaseDetails:
-		return details.Engine
 	case *common.CacheDetails:
 		if details != nil {
 			return details.Engine
 		}
-	case common.CacheDetails:
-		return details.Engine
 	case *common.ComputeDetails:
 		if details != nil {
 			return details.Platform

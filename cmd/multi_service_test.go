@@ -895,9 +895,9 @@ func TestApplyFilters_EngineFiltering(t *testing.T) {
 		{
 			name: "Include specific engines",
 			recs: []common.Recommendation{
-				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "postgresql"}},
-				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "mysql"}},
-				{Region: "us-east-1", ResourceType: "cache.t3.small", Count: 3, Service: common.ServiceElastiCache, Details: common.CacheDetails{Engine: "redis"}},
+				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "postgresql"}},
+				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "mysql"}},
+				{Region: "us-east-1", ResourceType: "cache.t3.small", Count: 3, Service: common.ServiceElastiCache, Details: &common.CacheDetails{Engine: "redis"}},
 			},
 			includeEngines: []string{"postgresql", "mysql"},
 			excludeEngines: []string{},
@@ -906,9 +906,9 @@ func TestApplyFilters_EngineFiltering(t *testing.T) {
 		{
 			name: "Exclude specific engines",
 			recs: []common.Recommendation{
-				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "postgresql"}},
-				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "mysql"}},
-				{Region: "us-east-1", ResourceType: "cache.t3.small", Count: 3, Service: common.ServiceElastiCache, Details: common.CacheDetails{Engine: "redis"}},
+				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "postgresql"}},
+				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "mysql"}},
+				{Region: "us-east-1", ResourceType: "cache.t3.small", Count: 3, Service: common.ServiceElastiCache, Details: &common.CacheDetails{Engine: "redis"}},
 			},
 			includeEngines: []string{},
 			excludeEngines: []string{"redis"},
@@ -917,8 +917,8 @@ func TestApplyFilters_EngineFiltering(t *testing.T) {
 		{
 			name: "Case insensitive engine matching",
 			recs: []common.Recommendation{
-				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "PostgreSQL"}},
-				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "MySQL"}},
+				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "PostgreSQL"}},
+				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "MySQL"}},
 			},
 			includeEngines: []string{"postgresql", "mysql"},
 			excludeEngines: []string{},
@@ -928,7 +928,7 @@ func TestApplyFilters_EngineFiltering(t *testing.T) {
 			name: "No engine details - with include list",
 			recs: []common.Recommendation{
 				{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS},
-				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "mysql"}},
+				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "mysql"}},
 			},
 			includeEngines: []string{"mysql"},
 			excludeEngines: []string{},
@@ -1025,10 +1025,10 @@ func TestApplyFilters_AccountFiltering(t *testing.T) {
 
 func TestApplyFilters_CombinedFilters(t *testing.T) {
 	recs := []common.Recommendation{
-		{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "postgresql"}, AccountName: "prod-account"},
-		{Region: "us-west-2", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "mysql"}, AccountName: "dev-account"},
-		{Region: "us-east-1", ResourceType: "db.r5.large", Count: 3, Service: common.ServiceRDS, Details: common.DatabaseDetails{Engine: "postgresql"}, AccountName: "staging-account"},
-		{Region: "eu-west-1", ResourceType: "cache.t3.small", Count: 4, Service: common.ServiceElastiCache, Details: common.CacheDetails{Engine: "redis"}, AccountName: "prod-account"},
+		{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "postgresql"}, AccountName: "prod-account"},
+		{Region: "us-west-2", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "mysql"}, AccountName: "dev-account"},
+		{Region: "us-east-1", ResourceType: "db.r5.large", Count: 3, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "postgresql"}, AccountName: "staging-account"},
+		{Region: "eu-west-1", ResourceType: "cache.t3.small", Count: 4, Service: common.ServiceElastiCache, Details: &common.CacheDetails{Engine: "redis"}, AccountName: "prod-account"},
 	}
 
 	cfg := Config{

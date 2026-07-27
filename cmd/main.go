@@ -279,20 +279,19 @@ func effectiveSizingPct(cfg Config) float64 {
 	return cfg.Coverage
 }
 
-// extractEngineLabel returns the engine or platform string from the polymorphic
-// Details field, handling both value and pointer forms. The live parser and the
-// CSV loader store pointers (*DatabaseDetails is required by findOfferingID),
-// while some test callers construct values directly.
+// extractEngineLabel returns the engine or platform string from the
+// polymorphic Details field. DatabaseDetails/CacheDetails are always
+// pointers (every producer constructs them that way; see
+// pkg/common/service_details_codec.go's package doc for the pointer
+// invariant). ComputeDetails is still accepted as a value because the
+// Azure compute client and the GCP compute-engine client both construct
+// it that way.
 func extractEngineLabel(details interface{}) string {
 	switch d := details.(type) {
-	case common.DatabaseDetails:
-		return d.Engine
 	case *common.DatabaseDetails:
 		if d != nil {
 			return d.Engine
 		}
-	case common.CacheDetails:
-		return d.Engine
 	case *common.CacheDetails:
 		if d != nil {
 			return d.Engine

@@ -255,6 +255,34 @@ func TestAdjustRecommendationForExcludedVersions_NonRDSService(t *testing.T) {
 	assert.Equal(t, 5, result.Count, "Non-RDS services should not be adjusted")
 }
 
+// TestAdjustRecommendationForExcludedVersions_TypedNilDetails pins the typed-nil
+// guard on the *common.DatabaseDetails case. A nil interface is caught by the
+// caller's own nil checks, but a (*common.DatabaseDetails)(nil) stored in the
+// interface reaches the type switch, and reading details.Engine there panics.
+// instanceVersions must contain an entry for the rec's ResourceType so the
+// function gets past its early "no running instances" return and actually
+// reaches the switch.
+func TestAdjustRecommendationForExcludedVersions_TypedNilDetails(t *testing.T) {
+	recommendation := common.Recommendation{
+		Service:      common.ServiceRDS,
+		Region:       "us-east-1",
+		ResourceType: "db.r5.large",
+		Count:        7,
+		Details:      (*common.DatabaseDetails)(nil),
+	}
+
+	instanceVersions := map[string][]InstanceEngineVersion{
+		"db.r5.large": {
+			{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		result := adjustRecommendationForExcludedVersions(recommendation, instanceVersions, createTestVersionInfo())
+		assert.Equal(t, 7, result.Count, "typed-nil Details must pass through unadjusted")
+	})
+}
+
 func TestExtractMajorVersion_Additional(t *testing.T) {
 	tests := []struct {
 		name     string

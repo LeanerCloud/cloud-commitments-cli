@@ -690,19 +690,30 @@ func adjustSingleRecommendation(rec common.Recommendation, existingMap map[strin
 }
 
 // getEngineFromRecommendation extracts the engine from recommendation details.
+// DatabaseDetails/CacheDetails are always pointers (every producer -- AWS,
+// Azure, the CSV loader, and the JSON codec -- constructs them that way); see
+// pkg/common/service_details_codec.go's package doc for the pointer
+// invariant. The nil-pointer guards are not dead code: `rec.Details == nil`
+// only catches an untyped nil, so a typed nil (a (*common.DatabaseDetails)(nil)
+// stored in the interface) reaches the switch and would panic on the field
+// read. Returning blank matches the sibling helpers (extractDeployment and
+// extractEngine in multi_service_csv.go, rdsEngineDeploymentFromRec in the
+// AWS coverage package), which already guard the same way.
 func getEngineFromRecommendation(rec common.Recommendation) string {
 	if rec.Details == nil {
 		return ""
 	}
 	var engine string
 	switch details := rec.Details.(type) {
-	case common.DatabaseDetails:
-		engine = details.Engine
 	case *common.DatabaseDetails:
-		engine = details.Engine
-	case common.CacheDetails:
+		if details == nil {
+			return ""
+		}
 		engine = details.Engine
 	case *common.CacheDetails:
+		if details == nil {
+			return ""
+		}
 		engine = details.Engine
 	default:
 		return ""

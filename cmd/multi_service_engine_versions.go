@@ -426,12 +426,17 @@ func adjustRecommendationForExcludedVersions(rec common.Recommendation, instance
 		return rec
 	}
 
-	// Get the engine name from the recommendation
+	// Get the engine name from the recommendation. DatabaseDetails is
+	// always a pointer (every producer constructs it that way; see
+	// pkg/common/service_details_codec.go's package doc). A typed nil
+	// pointer is treated like a non-RDS rec rather than panicking on the
+	// field read.
 	var recEngine string
 	switch details := rec.Details.(type) {
-	case common.DatabaseDetails:
-		recEngine = details.Engine
 	case *common.DatabaseDetails:
+		if details == nil {
+			return rec
+		}
 		recEngine = details.Engine
 	default:
 		return rec // Not RDS, no engine version filtering

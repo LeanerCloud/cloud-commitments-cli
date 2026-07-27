@@ -86,7 +86,7 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 						EstimatedSavings:  100,
 						SavingsPercentage: 30,
 						Timestamp:         time.Now(),
-						Details: common.DatabaseDetails{
+						Details: &common.DatabaseDetails{
 							Engine:   "mysql",
 							AZConfig: "multi-az",
 						},
@@ -109,7 +109,7 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 						ResourceType: "cache.t3.micro",
 						Count:        1,
 						Term:         "1yr",
-						Details: common.CacheDetails{
+						Details: &common.CacheDetails{
 							Engine:   "redis",
 							NodeType: "cache.t3.micro",
 						},
@@ -495,8 +495,9 @@ func TestFormatNormalizedUnitsOrBlank(t *testing.T) {
 // TestExtractDeployment covers the deployment-extraction helper used by
 // the RDS row in the CSV. Single-AZ / Multi-AZ is critical context for
 // pricing verification (Multi-AZ list price is ~2x Single-AZ) so the
-// column should land for every RDS rec regardless of which Details form
-// the upstream path used.
+// column should land for every RDS rec. DatabaseDetails is always a
+// pointer (every producer constructs it that way); no value-typed case
+// is needed.
 func TestExtractDeployment(t *testing.T) {
 	tests := []struct {
 		name string
@@ -505,7 +506,6 @@ func TestExtractDeployment(t *testing.T) {
 	}{
 		{"*DatabaseDetails Single-AZ", common.Recommendation{Details: &common.DatabaseDetails{AZConfig: "single-az"}}, "single-az"},
 		{"*DatabaseDetails Multi-AZ", common.Recommendation{Details: &common.DatabaseDetails{AZConfig: "multi-az"}}, "multi-az"},
-		{"DatabaseDetails (value) Multi-AZ", common.Recommendation{Details: common.DatabaseDetails{AZConfig: "multi-az"}}, "multi-az"},
 		{"DatabaseDetails empty AZConfig", common.Recommendation{Details: &common.DatabaseDetails{Engine: "mysql"}}, ""},
 		// Non-RDS Details → blank (column is RDS-only data).
 		{"CacheDetails -> empty", common.Recommendation{Details: &common.CacheDetails{Engine: "redis"}}, ""},
@@ -523,19 +523,22 @@ func TestExtractDeployment(t *testing.T) {
 // TestExtractEngine covers the four cases the helper dispatches on:
 // DatabaseDetails (RDS engine), CacheDetails (ElastiCache engine),
 // ComputeDetails (EC2 platform), and unset/other Details (blank).
+// DatabaseDetails/CacheDetails are always pointers (every producer
+// constructs them that way); ComputeDetails still accepts a value because
+// the Azure compute client and the GCP compute-engine client both construct
+// it that way.
 func TestExtractEngine(t *testing.T) {
 	tests := []struct {
 		name string
 		rec  common.Recommendation
 		want string
 	}{
-		// Pointer forms — what the live parser actually emits.
 		{"*DatabaseDetails -> Engine", common.Recommendation{Details: &common.DatabaseDetails{Engine: "aurora-postgresql"}}, "aurora-postgresql"},
 		{"*CacheDetails -> Engine", common.Recommendation{Details: &common.CacheDetails{Engine: "redis"}}, "redis"},
 		{"*ComputeDetails -> Platform", common.Recommendation{Details: &common.ComputeDetails{Platform: "Linux/UNIX"}}, "Linux/UNIX"},
-		// Value forms — what the CSV-loader path constructs.
-		{"DatabaseDetails (value) -> Engine", common.Recommendation{Details: common.DatabaseDetails{Engine: "mysql"}}, "mysql"},
-		{"CacheDetails (value) -> Engine", common.Recommendation{Details: common.CacheDetails{Engine: "memcached"}}, "memcached"},
+		// The Azure compute client and GCP's compute-engine client both
+		// still construct ComputeDetails as a value; keep coverage for
+		// that form.
 		{"ComputeDetails (value) -> Platform", common.Recommendation{Details: common.ComputeDetails{Platform: "Windows"}}, "Windows"},
 		// Fallbacks.
 		{"nil Details -> empty", common.Recommendation{}, ""},

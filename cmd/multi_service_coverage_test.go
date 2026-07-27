@@ -339,7 +339,7 @@ func TestAdjustRecommendationForExcludedVersions_AdditionalCases(t *testing.T) {
 				ResourceType: "db.t3.small",
 				Count:        10,
 				Region:       "us-east-1",
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine: "mysql",
 				},
 			},
@@ -352,7 +352,7 @@ func TestAdjustRecommendationForExcludedVersions_AdditionalCases(t *testing.T) {
 				ResourceType: "db.t3.small",
 				Count:        10,
 				Region:       "us-east-1",
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine: "mysql",
 				},
 			},
@@ -380,7 +380,7 @@ func TestAdjustRecommendationForExcludedVersions_AdditionalCases(t *testing.T) {
 				ResourceType: "db.t3.small",
 				Count:        10,
 				Region:       "us-east-1",
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine: "mysql",
 				},
 			},
@@ -739,7 +739,7 @@ func TestFilterAndAdjustRecommendations_WithEngineVersionFiltering(t *testing.T)
 			ResourceType: "db.t3.small",
 			Count:        5,
 			Region:       "us-east-1",
-			Details: common.DatabaseDetails{
+			Details: &common.DatabaseDetails{
 				Engine: "mysql",
 			},
 		},

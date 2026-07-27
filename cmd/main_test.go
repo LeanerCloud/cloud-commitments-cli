@@ -111,7 +111,7 @@ func TestGeneratePurchaseID(t *testing.T) {
 				Service:      common.ServiceRDS,
 				ResourceType: "db.t3.micro",
 				Count:        2,
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine:   "mysql",
 					AZConfig: "single-az",
 				},
@@ -141,7 +141,7 @@ func TestGeneratePurchaseID(t *testing.T) {
 				Service:      common.ServiceElastiCache,
 				ResourceType: "cache.r5.large",
 				Count:        1,
-				Details: common.CacheDetails{
+				Details: &common.CacheDetails{
 					Engine: "redis",
 				},
 			},
@@ -157,7 +157,7 @@ func TestGeneratePurchaseID(t *testing.T) {
 				Service:      common.ServiceRDS,
 				ResourceType: "db.m5.xlarge",
 				Count:        3,
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine:   "postgres",
 					AZConfig: "multi-az",
 				},
@@ -373,7 +373,7 @@ func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
 		Service:      common.ServiceRDS,
 		ResourceType: "db.r5b.2xlarge",
 		Count:        10,
-		Details: common.DatabaseDetails{
+		Details: &common.DatabaseDetails{
 			Engine:   "MySQL 8.0",
 			AZConfig: "single-az",
 		},
@@ -414,7 +414,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				ResourceType: "db.r5.large",
 				Count:        3,
 				AccountName:  "Production Account",
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine: "PostgreSQL",
 				},
 			},
@@ -431,7 +431,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				Service:      common.ServiceElastiCache,
 				ResourceType: "cache.r5.xlarge",
 				Count:        5,
-				Details: common.CacheDetails{
+				Details: &common.CacheDetails{
 					Engine: "Redis",
 				},
 			},
@@ -465,7 +465,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				Service:      common.ServiceMemoryDB,
 				ResourceType: "db.r6g.large",
 				Count:        2,
-				Details:      common.CacheDetails{Engine: "redis"},
+				Details:      &common.CacheDetails{Engine: "redis"},
 			},
 			region:   "us-east-1",
 			isDryRun: false,
@@ -523,7 +523,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				ResourceType: "db.r6g.xlarge",
 				Count:        15,
 				AccountName:  "Staging",
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine:   "aurora-mysql",
 					AZConfig: "multi-az",
 				},
@@ -541,7 +541,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				Service:      common.ServiceElastiCache,
 				ResourceType: "cache.m5.large",
 				Count:        1,
-				Details: common.CacheDetails{
+				Details: &common.CacheDetails{
 					Engine: "redis",
 				},
 			},
@@ -558,7 +558,7 @@ func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 				Service:      common.ServiceRDS,
 				ResourceType: "db.t3.micro",
 				Count:        20,
-				Details: common.DatabaseDetails{
+				Details: &common.DatabaseDetails{
 					Engine: "MySQL_8.0_Community",
 				},
 			},
@@ -610,7 +610,7 @@ func TestGeneratePurchaseIDCoverageVariations(t *testing.T) {
 		Service:      common.ServiceRDS,
 		ResourceType: "db.t3.small",
 		Count:        1,
-		Details: common.DatabaseDetails{
+		Details: &common.DatabaseDetails{
 			Engine: "mysql",
 		},
 	}
