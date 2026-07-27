@@ -248,13 +248,13 @@ func TestValidateUserAPIKey_LastUsedSingleflight(t *testing.T) {
 		KeyPrefix: rawKey[:8],
 	}
 
-	// done is closed by the mock's Run callback when UpdateAPIKeyLastUsed is
+	// done is closed by the mock's Run callback when RecordAPIKeyUsage is
 	// invoked, confirming the background goroutine ran to completion without
 	// relying on time.Sleep.
 	done := make(chan struct{})
 	mockStore.On("GetAPIKeyByHash", ctx, keyHash).Return(apiKey, nil).Maybe()
 	mockStore.On("GetUserByID", ctx, user.ID).Return(user, nil).Maybe()
-	mockStore.On("UpdateAPIKeyLastUsed", mock.Anything, keyID).
+	mockStore.On("RecordAPIKeyUsage", mock.Anything, keyID).
 		Run(func(args mock.Arguments) { close(done) }).
 		Return(nil).Once()
 
@@ -263,12 +263,12 @@ func TestValidateUserAPIKey_LastUsedSingleflight(t *testing.T) {
 	assert.Equal(t, keyID, gotKey.ID)
 	assert.Equal(t, user.ID, gotUser.ID)
 
-	// Wait for the background goroutine to invoke UpdateAPIKeyLastUsed.
+	// Wait for the background goroutine to invoke RecordAPIKeyUsage.
 	select {
 	case <-done:
 		// background update completed
 	case <-time.After(5 * time.Second):
-		t.Fatal("background UpdateAPIKeyLastUsed did not complete within 5s")
+		t.Fatal("background RecordAPIKeyUsage did not complete within 5s")
 	}
 }
 

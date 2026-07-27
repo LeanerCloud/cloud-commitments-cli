@@ -1178,6 +1178,10 @@ func (a *authServiceAdapter) ListUserAPIKeysAPI(ctx context.Context, userID stri
 	return a.service.ListUserAPIKeysAPI(ctx, userID)
 }
 
+func (a *authServiceAdapter) GetAPIKeysUsageStatsAPI(ctx context.Context, userID string) (any, error) {
+	return a.service.GetAPIKeysUsageStatsAPI(ctx, userID)
+}
+
 func (a *authServiceAdapter) DeleteAPIKeyAPI(ctx context.Context, userID, keyID string) error {
 	return a.service.DeleteAPIKeyAPI(ctx, userID, keyID)
 }

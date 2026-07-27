@@ -526,6 +526,26 @@ export interface APIKeyInfo {
   created_at: string;
   last_used_at?: string;
   permissions?: Permission[];
+  // Usage counters (issue #340/#344 deferred sub-task).
+  // Optional in the type so older mock data / cached responses without
+  // the columns don't blow up the renderer -- but the backend always
+  // sends them as of migration 000094.
+  request_count_total?: number;
+  request_count_24h?: number;
+}
+
+export interface APIKeysUsageStatsTopKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  request_count_24h: number;
+}
+
+export interface APIKeysUsageStats {
+  total_active: number;
+  total_requests_24h: number;
+  total_requests_lifetime: number;
+  top_keys: APIKeysUsageStatsTopKey[];
 }
 
 export interface CreateAPIKeyRequest {

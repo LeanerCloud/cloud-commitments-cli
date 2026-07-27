@@ -217,6 +217,11 @@ func (m *MockStore) UpdateAPIKeyLastUsed(ctx context.Context, keyID string) erro
 	return args.Error(0)
 }
 
+func (m *MockStore) RecordAPIKeyUsage(ctx context.Context, keyID string) error {
+	args := m.Called(ctx, keyID)
+	return args.Error(0)
+}
+
 func (m *MockStore) DeleteAPIKey(ctx context.Context, keyID string) error {
 	args := m.Called(ctx, keyID)
 	return args.Error(0)

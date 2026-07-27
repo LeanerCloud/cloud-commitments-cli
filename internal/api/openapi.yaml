@@ -1261,6 +1261,27 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/api-keys/usage-stats:
+    get:
+      operationId: getAPIKeysUsageStats
+      tags: [APIKeys]
+      summary: Section-level usage summary for the caller's API keys
+      description: |
+        Aggregates per-key counters into a single summary card: number of
+        active keys, total requests (24h + lifetime), and the top-3 keys
+        by 24h request count. Scoped to the calling user's own keys.
+      responses:
+        '200':
+          description: API keys usage stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKeysUsageStats'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/api-keys/{id}/revoke:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -2075,6 +2096,49 @@ components:
           format: date-time
         is_active:
           type: boolean
+        request_count_total:
+          type: integer
+          format: int64
+          description: Lifetime request count since the key was created.
+        request_count_24h:
+          type: integer
+          format: int64
+          description: |
+            Rolling 24h request count. Resets when the previous window
+            crosses 24h since its first request -- the value is "requests
+            in the last 24h", not "requests today".
+
+    APIKeysUsageStats:
+      type: object
+      properties:
+        total_active:
+          type: integer
+          description: Number of currently-active API keys for the caller.
+        total_requests_24h:
+          type: integer
+          format: int64
+          description: Sum of request_count_24h across the caller's keys.
+        total_requests_lifetime:
+          type: integer
+          format: int64
+          description: Sum of request_count_total across the caller's keys.
+        top_keys:
+          type: array
+          description: |
+            Top keys by 24h request count (lifetime count as tiebreaker).
+            At most 3 entries; keys with zero 24h activity are omitted.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              key_prefix:
+                type: string
+              request_count_24h:
+                type: integer
+                format: int64
 
     # -- Configuration ------------------------------------------------------
     ConfigResponse:

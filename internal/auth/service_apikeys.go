@@ -283,23 +283,25 @@ func (s *Service) ValidateUserAPIKey(ctx context.Context, apiKey string) (*UserA
 		return nil, nil, err
 	}
 
-	// Update last used timestamp asynchronously to avoid blocking the
-	// authentication hot path. singleflight.Group ensures at most one
-	// in-flight DB write per keyID at any moment: subsequent concurrent
-	// requests for the same key are deduplicated rather than spawning an
-	// unbounded number of goroutines (DoS amplifier on a revoked key).
+	// Record usage (last_used_at + counters) asynchronously to avoid
+	// blocking the authentication hot path. singleflight.Group ensures at
+	// most one in-flight DB write per keyID at any moment: subsequent
+	// concurrent requests for the same key are deduplicated rather than
+	// spawning an unbounded number of goroutines (DoS amplifier on a
+	// revoked key). The store does an atomic single-row UPDATE -- see
+	// PostgresStore.RecordAPIKeyUsage for the rolling-24h-window logic.
 	keyID := key.ID
 	go func() {
 		if _, sfErr, _ := s.lastUsedSFG.Do(keyID, func() (any, error) {
 			defer func() {
 				if r := recover(); r != nil {
-					logging.Warnf("service_apikeys: UpdateLastUsed goroutine panic: %v", r)
+					logging.Warnf("service_apikeys: RecordUsage goroutine panic: %v", r)
 				}
 			}()
 			updateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := s.UpdateLastUsed(updateCtx, keyID); err != nil {
-				logging.Debugf("Failed to update API key last used timestamp for key %s: %v", keyID, err)
+			if err := s.RecordUsage(updateCtx, keyID); err != nil {
+				logging.Debugf("Failed to record API key usage for key %s: %v", keyID, err)
 			}
 			return nil, nil
 		}); sfErr != nil {
@@ -310,9 +312,18 @@ func (s *Service) ValidateUserAPIKey(ctx context.Context, apiKey string) (*UserA
 	return key, user, nil
 }
 
-// UpdateLastUsed updates the last used timestamp for an API key atomically.
+// UpdateLastUsed updates only the last used timestamp for an API key.
+// Retained for backwards compatibility; new code paths should use
+// RecordUsage so the request_count_* counters stay current.
 func (s *Service) UpdateLastUsed(ctx context.Context, keyID string) error {
 	return s.store.UpdateAPIKeyLastUsed(ctx, keyID)
+}
+
+// RecordUsage updates last_used_at and increments both the lifetime and
+// rolling-24h request counters for the key. See
+// PostgresStore.RecordAPIKeyUsage for the atomic SQL.
+func (s *Service) RecordUsage(ctx context.Context, keyID string) error {
+	return s.store.RecordAPIKeyUsage(ctx, keyID)
 }
 
 // computeEffectivePermissionsFromAuthCtx returns the subset of key permissions

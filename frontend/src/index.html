@@ -786,6 +786,9 @@
                         <div class="section-header">
                             <button type="button" id="create-apikey-btn" class="primary">Create API Key</button>
                         </div>
+                        <!-- Section-level usage summary (issue #340/#344 deferred sub-task).
+                             Populated by apikeys.ts:loadApiKeysUsageStats(). -->
+                        <div id="apikeys-usage-summary" class="mt-3"></div>
                         <div id="apikeys-list" class="mt-3"></div>
                     </fieldset>
                 </section>

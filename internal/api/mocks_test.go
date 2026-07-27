@@ -315,6 +315,11 @@ func (m *MockAuthService) ListUserAPIKeysAPI(ctx context.Context, userID string)
 	return args.Get(0), args.Error(1)
 }
 
+func (m *MockAuthService) GetAPIKeysUsageStatsAPI(ctx context.Context, userID string) (interface{}, error) {
+	args := m.Called(ctx, userID)
+	return args.Get(0), args.Error(1)
+}
+
 func (m *MockAuthService) DeleteAPIKeyAPI(ctx context.Context, userID, keyID string) error {
 	args := m.Called(ctx, userID, keyID)
 	return args.Error(0)

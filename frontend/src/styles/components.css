@@ -1636,3 +1636,70 @@ tr.rec-variant-row:hover td:not(.checkbox-col) {
     font-size: var(--cudly-fs-sm);
     font-style: italic;
 }
+
+/* ---------------------------------------------------------------------------
+ * API keys usage summary (issue #340/#344 deferred sub-task).
+ * Three-tile summary card + top-3 most-active list. Sits above the
+ * api-keys table inside #apikeys-section. Tiles reuse the design-token
+ * stack from .kpi-tile but stay flat (no spark-area grid) — this is a
+ * settings-page card, not a dashboard headline.
+ * ------------------------------------------------------------------------- */
+.apikeys-usage-summary {
+    padding: var(--cudly-sp-4);
+}
+
+.apikeys-usage-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--cudly-sp-3);
+}
+
+.apikeys-usage-tile {
+    padding: var(--cudly-sp-3);
+    border-radius: var(--cudly-r-md);
+    border: 1px solid var(--cudly-border);
+    background: var(--cudly-bg-elevated, white);
+}
+
+.apikeys-usage-tile-label {
+    font-size: var(--cudly-fs-sm);
+    color: var(--cudly-text-muted);
+    margin-bottom: var(--cudly-sp-1);
+}
+
+.apikeys-usage-tile-value {
+    font-size: var(--cudly-fs-xl);
+    font-weight: var(--cudly-fw-semibold);
+    color: var(--cudly-text);
+}
+
+.apikeys-usage-top-heading {
+    margin: var(--cudly-sp-4) 0 var(--cudly-sp-2);
+    font-size: var(--cudly-fs-sm);
+    color: var(--cudly-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.apikeys-usage-top-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cudly-sp-1);
+}
+
+.apikeys-usage-top-list li {
+    padding: var(--cudly-sp-1) 0;
+    font-size: var(--cudly-fs-sm);
+}
+
+.apikeys-usage-top-count {
+    color: var(--cudly-text-muted);
+}
+
+.apikeys-count-cell {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}

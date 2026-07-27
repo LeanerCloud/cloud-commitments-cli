@@ -35,6 +35,27 @@ func (h *Handler) listAPIKeys(ctx context.Context, req *events.LambdaFunctionURL
 	return keys, nil
 }
 
+// listAPIKeysUsageStats handles GET /api/api-keys/usage-stats.
+//
+// Returns a section-level summary scoped to the calling user's own keys:
+// total active, total requests (24h + lifetime), and the top-3 keys by
+// 24h activity. Scope is identical to listAPIKeys -- both gate on the
+// same view/api-keys permission so the section header and the row list
+// can never disagree about visibility.
+func (h *Handler) listAPIKeysUsageStats(ctx context.Context, req *events.LambdaFunctionURLRequest) (any, error) {
+	session, err := h.requirePermission(ctx, req, "view", "api-keys")
+	if err != nil {
+		return nil, err
+	}
+
+	stats, err := h.auth.GetAPIKeysUsageStatsAPI(ctx, session.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load API key usage stats: %w", err)
+	}
+
+	return stats, nil
+}
+
 // createAPIKey handles POST /api/api-keys.
 func (h *Handler) createAPIKey(ctx context.Context, req *events.LambdaFunctionURLRequest) (any, error) {
 	session, err := h.requirePermission(ctx, req, "create", "api-keys")

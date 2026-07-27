@@ -510,14 +510,24 @@ func TestService_ValidateUserAPIKey(t *testing.T) {
 
 		mockStore.On("GetAPIKeyByHash", ctx, keyHash).Return(apiKeyRecord, nil)
 		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
-		mockStore.On("UpdateAPIKeyLastUsed", mock.Anything, "key-1").Return(nil).Maybe()
+		// Use a signaling channel + .Once() so the test fails (rather than
+		// silently passes) if ValidateUserAPIKey ever stops recording usage,
+		// and so we don't have to busy-sleep waiting for the async goroutine.
+		usageRecorded := make(chan struct{}, 1)
+		mockStore.On("RecordAPIKeyUsage", mock.Anything, "key-1").
+			Run(func(mock.Arguments) { usageRecorded <- struct{}{} }).
+			Return(nil).Once()
 
 		resultKey, resultUser, err := service.ValidateUserAPIKey(ctx, apiKey)
 
 		require.NoError(t, err)
 		assert.Equal(t, user, resultUser)
 		assert.Equal(t, apiKeyRecord, resultKey)
-		time.Sleep(10 * time.Millisecond) // Allow goroutine to complete
+		select {
+		case <-usageRecorded:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("expected RecordAPIKeyUsage to be called")
+		}
 		mockStore.AssertExpectations(t)
 	})
 
@@ -709,6 +719,32 @@ func TestService_UpdateLastUsed(t *testing.T) {
 	})
 }
 
+func TestService_RecordUsage(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("delegates to store RecordAPIKeyUsage", func(t *testing.T) {
+		mockStore := new(MockStore)
+		service := &Service{store: mockStore}
+
+		mockStore.On("RecordAPIKeyUsage", ctx, "key-1").Return(nil)
+
+		err := service.RecordUsage(ctx, "key-1")
+		require.NoError(t, err)
+		mockStore.AssertExpectations(t)
+	})
+
+	t.Run("propagates store error", func(t *testing.T) {
+		mockStore := new(MockStore)
+		service := &Service{store: mockStore}
+
+		mockStore.On("RecordAPIKeyUsage", ctx, "key-1").Return(assert.AnError)
+
+		err := service.RecordUsage(ctx, "key-1")
+		assert.Error(t, err)
+		mockStore.AssertExpectations(t)
+	})
+}
+
 func TestService_ComputeEffectivePermissions(t *testing.T) {
 	ctx := context.Background()
 
@@ -866,7 +902,7 @@ func TestService_HasAPIKeyPermissionAPI(t *testing.T) {
 
 		mockStore.On("GetAPIKeyByHash", ctx, keyHash).Return(keyRecord, nil)
 		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
-		mockStore.On("UpdateAPIKeyLastUsed", mock.Anything, "key-1").Return(nil).Maybe()
+		mockStore.On("RecordAPIKeyUsage", mock.Anything, "key-1").Return(nil).Maybe()
 		mockStore.On("GetGroup", ctx, userGrpID).Return(userGrp(), nil)
 		return service
 	}
@@ -987,7 +1023,7 @@ func TestService_HasAPIKeyPermissionForConstraintsAPI_OwnerCapEnforced(t *testin
 }
 
 // TestValidateUserAPIKey_UpdateLastUsedPanicIsRecovered proves that a panic
-// inside the fire-and-forget UpdateLastUsed goroutine is caught by the
+// inside the fire-and-forget RecordUsage goroutine is caught by the
 // recover() added in issue #672. Without the recover(), the panic would crash
 // the entire test binary (an unrecovered goroutine panic terminates the
 // process). The test uses a channel -- closed by the mock Run callback just
@@ -1021,7 +1057,7 @@ func TestValidateUserAPIKey_UpdateLastUsedPanicIsRecovered(t *testing.T) {
 	// done is closed by the Run callback immediately before panicking so the
 	// test can wait for goroutine execution without time.Sleep.
 	done := make(chan struct{})
-	mockStore.On("UpdateAPIKeyLastUsed", mock.Anything, "key-panic").
+	mockStore.On("RecordAPIKeyUsage", mock.Anything, "key-panic").
 		Run(func(args mock.Arguments) {
 			close(done)
 			panic("injected panic for #672 regression test")

@@ -780,7 +780,8 @@ func (s *PostgresStore) CreateAPIKey(ctx context.Context, key *UserAPIKey) error
 func (s *PostgresStore) GetAPIKeyByID(ctx context.Context, keyID string) (*UserAPIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_prefix, key_hash, permissions,
-		       is_active, expires_at, created_at, last_used_at
+		       is_active, expires_at, created_at, last_used_at,
+		       request_count_total, request_count_24h
 		FROM api_keys
 		WHERE id = $1
 	`
@@ -792,7 +793,8 @@ func (s *PostgresStore) GetAPIKeyByID(ctx context.Context, keyID string) (*UserA
 func (s *PostgresStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*UserAPIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_prefix, key_hash, permissions,
-		       is_active, expires_at, created_at, last_used_at
+		       is_active, expires_at, created_at, last_used_at,
+		       request_count_total, request_count_24h
 		FROM api_keys
 		WHERE key_hash = $1 AND is_active = true
 		  AND (expires_at IS NULL OR expires_at > NOW())
@@ -805,7 +807,8 @@ func (s *PostgresStore) GetAPIKeyByHash(ctx context.Context, keyHash string) (*U
 func (s *PostgresStore) ListAPIKeysByUser(ctx context.Context, userID string) ([]*UserAPIKey, error) {
 	query := `
 		SELECT id, user_id, name, key_prefix, key_hash, permissions,
-		       is_active, expires_at, created_at, last_used_at
+		       is_active, expires_at, created_at, last_used_at,
+		       request_count_total, request_count_24h
 		FROM api_keys
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -870,12 +873,56 @@ func (s *PostgresStore) UpdateAPIKey(ctx context.Context, key *UserAPIKey) error
 	return nil
 }
 
-// UpdateAPIKeyLastUsed atomically updates the last_used_at timestamp for an API key.
+// UpdateAPIKeyLastUsed atomically updates the last_used_at timestamp for an
+// API key. Retained for backwards compatibility with callers that only need
+// the timestamp update -- production code routes through RecordAPIKeyUsage,
+// which additionally maintains the usage counters from migration 000094.
 func (s *PostgresStore) UpdateAPIKeyLastUsed(ctx context.Context, keyID string) error {
 	query := `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`
 	result, err := s.db.Exec(ctx, query, keyID)
 	if err != nil {
 		return fmt.Errorf("failed to update API key last used: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("API key not found: %s", keyID)
+	}
+	return nil
+}
+
+// RecordAPIKeyUsage atomically updates last_used_at, increments
+// request_count_total, and increments-or-resets request_count_24h based on
+// whether the rolling 24h window is still current.
+//
+// The single UPDATE does the window decision inline:
+//   - if window_start IS NULL OR (NOW() - window_start) >= 24h, start a
+//     fresh window (window_start = NOW(), count = 1).
+//   - otherwise increment the existing count.
+//
+// Doing it in one statement keeps the update atomic per row, so two
+// concurrent calls can't both see "stale window" and reset to 1 in
+// parallel -- pgx serializes updates to the same row.
+func (s *PostgresStore) RecordAPIKeyUsage(ctx context.Context, keyID string) error {
+	query := `
+		UPDATE api_keys
+		SET last_used_at = NOW(),
+		    request_count_total = request_count_total + 1,
+		    request_count_24h = CASE
+		        WHEN request_count_24h_window_start IS NULL
+		             OR NOW() - request_count_24h_window_start >= INTERVAL '24 hours'
+		        THEN 1
+		        ELSE request_count_24h + 1
+		    END,
+		    request_count_24h_window_start = CASE
+		        WHEN request_count_24h_window_start IS NULL
+		             OR NOW() - request_count_24h_window_start >= INTERVAL '24 hours'
+		        THEN NOW()
+		        ELSE request_count_24h_window_start
+		    END
+		WHERE id = $1
+	`
+	result, err := s.db.Exec(ctx, query, keyID)
+	if err != nil {
+		return fmt.Errorf("failed to record API key usage: %w", err)
 	}
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("API key not found: %s", keyID)
@@ -1037,6 +1084,8 @@ func (s *PostgresStore) scanAPIKey(scanner Scanner) (*UserAPIKey, error) {
 		&expiresAt,
 		&key.CreatedAt,
 		&lastUsedAt,
+		&key.RequestCountTotal,
+		&key.RequestCount24h,
 	)
 
 	if err != nil {

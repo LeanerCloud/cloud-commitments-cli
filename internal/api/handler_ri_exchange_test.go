@@ -1033,6 +1033,9 @@ func (m *mockAuthForExchange) CreateAPIKeyAPI(_ context.Context, _ string, _ any
 func (m *mockAuthForExchange) ListUserAPIKeysAPI(_ context.Context, _ string) (any, error) {
 	return nil, nil
 }
+func (m *mockAuthForExchange) GetAPIKeysUsageStatsAPI(_ context.Context, _ string) (any, error) {
+	return nil, nil
+}
 func (m *mockAuthForExchange) DeleteAPIKeyAPI(_ context.Context, _, _ string) error { return nil }
 func (m *mockAuthForExchange) RevokeAPIKeyAPI(_ context.Context, _, _ string) error { return nil }
 func (m *mockAuthForExchange) ValidateUserAPIKeyAPI(_ context.Context, _ string) (any, any, error) {

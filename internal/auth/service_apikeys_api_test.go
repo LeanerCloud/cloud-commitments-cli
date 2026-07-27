@@ -412,7 +412,7 @@ func TestService_ValidateUserAPIKeyAPI(t *testing.T) {
 
 		mockStore.On("GetAPIKeyByHash", ctx, keyHash).Return(apiKeyRecord, nil)
 		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
-		mockStore.On("UpdateAPIKeyLastUsed", mock.Anything, "key-1").Return(nil).Maybe()
+		mockStore.On("RecordAPIKeyUsage", mock.Anything, "key-1").Return(nil).Maybe()
 
 		resultKey, resultUser, err := service.ValidateUserAPIKeyAPI(ctx, apiKey)
 
@@ -464,5 +464,130 @@ func TestService_ValidateUserAPIKeyAPI(t *testing.T) {
 		assert.Nil(t, resultKey)
 		assert.Nil(t, resultUser)
 		mockStore.AssertExpectations(t)
+	})
+}
+
+func TestSortAPIKeysByActivity(t *testing.T) {
+	t.Run("sorts by 24h count descending", func(t *testing.T) {
+		keys := []*UserAPIKey{
+			{ID: "low", RequestCount24h: 1, RequestCountTotal: 100},
+			{ID: "high", RequestCount24h: 10, RequestCountTotal: 5},
+			{ID: "mid", RequestCount24h: 5, RequestCountTotal: 50},
+		}
+
+		sortAPIKeysByActivity(keys)
+
+		require.Len(t, keys, 3)
+		assert.Equal(t, "high", keys[0].ID)
+		assert.Equal(t, "mid", keys[1].ID)
+		assert.Equal(t, "low", keys[2].ID)
+	})
+
+	t.Run("uses lifetime total as tiebreaker", func(t *testing.T) {
+		keys := []*UserAPIKey{
+			{ID: "idle-high-lifetime", RequestCount24h: 3, RequestCountTotal: 900},
+			{ID: "active-low-lifetime", RequestCount24h: 3, RequestCountTotal: 10},
+		}
+
+		sortAPIKeysByActivity(keys)
+
+		require.Len(t, keys, 2)
+		assert.Equal(t, "idle-high-lifetime", keys[0].ID)
+		assert.Equal(t, "active-low-lifetime", keys[1].ID)
+	})
+}
+
+func TestService_GetAPIKeysUsageStatsAPI(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("aggregates totals and returns top-3 by 24h activity", func(t *testing.T) {
+		mockStore := new(MockStore)
+		t.Cleanup(func() { mockStore.AssertExpectations(t) })
+		service := &Service{store: mockStore}
+
+		user := &User{ID: "user-123", Email: "test@example.com", Active: true}
+		keys := []*UserAPIKey{
+			{ID: "key-1", Name: "Busy", KeyPrefix: "aaaa1111", IsActive: true, RequestCount24h: 30, RequestCountTotal: 300},
+			{ID: "key-2", Name: "Medium", KeyPrefix: "bbbb2222", IsActive: true, RequestCount24h: 12, RequestCountTotal: 120},
+			{ID: "key-3", Name: "Quiet", KeyPrefix: "cccc3333", IsActive: false, RequestCount24h: 3, RequestCountTotal: 60},
+			{ID: "key-4", Name: "Idle", KeyPrefix: "dddd4444", IsActive: true, RequestCount24h: 0, RequestCountTotal: 5},
+		}
+		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
+		mockStore.On("ListAPIKeysByUser", ctx, "user-123").Return(keys, nil)
+
+		result, err := service.GetAPIKeysUsageStatsAPI(ctx, "user-123")
+		require.NoError(t, err)
+
+		resp, ok := result.(*APIKeysUsageStatsResponse)
+		require.True(t, ok)
+		assert.Equal(t, 3, resp.TotalActive) // key-3 is inactive
+		assert.Equal(t, int64(45), resp.TotalRequests24h)
+		assert.Equal(t, int64(485), resp.TotalRequestsLifetime)
+		require.Len(t, resp.TopKeys, 3)
+		assert.Equal(t, "key-1", resp.TopKeys[0].ID)
+		assert.Equal(t, "key-2", resp.TopKeys[1].ID)
+		assert.Equal(t, "key-3", resp.TopKeys[2].ID)
+		// key-4 has zero 24h activity and must be omitted, even though the
+		// top-N slice has room for a 4th entry.
+		for _, k := range resp.TopKeys {
+			assert.NotEqual(t, "key-4", k.ID)
+		}
+	})
+
+	t.Run("omits top list entirely when no key has 24h activity", func(t *testing.T) {
+		mockStore := new(MockStore)
+		t.Cleanup(func() { mockStore.AssertExpectations(t) })
+		service := &Service{store: mockStore}
+
+		user := &User{ID: "user-123", Email: "test@example.com", Active: true}
+		keys := []*UserAPIKey{
+			{ID: "key-1", IsActive: true, RequestCount24h: 0, RequestCountTotal: 7},
+		}
+		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
+		mockStore.On("ListAPIKeysByUser", ctx, "user-123").Return(keys, nil)
+
+		result, err := service.GetAPIKeysUsageStatsAPI(ctx, "user-123")
+		require.NoError(t, err)
+
+		resp, ok := result.(*APIKeysUsageStatsResponse)
+		require.True(t, ok)
+		assert.Equal(t, 1, resp.TotalActive)
+		assert.Equal(t, int64(0), resp.TotalRequests24h)
+		assert.Equal(t, int64(7), resp.TotalRequestsLifetime)
+		assert.Empty(t, resp.TopKeys)
+	})
+
+	t.Run("returns empty stats when user has no keys", func(t *testing.T) {
+		mockStore := new(MockStore)
+		t.Cleanup(func() { mockStore.AssertExpectations(t) })
+		service := &Service{store: mockStore}
+
+		user := &User{ID: "user-123", Email: "test@example.com", Active: true}
+		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
+		mockStore.On("ListAPIKeysByUser", ctx, "user-123").Return([]*UserAPIKey{}, nil)
+
+		result, err := service.GetAPIKeysUsageStatsAPI(ctx, "user-123")
+		require.NoError(t, err)
+
+		resp, ok := result.(*APIKeysUsageStatsResponse)
+		require.True(t, ok)
+		assert.Equal(t, 0, resp.TotalActive)
+		assert.Equal(t, int64(0), resp.TotalRequests24h)
+		assert.Equal(t, int64(0), resp.TotalRequestsLifetime)
+		assert.Empty(t, resp.TopKeys)
+	})
+
+	t.Run("propagates store error", func(t *testing.T) {
+		mockStore := new(MockStore)
+		t.Cleanup(func() { mockStore.AssertExpectations(t) })
+		service := &Service{store: mockStore}
+
+		user := &User{ID: "user-123", Email: "test@example.com", Active: true}
+		mockStore.On("GetUserByID", ctx, "user-123").Return(user, nil)
+		mockStore.On("ListAPIKeysByUser", ctx, "user-123").Return(nil, assert.AnError)
+
+		result, err := service.GetAPIKeysUsageStatsAPI(ctx, "user-123")
+		assert.Error(t, err)
+		assert.Nil(t, result)
 	})
 }

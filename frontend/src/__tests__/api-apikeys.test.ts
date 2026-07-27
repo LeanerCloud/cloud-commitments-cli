@@ -5,6 +5,7 @@
 import { fetchMock } from './setup';
 import {
   getApiKeys,
+  getApiKeysUsageStats,
   createApiKey,
   revokeApiKey,
   deleteApiKey
@@ -53,6 +54,46 @@ describe('API Keys API Module', () => {
       });
 
       await expect(getApiKeys()).rejects.toThrow('Unauthorized');
+    });
+  });
+
+  describe('getApiKeysUsageStats', () => {
+    test('fetches section-level usage summary', async () => {
+      const mockResponse = {
+        total_active: 2,
+        total_requests_24h: 42,
+        total_requests_lifetime: 1234,
+        top_keys: [
+          { id: 'key-1', name: 'Busy', key_prefix: 'abc12345', request_count_24h: 30 },
+        ],
+      };
+
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getApiKeysUsageStats();
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/api-keys/usage-stats',
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-Authorization': 'Bearer test-token',
+          }),
+        })
+      );
+      expect(result).toEqual(mockResponse);
+    });
+
+    test('throws error on API failure', async () => {
+      fetchMock.mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ error: 'Unauthorized' }),
+      });
+
+      await expect(getApiKeysUsageStats()).rejects.toThrow('Unauthorized');
     });
   });
 

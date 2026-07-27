@@ -17,6 +17,7 @@ import {
 // Mock the api module
 jest.mock('../api', () => ({
   getApiKeys: jest.fn(),
+  getApiKeysUsageStats: jest.fn(),
   createApiKey: jest.fn(),
   revokeApiKey: jest.fn(),
   deleteApiKey: jest.fn()
@@ -36,6 +37,7 @@ describe('API Keys Module', () => {
   beforeEach(() => {
     // Reset DOM
     document.body.innerHTML = `
+      <div id="apikeys-usage-summary"></div>
       <div id="apikeys-list"></div>
       <button id="create-apikey-btn"></button>
       <div id="create-apikey-modal" class="hidden">
@@ -59,6 +61,15 @@ describe('API Keys Module', () => {
     // clears call history, not the mockResolvedValueOnce queue.
     mockConfirmDialog.mockReset();
     mockConfirmDialog.mockImplementation(() => Promise.resolve(true));
+    // Default the usage-stats endpoint to an empty response so the
+    // parallel-load path in loadApiKeys doesn't reject in tests that
+    // only set up `getApiKeys`. Individual tests can override.
+    (api.getApiKeysUsageStats as jest.Mock).mockResolvedValue({
+      total_active: 0,
+      total_requests_24h: 0,
+      total_requests_lifetime: 0,
+      top_keys: [],
+    });
   });
 
   describe('loadApiKeys', () => {
@@ -998,6 +1009,134 @@ describe('API Keys Module', () => {
       // Absolute ISO on the title attribute for hover
       const span = container?.querySelector<HTMLElement>('[title]');
       expect(span?.getAttribute('title')).toBe(new Date(recentTs).toISOString());
+    });
+  });
+
+  // Usage stats (issue #340/#344 deferred sub-task) — section-level summary
+  // card above the table + per-row request count columns.
+  describe('Usage stats', () => {
+    test('renders summary tiles when stats load successfully', async () => {
+      (api.getApiKeys as jest.Mock).mockResolvedValue({ api_keys: [] });
+      (api.getApiKeysUsageStats as jest.Mock).mockResolvedValue({
+        total_active: 2,
+        total_requests_24h: 42,
+        total_requests_lifetime: 1234,
+        top_keys: [
+          { id: 'key-1', name: 'Busy', key_prefix: 'aaaa1111', request_count_24h: 30 },
+          { id: 'key-2', name: 'Medium', key_prefix: 'bbbb2222', request_count_24h: 12 },
+        ],
+      });
+
+      await loadApiKeys();
+      // Allow the parallel stats fetch to resolve.
+      await new Promise((r) => setTimeout(r, 0));
+
+      const summary = document.getElementById('apikeys-usage-summary');
+      expect(summary?.textContent).toContain('Active keys');
+      expect(summary?.textContent).toContain('2');
+      expect(summary?.textContent).toContain('Requests (24h)');
+      expect(summary?.textContent).toContain('42');
+      expect(summary?.textContent).toContain('Requests (lifetime)');
+      // formatCount abbreviates large numbers in the summary tiles to
+      // fit the tile width — table cells keep the exact integer.
+      expect(summary?.textContent).toContain('1.2k');
+      expect(summary?.textContent).toContain('Most active (24h)');
+      expect(summary?.textContent).toContain('Busy');
+      expect(summary?.textContent).toContain('aaaa1111');
+    });
+
+    test('omits top-list when no key has 24h activity', async () => {
+      (api.getApiKeys as jest.Mock).mockResolvedValue({ api_keys: [] });
+      (api.getApiKeysUsageStats as jest.Mock).mockResolvedValue({
+        total_active: 1,
+        total_requests_24h: 0,
+        total_requests_lifetime: 7,
+        top_keys: [],
+      });
+
+      await loadApiKeys();
+      await new Promise((r) => setTimeout(r, 0));
+
+      const summary = document.getElementById('apikeys-usage-summary');
+      expect(summary?.textContent).not.toContain('Most active (24h)');
+    });
+
+    test('shows inline error when stats endpoint fails, table still renders', async () => {
+      (api.getApiKeys as jest.Mock).mockResolvedValue({
+        api_keys: [
+          { id: 'key-1', name: 'k', key_prefix: 'abc12345', is_active: true, created_at: '2024-01-15T10:00:00Z' },
+        ],
+      });
+      (api.getApiKeysUsageStats as jest.Mock).mockRejectedValue(new Error('boom'));
+
+      await loadApiKeys();
+      await new Promise((r) => setTimeout(r, 0));
+
+      const summary = document.getElementById('apikeys-usage-summary');
+      expect(summary?.querySelector('.error')?.textContent).toBe('Failed to load usage summary');
+      // The table itself still renders despite the summary failure.
+      const list = document.getElementById('apikeys-list');
+      expect(list?.innerHTML).toContain('abc12345');
+    });
+
+    test('renders Requests (24h) and Requests (total) columns per row', async () => {
+      (api.getApiKeys as jest.Mock).mockResolvedValue({
+        api_keys: [
+          {
+            id: 'key-1',
+            name: 'k1',
+            key_prefix: 'abc12345',
+            is_active: true,
+            created_at: '2024-01-15T10:00:00Z',
+            request_count_24h: 12,
+            request_count_total: 1234,
+          },
+        ],
+      });
+
+      await loadApiKeys();
+
+      const container = document.getElementById('apikeys-list');
+      expect(container?.innerHTML).toContain('Requests (24h)');
+      expect(container?.innerHTML).toContain('Requests (total)');
+      // Counts render with thousands separator for readability.
+      expect(container?.innerHTML).toContain('1,234');
+      expect(container?.innerHTML).toContain('apikeys-count-cell');
+    });
+
+    test('falls back to 0 when counter fields are missing from the response', async () => {
+      (api.getApiKeys as jest.Mock).mockResolvedValue({
+        api_keys: [
+          // No request_count_* fields — simulates a cached older response.
+          { id: 'key-1', name: 'k1', key_prefix: 'abc12345', is_active: true, created_at: '2024-01-15T10:00:00Z' },
+        ],
+      });
+
+      await loadApiKeys();
+
+      const container = document.getElementById('apikeys-list');
+      const cells = container?.querySelectorAll('.apikeys-count-cell');
+      expect(cells?.length).toBe(2);
+      expect(cells?.[0]?.textContent).toBe('0');
+      expect(cells?.[1]?.textContent).toBe('0');
+    });
+
+    test('list-fetch failure clears summary skeleton and shows error', async () => {
+      (api.getApiKeys as jest.Mock).mockRejectedValue(new Error('list boom'));
+      (api.getApiKeysUsageStats as jest.Mock).mockResolvedValue({
+        total_active: 0,
+        total_requests_24h: 0,
+        total_requests_lifetime: 0,
+        top_keys: [],
+      });
+
+      await loadApiKeys();
+      await new Promise((r) => setTimeout(r, 0));
+
+      const list = document.getElementById('apikeys-list');
+      expect(list?.querySelector('.error')?.textContent).toBe('Failed to load API keys');
+      // The skeleton-active marker is gone (success/error both clear it).
+      expect(list?.dataset['skeletonActive']).toBeUndefined();
     });
   });
 });
