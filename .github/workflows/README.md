@@ -378,9 +378,15 @@ Quickly rollback to a previous deployment version by redeploying a known-good Do
 ### Jobs
 
 1. **Validate** - Validate image tag and construct image URI
-2. **Verify Image** - Confirm image exists in registry
-3. **Rollback** - Deploy previous image with Terraform
-4. **Summary** - Create audit record
+2. **Rollback** - Confirm the image exists in the registry, then deploy it with Terraform
+3. **Summary** - Create audit record
+
+Image existence is verified *inside* each rollback job rather than in a
+standalone job. A separate verify job would have to assume the same cloud
+deploy role while carrying no `environment:` binding, which is exactly the
+ungated-but-credentialed shape that made the workflow exploitable. The
+tradeoff is that a rollback to a nonexistent tag now fails after the
+environment approval rather than before it.
 
 ### Triggers
 
