@@ -169,9 +169,13 @@ func printSuccessRate(success, failed int) {
 	}
 }
 
-// archeraSignupURL is the Archera signup link with CUDly attribution, shared
-// with the web interface (frontend ARCHERA_SIGNUP_URL).
-const archeraSignupURL = "https://www.archera.ai/cudly"
+// archeraSignupURL is the Archera signup link with CUDly attribution. Now an
+// alias for the shared constant in pkg/common, which the MCP server's
+// post-purchase offer reads too, so the link and the two disclosures below
+// are written once rather than once per binary. Kept identical to the
+// frontend's ARCHERA_SIGNUP_URL (frontend/src/archera.ts), which cannot
+// import Go.
+const archeraSignupURL = common.ArcheraSignupURL
 
 // printFinalMessage prints the final message based on mode and results.
 func printFinalMessage(isDryRun bool, riSuccess int) {
@@ -200,11 +204,9 @@ func printArcheraPitch() {
 	AppLogger.Println("    You can buy underutilization insurance for Reserved Instances and")
 	AppLogger.Println("    Savings Plans from Archera by signing up at:")
 	AppLogger.Printf("      %s\n", archeraSignupURL)
-	AppLogger.Println("    within the first 7 days of the purchase.")
-	AppLogger.Println("\n    This is entirely optional. CUDly's purchase and management features")
-	AppLogger.Println("    work fully without Archera.")
-	AppLogger.Println("\n    For full disclosure, Archera sponsors CUDly's Open Source development")
-	AppLogger.Println("    from a fraction of their insurance premiums.")
+	AppLogger.Printf("    within the first %d days of the purchase.\n", common.ArcheraEnrollmentWindowDays)
+	AppLogger.Printf("\n    %s\n", common.ArcheraNonGatingDisclosure)
+	AppLogger.Printf("\n    %s\n", common.ArcheraSponsorshipDisclosure)
 }
 
 // printSavingsPlansSection prints the Savings Plans summary section.

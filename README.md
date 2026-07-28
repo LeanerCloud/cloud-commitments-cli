@@ -15,6 +15,12 @@ Topic pages:
 - [Purchase Safety](docs/cli/purchase-safety.md) - dry-run, audit log, idempotency window, and guardrails
 - [Cloud Setup](docs/cli/cloud-setup.md) - `configure-azure` and `configure-gcp` self-hosted credential bootstrap
 
+## MCP Server
+
+CUDly also ships an MCP server (`cudly-mcp`) that lets Claude and other MCP clients search recommendations and drive RI, Savings Plan, and CUD purchases across AWS, Azure, and GCP, with the same dry-run-by-default safety as the CLI.
+
+Setup and usage: [mcp/README.md](mcp/README.md)
+
 ## Key Features
 
 - **Multi-Cloud Support** - Unified interface for AWS (production), Azure (experimental), and GCP (experimental)
