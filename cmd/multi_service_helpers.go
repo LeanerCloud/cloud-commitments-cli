@@ -11,6 +11,7 @@ import (
 	"github.com/LeanerCloud/CUDly/pkg/common"
 	"github.com/LeanerCloud/CUDly/pkg/provider"
 	"github.com/LeanerCloud/CUDly/providers/aws/recommendations"
+	azureprovider "github.com/LeanerCloud/CUDly/providers/azure"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )
@@ -99,7 +100,13 @@ func getAllAWSRegionsWithClient(ctx context.Context, ec2Client EC2ClientInterfac
 // discoverRegionsForService discovers regions that have recommendations for a specific service.
 func discoverRegionsForService(ctx context.Context, client provider.RecommendationsClient, service common.ServiceType) ([]string, error) {
 	recs, err := client.GetRecommendationsForService(ctx, service)
-	if err != nil {
+	if partial := azureprovider.AsPartialSubscriptionFailure(err); partial != nil {
+		// Region discovery is best-effort: the subscriptions that answered
+		// still tell us where to look. Report the gap rather than dropping
+		// the discovered regions or failing outright.
+		AppLogger.Printf("  ⚠️  Region discovery incomplete: %d of %d Azure subscriptions succeeded\n",
+			partial.Succeeded, partial.Attempted)
+	} else if err != nil {
 		return nil, err
 	}
 
@@ -439,6 +446,18 @@ func fetchRecommendationsForRegion(
 	}
 
 	recs, err := recClient.GetRecommendations(ctx, &params)
+	if partial := azureprovider.AsPartialSubscriptionFailure(err); partial != nil {
+		// Keep the subscriptions that did answer, but say plainly that the
+		// sweep was incomplete: without this the operator would read a short
+		// list as "little to buy here" rather than "some subscriptions were
+		// never queried".
+		AppLogger.Printf("  ⚠️  Incomplete: %d of %d Azure subscriptions succeeded; %d could not be queried\n",
+			partial.Succeeded, partial.Attempted, len(partial.Failed))
+		for _, f := range partial.Failed {
+			AppLogger.Printf("      subscription %s: %v\n", f.SubscriptionID, f.Err)
+		}
+		return recs
+	}
 	if err != nil {
 		AppLogger.Printf("  ❌ Failed to fetch recommendations: %v\n", err)
 		return nil
