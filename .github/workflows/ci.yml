@@ -499,6 +499,25 @@ jobs:
       - name: Run parity script self-tests
         run: bash scripts/test-aws-iam-parity.sh
 
+  # Assert that no Terraform file grants a Secret Manager role at project,
+  # folder or organization scope; those scopes hand the member every secret in
+  # the scope. Fast (shell only), so it always runs.
+  gcp-secret-scope:
+    name: GCP Secret Manager grant scope
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert no scope-wide Secret Manager grants
+        run: bash scripts/check-gcp-secret-scope.sh
+
+      - name: Run guard script self-tests
+        run: bash scripts/test-gcp-secret-scope.sh
+
   # Summary job - all checks must pass
   ci-success:
     name: CI Success
@@ -513,6 +532,7 @@ jobs:
       - e2e-tests
       - azure-role-parity
       - aws-iam-parity
+      - gcp-secret-scope
     if: always()
 
     steps:
