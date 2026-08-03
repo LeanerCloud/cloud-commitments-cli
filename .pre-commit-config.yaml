@@ -63,11 +63,26 @@ repos:
         name: Check for case conflicts
 
   # Dockerfile linting
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.14.0
+  #
+  # The upstream hadolint-docker hook (hadolint/hadolint's own
+  # .pre-commit-hooks.yaml) declares `entry: ghcr.io/hadolint/hadolint
+  # hadolint` with no image tag, so Docker resolves it to `:latest` on every
+  # run -- independent of the `rev:` pin above, which only pins which
+  # commit of the *hook definition* is used, not the Docker image it runs.
+  # When upstream published hadolint 2.15.1 as `latest`, CI silently
+  # started linting with a newer ruleset (new DL3066/DL3025 findings on
+  # unchanged Dockerfiles) with no corresponding change in this repo.
+  #
+  # Defined as a local hook instead, pinned to the immutable digest of the
+  # v2.14.0 image, so the linter version can only change via an explicit
+  # bump here.
+  - repo: local
     hooks:
-      - id: hadolint-docker
+      - id: hadolint
         name: Lint Dockerfiles
+        language: docker_image
+        entry: ghcr.io/hadolint/hadolint:v2.14.0@sha256:27086352fd5e1907ea2b934eb1023f217c5ae087992eb59fde121dce9c9ff21e hadolint
+        types: [dockerfile]
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli

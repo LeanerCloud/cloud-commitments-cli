@@ -182,13 +182,17 @@ jobs:
             exit 1
           }
 
-      # Note: the hadolint-docker pre-commit hook
-      # (.pre-commit-config.yaml:80) runs the official
-      # hadolint/hadolint:v2.14.0 Docker image. We do NOT install a host
-      # binary here — it would be dead code (never invoked by the hook)
-      # AND a supply-chain hole (latest tag, no checksum). If a future
-      # change switches the hook from hadolint-docker to plain hadolint,
-      # install a pinned + sha256-verified binary here.
+      # Note: the local `hadolint` pre-commit hook (.pre-commit-config.yaml:81)
+      # runs ghcr.io/hadolint/hadolint pinned by digest to v2.14.0. We do NOT
+      # install a host binary here — it would be dead code (never invoked by
+      # the hook) AND a supply-chain hole (latest tag, no checksum). Note:
+      # an earlier version of this comment claimed the hook already pinned
+      # the image to v2.14.0 via the hook repo's `rev:` -- it did not; that
+      # `rev:` only pins hadolint's *hook definition*, whose upstream entry
+      # (`ghcr.io/hadolint/hadolint hadolint`) has no image tag and floats to
+      # `:latest`. See the digest pin in .pre-commit-config.yaml for the fix.
+      # If a future change switches the hook to a host binary, install a
+      # pinned + sha256-verified binary here.
 
       - name: Install pre-commit
         run: pip install 'pre-commit==4.0.1'
