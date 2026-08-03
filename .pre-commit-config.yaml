@@ -67,21 +67,26 @@ repos:
   # The upstream hadolint-docker hook (hadolint/hadolint's own
   # .pre-commit-hooks.yaml) declares `entry: ghcr.io/hadolint/hadolint
   # hadolint` with no image tag, so Docker resolves it to `:latest` on every
-  # run -- independent of the `rev:` pin above, which only pins which
-  # commit of the *hook definition* is used, not the Docker image it runs.
-  # When upstream published hadolint 2.15.1 as `latest`, CI silently
-  # started linting with a newer ruleset (new DL3066/DL3025 findings on
-  # unchanged Dockerfiles) with no corresponding change in this repo.
+  # run -- independent of any `rev:` pin, which only pins which commit of the
+  # *hook definition* is used, not the Docker image it runs. When upstream
+  # published hadolint 2.15.1 as `latest`, CI silently started linting with a
+  # newer ruleset (new DL3066/DL3025 findings on unchanged Dockerfiles) with no
+  # corresponding change in this repo, and `main` went red (issue #1695).
   #
-  # Defined as a local hook instead, pinned to the immutable digest of the
-  # v2.14.0 image, so the linter version can only change via an explicit
-  # bump here.
+  # Defined as a local hook instead, pinned to an immutable digest, so the
+  # linter version can only change through an explicit edit to this line.
+  #
+  # Pinned to 2.15.1 -- the version that surfaced the findings -- rather than
+  # back to 2.14.0. Pinning to the older image would also have made CI green,
+  # but only by un-seeing findings that are real; the four it reported are
+  # fixed in the Dockerfiles rather than silenced. Bumping this digest is
+  # expected to require fixing whatever the new version finds.
   - repo: local
     hooks:
       - id: hadolint
         name: Lint Dockerfiles
         language: docker_image
-        entry: ghcr.io/hadolint/hadolint:v2.14.0@sha256:27086352fd5e1907ea2b934eb1023f217c5ae087992eb59fde121dce9c9ff21e hadolint
+        entry: ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint
         types: [dockerfile]
 
   # Markdown linting

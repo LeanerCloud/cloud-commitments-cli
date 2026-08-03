@@ -182,8 +182,11 @@ jobs:
             exit 1
           }
 
-      # Note: the local `hadolint` pre-commit hook (.pre-commit-config.yaml:81)
-      # runs ghcr.io/hadolint/hadolint pinned by digest to v2.14.0. We do NOT
+      # Note: the local `hadolint` hook in .pre-commit-config.yaml (search for
+      # `id: hadolint`; no line number, because this comment has already gone
+      # stale twice as that file shifted) runs ghcr.io/hadolint/hadolint pinned
+      # by digest. The version lives in that entry and is the single source of
+      # truth; do not restate it here, or this comment rots again. We do NOT
       # install a host binary here — it would be dead code (never invoked by
       # the hook) AND a supply-chain hole (latest tag, no checksum). Note:
       # an earlier version of this comment claimed the hook already pinned
