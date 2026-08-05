@@ -13,7 +13,7 @@ GIT_SHA?=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # Dev tool versions - keep in sync with the CI pins in
 # .github/workflows/ci.yml, pre-commit.yml and database-migration.yml
 GOLANGCI_LINT_VERSION?=v2.10.1
-GOSEC_VERSION?=v2.22.4
+GOSEC_VERSION?=v2.28.0
 GOCYCLO_VERSION?=v0.6.0
 MIGRATE_VERSION?=v4.19.1
 # staticcheck has no CI pin; it is used by scripts/security-scan.sh

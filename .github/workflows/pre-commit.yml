@@ -127,14 +127,14 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/go/bin
-          key: go-tools-${{ runner.os }}-gosec-v2.22.4-gocyclo-v0.6.0
+          key: go-tools-${{ runner.os }}-gosec-v2.28.0-gocyclo-v0.6.0
 
       - name: Install gosec
         if: steps.cache-go-tools.outputs.cache-hit != 'true'
         # Pinned to the same version ci.yml's `securego/gosec` Action uses,
         # so an upstream gosec release with rule changes can't silently
         # downgrade the gate between the two workflows.
-        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.4
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
 
       - name: Install gocyclo
         if: steps.cache-go-tools.outputs.cache-hit != 'true'
