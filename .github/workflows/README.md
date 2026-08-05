@@ -83,7 +83,7 @@ Deploy CUDly to AWS Lambda with Function URL. Serverless, event-driven platform.
 
 ### Triggers
 
-- Push to `main` (deploys to staging)
+- Push to `main` (deploys to dev)
 - Release creation (deploys to prod)
 - Manual dispatch with environment selection
 
@@ -104,7 +104,7 @@ Deploy CUDly to AWS Lambda with Function URL. Serverless, event-driven platform.
 # Deploy to dev
 gh workflow run deploy-aws-lambda.yml -f environment=dev
 
-# Deploy to staging
+# Push to main also deploys to dev
 git push origin main
 
 # Deploy to prod
