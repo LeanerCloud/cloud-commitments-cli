@@ -91,37 +91,112 @@ jobs:
 
       - name: Download dependencies
         run: |
-          go mod download
-          go mod verify
+          # Multi-module repo: `go mod download` resolves the current module
+          # only, so running it at the root left pkg/ and providers/* unverified
+          # (issue #1751). Mirror the govulncheck per-module loop below.
+          set -e
+          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+            echo "==> go mod download/verify in $mod"
+            (cd "$mod" && go mod download && go mod verify)
+          done
 
-      - name: Run unit tests
+      - name: Run unit tests (all modules)
         run: |
-          go test -v -race -short -coverprofile=coverage.out -covermode=atomic ./...
+          # Multi-module repo: each ./... only walks the current module, so
+          # running from the root alone never compiled or asserted pkg/,
+          # providers/* or tests/e2e -- roughly 1600 test functions that had
+          # never gated a merge (issue #1751). Mirror the govulncheck and gosec
+          # per-module loops, collect one coverage profile per module, then
+          # merge for the upload steps below.
+          #
+          # A failing module must not abort the loop. Aborting would hide every
+          # later module's result behind the first failure, which is the same
+          # shape as the gosec bug in issue #1717. Guard each run, record the
+          # status, and fail at the end so every module is reported.
+          set -uo pipefail
+          status=0
+          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+            tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
+            log="$RUNNER_TEMP/unit-${tag}.log"
+            # tests/e2e holds only //go:build e2e files, so `go test ./...`
+            # there matches no packages and exits 1 -- it cannot be run like the
+            # others. Its tests need the running stack and are executed by the
+            # e2e-tests job over docker compose; what this job can add is a
+            # type-check under that tag, which nothing else here does. Handled
+            # by name, not by a pattern, so the difference is visible in review.
+            if [ "$mod" = "tests/e2e" ]; then
+              echo "==> type-check $mod under -tags=e2e (tests run in the e2e-tests job)"
+              if ! (cd "$mod" && go vet -tags=e2e ./...) 2>&1 | tee "$log"; then
+                echo "::error::$mod failed to type-check under -tags=e2e"
+                status=1
+              fi
+              continue
+            fi
+            echo "==> unit tests in $mod"
+            # Profiles go to $RUNNER_TEMP, not the checkout: never leave working
+            # files in the repository root (repo coding guideline).
+            if ! (cd "$mod" && go test -v -race -short \
+                    -coverprofile="$RUNNER_TEMP/coverage-${tag}.out" \
+                    -covermode=atomic ./...) 2>&1 | tee "$log"; then
+              echo "::error::unit tests failed in $mod"
+              status=1
+            fi
+            # A module that runs zero tests is issue #1751 wearing a new
+            # costume: the loop would "cover" it while asserting nothing. Count
+            # top-level results (subtest lines are indented) and fail loudly.
+            ran=$(grep -cE '^--- (PASS|FAIL|SKIP)' "$log" || true)
+            echo "==> $mod ran $ran top-level test(s)"
+            if [ "$ran" -eq 0 ]; then
+              echo "::error::$mod ran zero tests -- it is in the loop but asserting nothing"
+              status=1
+            fi
+          done
+
+          # Merge the per-module profiles into the single file the steps below
+          # expect. A Go profile is one "mode:" header followed by block lines,
+          # so keep one header and concatenate the bodies.
+          shopt -s nullglob
+          profiles=("$RUNNER_TEMP"/coverage-*.out)
+          if [ "${#profiles[@]}" -eq 0 ]; then
+            echo "::error::no module produced a coverage profile" >&2
+            exit 1
+          fi
+          # Take the mode header from the first profile rather than hardcoding
+          # it: go test picks the default covermode itself (atomic whenever
+          # -race is on), so a literal here would silently mislabel the merge if
+          # the flags change.
+          merged="$RUNNER_TEMP/coverage.out"
+          head -n 1 "${profiles[0]}" > "$merged"
+          for p in "${profiles[@]}"; do
+            tail -n +2 "$p" >> "$merged"
+          done
+          echo "Merged ${#profiles[@]} coverage profile(s), $(( $(wc -l < "$merged") - 1 )) block(s)"
+          exit "$status"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
-          files: ./coverage.out
+          files: ${{ runner.temp }}/coverage.out
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
 
       - name: Generate coverage report
         run: |
-          go tool cover -html=coverage.out -o coverage.html
+          go tool cover -html="$RUNNER_TEMP/coverage.out" -o "$RUNNER_TEMP/coverage.html"
 
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: coverage-report
           path: |
-            coverage.out
-            coverage.html
+            ${{ runner.temp }}/coverage.out
+            ${{ runner.temp }}/coverage.html
           retention-days: 30
 
       - name: Check coverage threshold
         run: |
-          coverage=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          coverage=$(go tool cover -func="$RUNNER_TEMP/coverage.out" | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage: ${coverage}%"
           if (( $(echo "$coverage < 80" | bc -l) )); then
             echo "::warning::Coverage is below 80% (current: ${coverage}%)"
@@ -186,13 +261,65 @@ jobs:
           DB_PASSWORD: test_password  # CI-only throwaway password — not used in any real environment
           DB_SSL_MODE: disable
         run: |
-          go test -v -race -tags=integration -coverprofile=coverage-integration.out ./...
+          # Same multi-module gap as the unit job (issue #1751): a bare ./...
+          # here only ever walked the root module. Mirror the same loop.
+          #
+          # Note that -tags=integration ADDS a build tag rather than selecting
+          # only tagged files, so each module runs its untagged tests too. Today
+          # every //go:build integration file lives in the root module, so for
+          # pkg/ and providers/* this run is a compile-under-tag check plus a
+          # re-run of their unit tests. That is the point: it is what makes an
+          # integration test added to those modules later actually gate.
+          set -uo pipefail
+          status=0
+          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+            tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
+            log="$RUNNER_TEMP/integration-${tag}.log"
+            # See the unit job: tests/e2e has no package to test without its own
+            # tag, so it gets a type-check here too rather than a run.
+            if [ "$mod" = "tests/e2e" ]; then
+              echo "==> type-check $mod under -tags=e2e (tests run in the e2e-tests job)"
+              if ! (cd "$mod" && go vet -tags=e2e ./...) 2>&1 | tee "$log"; then
+                echo "::error::$mod failed to type-check under -tags=e2e"
+                status=1
+              fi
+              continue
+            fi
+            echo "==> integration tests in $mod"
+            if ! (cd "$mod" && go test -v -race -tags=integration \
+                    -coverprofile="$RUNNER_TEMP/coverage-integration-${tag}.out" \
+                    ./...) 2>&1 | tee "$log"; then
+              echo "::error::integration tests failed in $mod"
+              status=1
+            fi
+            ran=$(grep -cE '^--- (PASS|FAIL|SKIP)' "$log" || true)
+            echo "==> $mod ran $ran top-level test(s)"
+            if [ "$ran" -eq 0 ]; then
+              echo "::error::$mod ran zero tests -- it is in the loop but asserting nothing"
+              status=1
+            fi
+          done
+
+          # Merge per-module profiles for the upload step (see the unit job).
+          shopt -s nullglob
+          profiles=("$RUNNER_TEMP"/coverage-integration-*.out)
+          if [ "${#profiles[@]}" -eq 0 ]; then
+            echo "::error::no module produced an integration coverage profile" >&2
+            exit 1
+          fi
+          merged="$RUNNER_TEMP/coverage-integration.out"
+          head -n 1 "${profiles[0]}" > "$merged"
+          for p in "${profiles[@]}"; do
+            tail -n +2 "$p" >> "$merged"
+          done
+          echo "Merged ${#profiles[@]} integration coverage profile(s)"
+          exit "$status"
 
       - name: Upload integration coverage
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: integration-coverage
-          path: coverage-integration.out
+          path: ${{ runner.temp }}/coverage-integration.out
           retention-days: 30
 
   # Docker image build test
