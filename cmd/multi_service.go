@@ -136,8 +136,8 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	AppLogger.Printf("\n📥 Fetching recommendations from all services...\n")
 	allRecs, drops := fetchAllRecs(ctx, awsCfg, recClient, accountCache, servicesToProcess, engineData, cfg, coverageMap)
 
-	// Phase 2: score and display.
-	scoredResult := scoreAndDisplay(allRecs, cfg)
+	// Phase 2: score, enforce the run-wide instance cap, and display.
+	scoredResult := scoreLimitAndDisplay(allRecs, cfg, drops)
 	if len(scoredResult.Passed) == 0 {
 		printDropSummary(drops)
 		AppLogger.Printf("\nℹ️  No recommendations passed filters. Nothing to purchase.\n")
@@ -202,18 +202,147 @@ func loadAWSConfig(ctx context.Context, cfg Config) (aws.Config, error) {
 	return awsconfig.LoadDefaultConfig(ctx, opts...)
 }
 
-// scoreAndDisplay runs the scorer on recs and prints the scored table and summary.
-func scoreAndDisplay(recs []common.Recommendation, cfg Config) scorer.ScoredResult {
+// scoreLimitAndDisplay runs the scorer on recs, enforces the run-wide
+// --max-instances cap on the survivors, and prints the scored table and
+// summary.
+//
+// The cap runs between scoring and rendering so the table, the confirmation
+// prompt and the purchase loop all describe the same post-cap set, and so the
+// instances that survive are the highest-savings ones run-wide (scorer.Score
+// sorts Passed by savings percentage descending).
+func scoreLimitAndDisplay(recs []common.Recommendation, cfg Config, drops *common.DropSummary) scorer.ScoredResult {
 	scorerCfg := scorer.Config{
 		MinSavingsPct:      cfg.MinSavingsPct,
 		MaxBreakEvenMonths: cfg.MaxBreakEvenMonths,
 		MinCount:           cfg.MinCount,
 	}
 	result := scorer.Score(recs, scorerCfg)
+	result.Passed = applyGlobalInstanceLimit(result.Passed, cfg, drops)
 	fmt.Print(reporter.RenderTable(result))
 	fmt.Print(reporter.RenderExcluded(result))
 	fmt.Print(reporter.RenderSummary(result))
 	return result
+}
+
+// applyGlobalInstanceLimit enforces --max-instances once across the entire run.
+//
+// The flag is documented as a hard cap on the total number of instances
+// purchased across all recommendations, so it has to see every service and
+// every region together. Applying it inside the per-region fetch instead caps
+// each (service, region) pair independently and multiplies the operator's cap
+// by the number of pairs.
+//
+// passed must already be ordered best-first: ApplyInstanceLimit consumes the
+// slice in order and drops the tail, so the ordering decides which commitments
+// survive. scorer.Score guarantees that ordering.
+//
+// Truncation can push a recommendation under --min-count, which is a hard
+// floor rather than advice, so dropTruncatedBelowMinCount removes any such
+// recommendation instead of purchasing it short.
+//
+// Nothing is truncated silently. Every reduced or dropped recommendation is
+// named on stdout, and the drops are counted into the end-of-run summary.
+func applyGlobalInstanceLimit(passed []common.Recommendation, cfg Config, drops *common.DropSummary) []common.Recommendation {
+	if cfg.MaxInstances <= 0 {
+		return passed
+	}
+	totalBefore := CalculateTotalInstances(passed)
+	if totalBefore <= int(cfg.MaxInstances) {
+		return passed
+	}
+
+	limited := ApplyInstanceLimit(passed, cfg.MaxInstances)
+	limited, belowMin := dropTruncatedBelowMinCount(limited, cfg.MinCount)
+	reportInstanceLimit(passed, limited, len(belowMin), totalBefore, cfg.MaxInstances, drops)
+	reportMinCountDrops(belowMin, cfg.MinCount, drops)
+	return limited
+}
+
+// dropTruncatedBelowMinCount removes recommendations that the cap truncated to
+// fewer instances than --min-count allows, returning the survivors and the
+// removed recommendations at their truncated counts.
+//
+// --min-count is a hard floor everywhere else in the codebase, never advice:
+// the scorer rejects recommendations under it outright
+// (scorer.filterReason, "count %d below minimum %d"), the scheduler's
+// meetsMinCount drops them, and both `docs/cli/filtering.md` and
+// `docs/cli/README.md` describe it as dropping recommendations below the
+// number. filtering.md applies it to "the adjusted instance count (after
+// coverage scaling)", so the floor is meant to gate the *sized* count, and
+// truncation by --max-instances is another form of sizing.
+//
+// Buying a commitment smaller than the operator's stated minimum can be worse
+// than buying nothing, which is the whole reason the floor exists, so a
+// truncated recommendation is dropped rather than purchased short. The freed
+// budget is deliberately not redistributed: the next recommendation would have
+// to fit in an even smaller remainder and would fail the same floor.
+//
+// Removal is always from the tail. ApplyInstanceLimit reduces at most one
+// recommendation (the one where the budget runs out, which is the last it
+// keeps), and every earlier one still carries the full count that already
+// cleared the scorer's floor. Taking only from the tail keeps the result a
+// prefix of the input, which reportInstanceLimit relies on.
+func dropTruncatedBelowMinCount(limited []common.Recommendation, minCount int) (kept, removed []common.Recommendation) {
+	if minCount <= 0 {
+		return limited, nil
+	}
+	kept = limited
+	for len(kept) > 0 && kept[len(kept)-1].Count < minCount {
+		removed = append(removed, kept[len(kept)-1])
+		kept = kept[:len(kept)-1]
+	}
+	return kept, removed
+}
+
+// reportMinCountDrops names each recommendation the --min-count floor rejected
+// after --max-instances truncated it. It continues the reportInstanceLimit
+// listing, where these already appear as dropped, and explains why they were
+// not simply purchased at the reduced count.
+func reportMinCountDrops(removed []common.Recommendation, minCount int, drops *common.DropSummary) {
+	for i := range removed {
+		rec := removed[i]
+		AppLogger.Printf("     ↳ %s %s %s: the cap left room for only %d instances, below --min-count %d, so it is dropped rather than purchased short\n",
+			rec.Service, rec.Region, rec.ResourceType, rec.Count, minCount)
+	}
+	drops.Add(common.DropMinCountAfterCap, len(removed))
+}
+
+// reportInstanceLimit prints what --max-instances removed from the run.
+// after must be the prefix of before produced by ApplyInstanceLimit, so
+// after[i] and before[i] describe the same recommendation.
+//
+// belowMinCount is how many of the missing entries were removed by the
+// --min-count floor rather than by the budget. They are still listed here as
+// dropped (they were), but they are attributed to --min-count-after-cap by
+// reportMinCountDrops, so excluding them from this tally keeps each dropped
+// recommendation counted exactly once in the end-of-run summary.
+func reportInstanceLimit(before, after []common.Recommendation, belowMinCount, totalBefore int, maxInstances int32, drops *common.DropSummary) {
+	AppLogger.Printf("\n🔒 --max-instances=%d caps the whole run: the %d recommendations that passed scoring total %d instances.\n",
+		maxInstances, len(before), totalBefore)
+	AppLogger.Printf("   Keeping the highest savings-percentage recommendations first. The following are reduced or dropped:\n")
+
+	reduced, dropped := 0, 0
+	for i := range before {
+		rec := before[i]
+		kept := 0
+		if i < len(after) {
+			kept = after[i].Count
+		}
+		switch {
+		case kept == rec.Count:
+			continue
+		case kept > 0:
+			reduced++
+			AppLogger.Printf("   • reduced: %s %s %s %d → %d instances\n", rec.Service, rec.Region, rec.ResourceType, rec.Count, kept)
+		default:
+			dropped++
+			AppLogger.Printf("   • dropped: %s %s %s (%d instances)\n", rec.Service, rec.Region, rec.ResourceType, rec.Count)
+		}
+	}
+
+	drops.Add(common.DropMaxInstances, dropped-belowMinCount)
+	AppLogger.Printf("   Proceeding with %d instances across %d recommendations (%d reduced, %d dropped).\n",
+		CalculateTotalInstances(after), len(after), reduced, dropped)
 }
 
 // sumPassedRecs returns total instance count and total estimated savings for passed recs.

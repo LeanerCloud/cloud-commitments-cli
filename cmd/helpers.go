@@ -501,7 +501,16 @@ func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []com
 	return result
 }
 
-// ApplyInstanceLimit limits the total number of instances.
+// ApplyInstanceLimit truncates recs so their total Count does not exceed
+// maxInstances. It is a single-shot cap over whatever slice it is handed: the
+// caller is responsible for handing it the complete run-wide set, because
+// applying it to a subset (one service, one region) caps that subset only and
+// multiplies the effective cap by the number of subsets. See
+// applyGlobalInstanceLimit in multi_service.go for the run-wide call site.
+//
+// Recommendations are consumed in slice order, so the caller controls which
+// ones survive by ordering the slice (the main path caps the scorer's
+// savings-sorted output, keeping the highest-value commitments).
 func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []common.Recommendation {
 	if maxInstances <= 0 {
 		return recs
@@ -520,7 +529,12 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 			adjusted.Count = remaining
 		}
 		result = append(result, adjusted)
-		remaining -= adjusted.Count
+		// Only a positive Count consumes budget. Subtracting a non-positive
+		// Count would credit budget back and let later recommendations push
+		// the run past the cap.
+		if adjusted.Count > 0 {
+			remaining -= adjusted.Count
+		}
 	}
 	return result
 }

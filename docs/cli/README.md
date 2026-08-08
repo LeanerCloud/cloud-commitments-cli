@@ -36,7 +36,7 @@ All flags belong to the root command unless noted otherwise.
 | `--target-coverage` | `-u` | `0` (disabled) | Target percentage (0-100) of historical average hourly usage to cover with commitments. Sizes each recommendation to `floor(avg * target/100)`, leaving the remainder on-demand. Overrides `--coverage` when non-zero. Pairs with `--rebuy-window-days` and `--min-pool-size` (see [filtering.md](filtering.md)). |
 | `--coverage-lookback-days` | | `30` | Calendar days of historical demand fed to `GetReservationCoverage` when computing the existing-RI coverage map for `--target-coverage` sizing. Match this to your AWS console coverage report window to reconcile cudly's `ExistingCoverage` column against the console export. Only affects `--target-coverage`. |
 | `--override-count` | | `0` (disabled) | Replace every recommendation's count with this fixed number. Useful when testing a specific purchase size. |
-| `--max-instances` | | `0` (no limit) | Hard cap on the total number of instances purchased across all recommendations. Applied after coverage scaling. See [filtering.md](filtering.md). |
+| `--max-instances` | | `0` (no limit) | Hard cap on the total number of instances purchased across all recommendations. Applied after coverage scaling, once per run across every service and region (not per service or per region). On default runs the survivors are the highest-savings recommendations run-wide; on `--input-csv` runs they are taken in file order. A recommendation the cap would truncate below `--min-count` is dropped instead. See [filtering.md](filtering.md). |
 
 ### Purchase terms
 
