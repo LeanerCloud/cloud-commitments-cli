@@ -1346,7 +1346,7 @@ func TestProcessPurchaseLoopEmptyRecommendations(t *testing.T) {
 	results := processPurchaseLoop(ctx, []common.Recommendation{}, "us-east-1", false, mockClient, toolCfg)
 
 	assert.Empty(t, results)
-	mockClient.AssertNotCalled(t, "PurchaseCommitment")
+	mockClient.AssertNotCalled(t, "PurchaseCommitment", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestProcessServicePurchasesUserCancellation(t *testing.T) {
@@ -1408,7 +1408,7 @@ func TestProcessServicePurchasesDryRunMultiple(t *testing.T) {
 		assert.Equal(t, recs[i].ResourceType, result.Recommendation.ResourceType)
 	}
 
-	mockClient.AssertNotCalled(t, "PurchaseCommitment")
+	mockClient.AssertNotCalled(t, "PurchaseCommitment", mock.Anything, mock.Anything, mock.Anything)
 }
 
 // ==================== New Extracted Function Tests ====================
@@ -1483,7 +1483,7 @@ func TestProcessPurchaseLoopDryRun(t *testing.T) {
 	}
 
 	// Mock should not be called in dry run mode
-	mockClient.AssertNotCalled(t, "PurchaseCommitment")
+	mockClient.AssertNotCalled(t, "PurchaseCommitment", mock.Anything, mock.Anything, mock.Anything)
 }
 
 func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
