@@ -27,16 +27,23 @@ resource "azurerm_user_assigned_identity" "cleanup" {
   tags                = var.tags
 }
 
-# Grant Key Vault access to managed identity
-resource "azurerm_key_vault_access_policy" "cleanup" {
-  key_vault_id = var.key_vault_id
-  tenant_id    = azurerm_user_assigned_identity.cleanup.tenant_id
-  object_id    = azurerm_user_assigned_identity.cleanup.principal_id
-
-  secret_permissions = [
-    "Get",
-    "List"
-  ]
+# Grant Key Vault access to the managed identity.
+#
+# This MUST be an RBAC role assignment, not an azurerm_key_vault_access_policy.
+# The vault this module is pointed at (terraform/modules/secrets/azure/main.tf)
+# sets enable_rbac_authorization = true, and an RBAC-enabled vault never
+# consults its accessPolicies array. Terraform applies an access policy against
+# such a vault successfully, so the mistake is invisible at plan and apply time
+# and only surfaces as a runtime 403 when the function reads db-password (#1621).
+#
+# "Key Vault Secrets User" is the exact RBAC equivalent of the access policy this
+# replaced: its dataActions are getSecret + readMetadata, which is precisely
+# secret_permissions = ["Get", "List"], and its actions list is empty so it
+# confers no management-plane rights.
+resource "azurerm_role_assignment" "cleanup_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.cleanup.principal_id
 }
 
 # Linux Function App with container
@@ -96,6 +103,11 @@ resource "azurerm_linux_function_app" "cleanup" {
   virtual_network_subnet_id = var.subnet_id != "" ? var.subnet_id : null
 
   tags = var.tags
+
+  # Azure RBAC propagation is asynchronous and takes up to 10 minutes. Without
+  # this edge Terraform may create the function app in parallel with its Key
+  # Vault grant, and the first invocation 403s on db-password.
+  depends_on = [azurerm_role_assignment.cleanup_kv_secrets_user]
 }
 
 # Timer trigger function (defined in host.json and function.json)

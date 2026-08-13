@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "Fixture: the Terraform JSON encoding. Must exit 2 (cannot check), never 0.",
+    "This file DOES declare an azurerm_key_vault_access_policy. The HCL scanner",
+    "matches block syntax and would find nothing here, so without the explicit",
+    "reject it would report clean, which is the exact failure this guard exists",
+    "to prevent. Kept as .tf.json so it is discovered by the same find as a real",
+    "one would be; it lives outside terraform/ and iac/, so it is only reachable",
+    "when passed explicitly by this test."
+  ],
+  "resource": {
+    "azurerm_key_vault_access_policy": {
+      "workload": {
+        "key_vault_id": "${var.key_vault_id}",
+        "tenant_id": "${data.azurerm_client_config.current.tenant_id}",
+        "object_id": "${azurerm_user_assigned_identity.workload.principal_id}",
+        "secret_permissions": ["Get", "List"]
+      }
+    }
+  }
+}

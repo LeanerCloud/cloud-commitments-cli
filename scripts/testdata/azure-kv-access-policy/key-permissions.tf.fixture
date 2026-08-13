@@ -1,0 +1,22 @@
+# Fixture: an access policy granting KEY permissions rather than secret ones.
+# Must exit 1.
+#
+# The ban is on the resource type, not on any particular permission list. An
+# RBAC-enabled vault ignores this one just as completely as it ignores a
+# secret_permissions policy, and a guard keyed on "Get"/"List" or on
+# secret_permissions would let this variant through.
+
+resource "azurerm_key_vault_access_policy" "signing" {
+  key_vault_id = var.key_vault_id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_user_assigned_identity.app.principal_id
+
+  key_permissions = [
+    "Get",
+    "Sign",
+  ]
+
+  certificate_permissions = [
+    "Get",
+  ]
+}

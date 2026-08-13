@@ -101,16 +101,25 @@ resource "azurerm_user_assigned_identity" "workload" {
   tags = local.common_tags
 }
 
-# Grant workload identity access to Key Vault secrets
-resource "azurerm_key_vault_access_policy" "workload" {
-  key_vault_id = var.key_vault_id
-  tenant_id    = azurerm_user_assigned_identity.workload.tenant_id
-  object_id    = azurerm_user_assigned_identity.workload.principal_id
-
-  secret_permissions = [
-    "Get",
-    "List"
-  ]
+# Grant the workload identity access to Key Vault secrets.
+#
+# This MUST be an RBAC role assignment, not an azurerm_key_vault_access_policy.
+# The vault this module is pointed at (terraform/modules/secrets/azure/main.tf)
+# sets enable_rbac_authorization = true, and an RBAC-enabled vault never
+# consults its accessPolicies array. Terraform applies an access policy against
+# such a vault successfully, so the mistake is invisible at plan and apply time
+# and only surfaces as a runtime 403 when a pod fetches a secret (#1621).
+#
+# "Key Vault Secrets User" is the exact RBAC equivalent of the access policy this
+# replaced: its dataActions are getSecret + readMetadata, which is precisely
+# secret_permissions = ["Get", "List"], and its actions list is empty so it
+# confers no management-plane rights. Deliberately not "Key Vault Secrets
+# Officer" (dataActions secrets/*), which would grant write and delete that the
+# access policy never did.
+resource "azurerm_role_assignment" "workload_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
 }
 
 # Grant AKS cluster identity access to pull images from ACR
@@ -424,9 +433,15 @@ resource "kubernetes_deployment" "app" {
     }
   }
 
+  # The Key Vault grant is listed here because these pods resolve
+  # ADMIN_PASSWORD_SECRET, CREDENTIAL_ENCRYPTION_KEY_SECRET_NAME and the
+  # AZURE_SMTP_* secrets from the vault at startup through the workload
+  # identity. Azure RBAC propagation is asynchronous and takes up to 10
+  # minutes, and Terraform's implicit graph does not capture that edge.
   depends_on = [
     kubernetes_namespace.app,
-    kubernetes_secret.database
+    kubernetes_secret.database,
+    azurerm_role_assignment.workload_kv_secrets_user
   ]
 }
 

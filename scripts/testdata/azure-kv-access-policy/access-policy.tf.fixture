@@ -1,0 +1,18 @@
+# Fixture: the #1621 anti-pattern verbatim. Must exit 1.
+#
+# This is the exact shape that shipped in
+# terraform/modules/compute/azure/cleanup-function/main.tf and
+# terraform/modules/compute/azure/aks/main.tf: an access policy declared against
+# a vault that has enable_rbac_authorization = true, which Azure accepts and
+# then ignores.
+
+resource "azurerm_key_vault_access_policy" "workload" {
+  key_vault_id = var.key_vault_id
+  tenant_id    = azurerm_user_assigned_identity.workload.tenant_id
+  object_id    = azurerm_user_assigned_identity.workload.principal_id
+
+  secret_permissions = [
+    "Get",
+    "List"
+  ]
+}

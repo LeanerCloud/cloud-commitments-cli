@@ -1,0 +1,27 @@
+# Fixture: the supported shape. Must exit 0.
+#
+# An RBAC role assignment against the vault, plus an unrelated role assignment,
+# plus a prose mention of the banned resource type inside a comment. A guard
+# blunt enough to grep the bare string would fire on the comment below and on
+# nothing of substance, so this fixture is what keeps it anchored to the block
+# header.
+#
+# Do not replace this with an azurerm_key_vault_access_policy resource.
+
+resource "azurerm_role_assignment" "workload_kv_secrets_user" {
+  scope                = var.key_vault_id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+}
+
+resource "azurerm_role_assignment" "acr_pull" {
+  scope                = var.registry_id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+}
+
+resource "azurerm_user_assigned_identity" "workload" {
+  name                = "workload-identity"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+}
