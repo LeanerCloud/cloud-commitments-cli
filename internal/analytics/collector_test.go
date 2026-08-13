@@ -805,6 +805,9 @@ func (m *mockConfigStore) SaveLadderTranches(_ context.Context, _ []config.Ladde
 func (m *mockConfigStore) LatestLadderRunStartedAt(_ context.Context, _ string) (*time.Time, error) {
 	return nil, nil
 }
+func (m *mockConfigStore) ExpireElapsedLadderTranches(_ context.Context, _ string, _ time.Time) (int64, error) {
+	return 0, nil
+}
 func (m *mockConfigStore) TransitionLadderRunStatus(_ context.Context, _ string, _ []ladder.RunStatus, _ ladder.RunStatus) (*config.LadderRunDB, error) {
 	return nil, nil
 }

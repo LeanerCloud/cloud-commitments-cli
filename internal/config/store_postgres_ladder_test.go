@@ -463,6 +463,68 @@ func TestPostgresStore_GetInFlightLadderCommitUSDHr(t *testing.T) {
 	})
 }
 
+// TestPostgresStore_ExpireElapsedLadderTranches exercises the real UPDATE that
+// retires un-fired tranches (#1605). It pins every axis of the WHERE clause:
+// only this config's rows, only 'scheduled' rows, and only rows STRICTLY before
+// the cutoff, so a tranche exactly on the boundary keeps its place in the
+// in-flight sum instead of being re-planned while it can still fire.
+func TestPostgresStore_ExpireElapsedLadderTranches(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	store := setupLadderStore(ctx, t)
+	configID := seedLadderConfigWithExtID(ctx, t, store, "444444444444")
+	otherConfigID := seedLadderConfigWithExtID(ctx, t, store, "555555555555")
+	cfgID := configID
+	otherID := otherConfigID
+
+	cutoff := time.Now().UTC().Truncate(time.Microsecond)
+
+	insert := func(t *testing.T, cID *string, amount float64, status ladder.TrancheStatus, scheduled time.Time) string {
+		t.Helper()
+		id := uuid.New().String()
+		require.NoError(t, store.SaveLadderTranches(ctx, []LadderTrancheDB{{
+			ID: id, ConfigID: cID, LayerType: ladder.LayerConvertibleRI,
+			Term: ladder.Term1Year, PaymentOption: ladder.PaymentNoUpfront,
+			Status: status, AmountUSDHr: amount, ScheduledDate: scheduled,
+		}}))
+		return id
+	}
+	statusOf := func(t *testing.T, id string) string {
+		t.Helper()
+		var s string
+		require.NoError(t, store.db.QueryRow(ctx,
+			`SELECT status FROM ladder_tranches WHERE id = $1`, id).Scan(&s))
+		return s
+	}
+
+	elapsed := insert(t, &cfgID, 3.0, ladder.TrancheStatusScheduled, cutoff.Add(-time.Hour))
+	onBoundary := insert(t, &cfgID, 2.0, ladder.TrancheStatusScheduled, cutoff)
+	future := insert(t, &cfgID, 1.5, ladder.TrancheStatusScheduled, cutoff.Add(24*time.Hour))
+	elapsedFired := insert(t, &cfgID, 7.0, ladder.TrancheStatusFired, cutoff.Add(-48*time.Hour))
+	otherElapsed := insert(t, &otherID, 9.0, ladder.TrancheStatusScheduled, cutoff.Add(-48*time.Hour))
+
+	n, err := store.ExpireElapsedLadderTranches(ctx, configID, cutoff)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n, "only the strictly-elapsed scheduled tranche of this config may be expired")
+
+	assert.Equal(t, string(ladder.TrancheStatusCancelled), statusOf(t, elapsed), "an un-fired elapsed tranche must be cancelled")
+	assert.Equal(t, string(ladder.TrancheStatusScheduled), statusOf(t, onBoundary), "a tranche exactly on the cutoff must be kept in flight")
+	assert.Equal(t, string(ladder.TrancheStatusScheduled), statusOf(t, future), "a not-yet-due tranche must be kept in flight")
+	assert.Equal(t, string(ladder.TrancheStatusFired), statusOf(t, elapsedFired), "a fired tranche must not be rewritten")
+	assert.Equal(t, string(ladder.TrancheStatusScheduled), statusOf(t, otherElapsed), "another config's tranches must never be touched")
+
+	// The netting sum the planner reads drops by exactly the expired amount.
+	inFlight, err := store.GetInFlightLadderCommitUSDHr(ctx, configID)
+	require.NoError(t, err)
+	require.NotNil(t, inFlight)
+	assert.InDelta(t, 3.5, *inFlight, 1e-6, "in-flight must drop the expired 3.0 and keep the live 2.0 + 1.5")
+
+	// Idempotent: a second pass has nothing left to expire.
+	n, err = store.ExpireElapsedLadderTranches(ctx, configID, cutoff)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n, "re-running the expiry must be a no-op")
+}
+
 // TestPostgresStore_SaveLadderRunWithTranches_AppendOnly proves the L5
 // append-only contract at the store layer: persisting a new run's tranches for
 // a config MUST NOT touch that config's existing scheduled tranches. (The

@@ -470,9 +470,20 @@ type StoreInterface interface {
 	// a non-nil pointer (zero when no scheduled tranches exist) so callers can
 	// pass it directly to AllocationInput.InFlightUSDPerHour. Never returns
 	// nil without an error.
+	//
+	// ExpireElapsedLadderTranches moves the config's scheduled tranches whose
+	// scheduled_date is strictly before cutoff to status='cancelled' and returns
+	// how many rows moved. A tranche only leaves 'scheduled' by firing, so one
+	// still scheduled well past its own fire date never fired: without this
+	// transition it stays in the in-flight sum forever, the netting keeps
+	// zeroing the gap, and the ladder silently stops planning (#1605). Callers
+	// must run it before GetInFlightLadderCommitUSDHr and must pick a cutoff
+	// that leaves a just-due tranche time to fire, so expiry can never race a
+	// firing tranche into a duplicate purchase.
 	SaveLadderRun(ctx context.Context, run *LadderRunDB) (*LadderRunDB, error)
 	SaveLadderRunWithTranches(ctx context.Context, run *LadderRunDB, tranches []LadderTrancheDB) (*LadderRunDB, error)
 	GetInFlightLadderCommitUSDHr(ctx context.Context, configID string) (*float64, error)
+	ExpireElapsedLadderTranches(ctx context.Context, configID string, cutoff time.Time) (int64, error)
 	GetLadderRun(ctx context.Context, id string) (*LadderRunDB, error)
 	SaveLadderTranches(ctx context.Context, tranches []LadderTrancheDB) error
 	LatestLadderRunStartedAt(ctx context.Context, configID string) (*time.Time, error)

@@ -18,14 +18,21 @@ import (
 	pkgladder "github.com/LeanerCloud/CUDly/pkg/ladder"
 )
 
+// Nominal planning period per cadence: how long a config waits between runs.
+const (
+	cadenceDailyPeriod  = 24 * time.Hour
+	cadenceWeeklyPeriod = 7 * 24 * time.Hour
+)
+
 // Cadence thresholds for the per-config self-gate (Q6).
 // Each constant is a minimum elapsed time before the same config may run again.
 // The 4-hour slack on each bound prevents skipped firings from drifting into
 // the next cadence window: a daily at 23:55 still qualifies at 19:55 the next
 // day even if the cron fires a few minutes early.
 const (
-	cadenceDailyMin  = 20 * time.Hour                // daily: 20h (24h - 4h slack)
-	cadenceWeeklyMin = 6*24*time.Hour + 20*time.Hour // weekly: 6d 20h (7d - 4h slack)
+	cadenceRunSlack  = 4 * time.Hour
+	cadenceDailyMin  = cadenceDailyPeriod - cadenceRunSlack  // 20h
+	cadenceWeeklyMin = cadenceWeeklyPeriod - cadenceRunSlack // 6d 20h
 )
 
 // dataSourceAWSCostExplorer is the provenance tag stamped on every planned
@@ -313,6 +320,13 @@ func (app *Application) executeLadderRun(
 		return fmt.Errorf("GetLayerStates: %w", err)
 	}
 
+	// Retire tranches that are scheduled but long past their fire date before
+	// reading the in-flight sum: they never fired, so they are not in flight and
+	// must not net against this run's gap (#1605).
+	if err := app.expireElapsedLadderTranches(ctx, dbCfg.ID, engineCfg.Cadence, now); err != nil {
+		return err
+	}
+
 	// L5: Fetch in-flight commitment BEFORE Allocate so the engine can subtract
 	// it from the gap. In-flight = the config's status=scheduled (not-yet-fired)
 	// ladder tranches ONLY. Fired/completed tranches are excluded because they
@@ -369,6 +383,54 @@ func (app *Application) executeLadderRun(
 	// SaveLadderRunWithTranches inserts the run and its NEW scheduled tranches
 	// and leaves any existing scheduled tranches untouched (see persistLadderRun).
 	return app.persistLadderRun(ctx, dbCfg, runID, now, plan, baseline, allocResult, trancheResult)
+}
+
+// ladderCadencePeriod returns the nominal planning period for a cadence. An
+// unrecognized cadence is an error rather than a default: silently treating an
+// unknown cadence as daily would shorten the window that protects a due tranche
+// from premature expiry, which is a money-path decision.
+func ladderCadencePeriod(cadence pkgladder.LadderCadence) (time.Duration, error) {
+	switch cadence {
+	case pkgladder.CadenceDaily:
+		return cadenceDailyPeriod, nil
+	case pkgladder.CadenceWeekly:
+		return cadenceWeeklyPeriod, nil
+	}
+	return 0, fmt.Errorf("unknown cadence %q", cadence)
+}
+
+// expireElapsedLadderTranches cancels the config's scheduled tranches that are
+// more than one full planning period past their fire date.
+//
+// A tranche leaves 'scheduled' only by firing, so one that is still scheduled a
+// whole cadence after it was due never fired and never will. Until it is
+// retired it keeps counting toward GetInFlightLadderCommitUSDHr, the netting
+// keeps subtracting it from the gap, and every subsequent run Holds: the ladder
+// stops planning with no error, looking exactly like "target coverage already
+// met" (#1605).
+//
+// The one-period grace (strictly more than, so a tranche exactly one period
+// past due survives) is deliberately generous: a tranche that is merely late is
+// still genuinely in flight, and re-planning its amount while it can still fire
+// would commit the money twice.
+//
+// A failed expiry is returned, not swallowed: proceeding would net stale
+// tranches out of the gap and under-purchase silently.
+func (app *Application) expireElapsedLadderTranches(ctx context.Context, configID string, cadence pkgladder.LadderCadence, now time.Time) error {
+	period, err := ladderCadencePeriod(cadence)
+	if err != nil {
+		return fmt.Errorf("tranche expiry cutoff: %w", err)
+	}
+	cutoff := now.Add(-period)
+	expired, err := app.Config.ExpireElapsedLadderTranches(ctx, configID, cutoff)
+	if err != nil {
+		return fmt.Errorf("ExpireElapsedLadderTranches: %w", err)
+	}
+	if expired > 0 {
+		log.Printf("ladder_run: config %s: cancelled %d scheduled tranche(s) still un-fired before %s (cadence=%s); their commitment is no longer netted out of the gap",
+			configID, expired, cutoff.Format(time.RFC3339), cadence)
+	}
+	return nil
 }
 
 // persistLadderRun validates the assembled plan and writes the ladder_runs row

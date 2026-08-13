@@ -1654,6 +1654,21 @@ func (m *MockConfigStore) GetInFlightLadderCommitUSDHr(ctx context.Context, conf
 	return v, args.Error(1)
 }
 
+// ExpireElapsedLadderTranches mocks the ExpireElapsedLadderTranches operation.
+// Returns (0, nil) when no expectation is registered: nothing to expire.
+func (m *MockConfigStore) ExpireElapsedLadderTranches(ctx context.Context, configID string, cutoff time.Time) (int64, error) {
+	m.record("ExpireElapsedLadderTranches", ctx, configID, cutoff)
+	if !isExpected(&m.Mock, "ExpireElapsedLadderTranches") {
+		return 0, nil
+	}
+	args := m.Called(ctx, configID, cutoff)
+	v, ok := args.Get(0).(int64)
+	if !ok {
+		panic(fmt.Sprintf("mock: expected int64, got %T", args.Get(0)))
+	}
+	return v, args.Error(1)
+}
+
 // TransitionLadderRunStatus mocks the TransitionLadderRunStatus operation.
 // Returns (nil, nil) when no expectation is registered (CAS race-lost path).
 func (m *MockConfigStore) TransitionLadderRunStatus(ctx context.Context, id string, fromStatuses []ladder.RunStatus, toStatus ladder.RunStatus) (*config.LadderRunDB, error) {

@@ -372,6 +372,11 @@ func (s *PostgresStore) SaveLadderRunWithTranches(ctx context.Context, run *Ladd
 // not-yet-fired (scheduled) tranches are genuinely "in flight" and absent
 // from E, so they alone must be netted out of the gap.
 //
+// "scheduled" means LIVE only because the caller expires long-elapsed tranches
+// (ExpireElapsedLadderTranches) before reading this sum. Without that step a
+// tranche that was never fired stays scheduled forever and keeps inflating the
+// in-flight figure, which zeroes the gap and silently stops planning (#1605).
+//
 // Returns a non-nil *float64 (zero when no scheduled tranches exist); never
 // returns nil without a non-nil error, so callers can pass it directly to
 // AllocationInput.InFlightUSDPerHour without an extra nil-guard.
@@ -387,6 +392,38 @@ func (s *PostgresStore) GetInFlightLadderCommitUSDHr(ctx context.Context, config
 		return nil, fmt.Errorf("GetInFlightLadderCommitUSDHr config_id=%s: %w", configID, err)
 	}
 	return &total, nil
+}
+
+// ExpireElapsedLadderTranches transitions the config's scheduled tranches whose
+// scheduled_date is strictly before cutoff to status='cancelled', returning the
+// number of rows moved.
+//
+// A tranche only leaves 'scheduled' when it fires. One that is still scheduled
+// well past its own fire date never fired and never will, so it is not in
+// flight: leaving it scheduled keeps it in the in-flight sum that
+// GetInFlightLadderCommitUSDHr feeds to the netting, which zeroes the gap and
+// stops the ladder from planning anything ever again (#1605).
+//
+// 'cancelled' rather than 'failed': TrancheStatus.allowsFiredAt reserves
+// 'failed' for tranches that fired and then failed, while 'cancelled' is the
+// terminal status for a tranche that never fired. Rows are kept (not deleted)
+// so the abandoned ramp stays auditable.
+//
+// The cutoff is the caller's; it must leave enough slack for a tranche that is
+// only just past due to still fire, so this can never race a firing tranche
+// into a duplicate purchase.
+func (s *PostgresStore) ExpireElapsedLadderTranches(ctx context.Context, configID string, cutoff time.Time) (int64, error) {
+	tag, err := s.db.Exec(ctx, `
+		UPDATE ladder_tranches
+		SET status = $3
+		WHERE config_id = $1
+		  AND status = $2
+		  AND scheduled_date < $4
+	`, configID, string(ladder.TrancheStatusScheduled), string(ladder.TrancheStatusCancelled), cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("ExpireElapsedLadderTranches config_id=%s cutoff=%s: %w", configID, cutoff.Format(time.RFC3339), err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // LatestLadderRunStartedAt returns the maximum started_at for the given

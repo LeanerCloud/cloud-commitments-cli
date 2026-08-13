@@ -1147,8 +1147,39 @@ func TestRatToFloat64Ptr_PositiveValue(t *testing.T) {
 // -> persist pipeline; only the store and capability are fakes.
 type ladderStatefulStore struct {
 	mockConfigStoreForHealth
-	tranches []config.LadderTrancheDB // every persisted tranche, live status
-	runs     []*config.LadderRunDB
+	expireErr error                    // when set, ExpireElapsedLadderTranches fails
+	tranches  []config.LadderTrancheDB // every persisted tranche, live status
+	runs      []*config.LadderRunDB
+}
+
+// ExpireElapsedLadderTranches mirrors the production UPDATE: scheduled tranches
+// of THIS config whose scheduled_date is strictly before the cutoff become
+// cancelled; the rows are kept for audit. Nothing else is touched.
+func (s *ladderStatefulStore) ExpireElapsedLadderTranches(_ context.Context, configID string, cutoff time.Time) (int64, error) {
+	if s.expireErr != nil {
+		return 0, s.expireErr
+	}
+	var n int64
+	for i := range s.tranches {
+		tr := &s.tranches[i]
+		if tr.ConfigID != nil && *tr.ConfigID == configID &&
+			tr.Status == pkgladder.TrancheStatusScheduled &&
+			tr.ScheduledDate.Before(cutoff) {
+			tr.Status = pkgladder.TrancheStatusCancelled
+			n++
+		}
+	}
+	return n, nil
+}
+
+// trancheStatuses maps each persisted tranche ID to its live status, so a test
+// can assert that an abandoned tranche was retired (not deleted).
+func (s *ladderStatefulStore) trancheStatuses() map[string]pkgladder.TrancheStatus {
+	out := make(map[string]pkgladder.TrancheStatus, len(s.tranches))
+	for i := range s.tranches {
+		out[s.tranches[i].ID] = s.tranches[i].Status
+	}
+	return out
 }
 
 // scheduledSum totals the config's currently-scheduled tranche amounts. It is
@@ -1354,4 +1385,145 @@ func TestExecuteLadderRun_L5OverCommitGuard_NettingCapsAppends(t *testing.T) {
 	// Final: still pinned exactly at target-E.
 	assert.InDelta(t, targetMinusE, store.scheduledSum(cfgID), 1e-9,
 		"after 3 constant-usage runs the scheduled commitment must equal target-E, never a multiple")
+}
+
+// ============================================================
+// Tranche expiry: un-fired tranches must stop being netted (#1605)
+// ============================================================
+
+// TestExecuteLadderRun_ElapsedRampExpires_PlanningResumes is the #1605
+// regression. A tranche only leaves 'scheduled' by firing, and nothing fires
+// today, so a planned ramp that is never executed used to stay in the in-flight
+// sum forever: the netting kept zeroing the gap and the ladder stopped planning
+// after its very first run, with no error and no way to tell it apart from
+// "target coverage already met".
+//
+// Run 1 builds the ramp; run 2 happens a month later with the ramp still
+// un-fired. The dead tranches must be retired so the run plans the still-needed
+// commitment again. Before the fix run 2 is a Hold (zero new commitment), and
+// so is every run after it, forever.
+func TestExecuteLadderRun_ElapsedRampExpires_PlanningResumes(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	const cfgID = "cfg-1605-elapsed"
+	const targetMinusE = 8.0
+	dbCfg := validTestDBConfig(cfgID) // cadence=daily -> one-day expiry grace
+	dbCfg.RampSchedule = fullyDelayedRamp(t)
+
+	store := &ladderStatefulStore{}
+	app := &Application{Config: store}
+	capability := &fakeLadderCapability{t: t, baseline: testBaseline()}
+
+	// Run 1: builds the ramp (tranches due at +1d and +7d) summing target-E.
+	require.NoError(t, app.executeLadderRun(ctx, &dbCfg, capability, "123456789012",
+		pkgladder.Term1Year, pkgladder.PaymentNoUpfront, now))
+	gen1 := store.scheduledTrancheIDs(cfgID)
+	require.NotEmpty(t, gen1, "run1 must build a scheduled ramp")
+	require.InDelta(t, targetMinusE, store.scheduledSum(cfgID), 1e-9, "run1 ramp must sum to target-E")
+
+	// Run 2, 30 days later. Nothing ever fired: both tranches are weeks past
+	// their fire date, so none of that commitment exists and none of it is in
+	// flight. The run MUST plan the gap again.
+	require.NoError(t, app.executeLadderRun(ctx, &dbCfg, capability, "123456789012",
+		pkgladder.Term1Year, pkgladder.PaymentNoUpfront, now.Add(30*24*time.Hour)))
+
+	require.Len(t, store.runs, 2)
+	assert.InDelta(t, targetMinusE, store.runs[1].TotalHourlyCommit, 1e-9,
+		"run2 must re-plan the full gap: the run1 ramp never fired, so it is not in flight")
+
+	// The abandoned generation is retired (kept for audit, not deleted) and no
+	// longer counted, and the fresh ramp is exactly target-E: not 0 (silent
+	// stop) and not 16 (double-counting the dead ramp).
+	statuses := store.trancheStatuses()
+	for id := range gen1 {
+		assert.Equal(t, pkgladder.TrancheStatusCancelled, statuses[id],
+			"un-fired elapsed tranche %s must be retired, not left scheduled forever", id)
+	}
+	gen2 := store.scheduledTrancheIDs(cfgID)
+	require.NotEmpty(t, gen2, "run2 must build a replacement ramp")
+	for id := range gen1 {
+		assert.NotContains(t, gen2, id, "the expired tranche %s must not still count as in flight", id)
+	}
+	assert.InDelta(t, targetMinusE, store.scheduledSum(cfgID), 1e-9,
+		"live scheduled commitment must be back at target-E after the dead ramp is retired")
+	assert.Len(t, store.tranches, len(gen1)+len(gen2),
+		"expired tranches must be retained as audit rows, never deleted")
+}
+
+// TestExecuteLadderRun_PastDueWithinGrace_StaysInFlight guards the opposite
+// direction of the same money path: a tranche that is only slightly past due
+// can still fire, so expiring it would let the run re-plan an amount that is
+// about to be purchased, committing it twice. Only tranches more than a full
+// planning period past due are retired.
+func TestExecuteLadderRun_PastDueWithinGrace_StaysInFlight(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	const cfgID = "cfg-1605-grace"
+	const targetMinusE = 8.0
+	dbCfg := validTestDBConfig(cfgID) // cadence=daily -> 24h grace past the fire date
+	dbCfg.RampSchedule = fullyDelayedRamp(t)
+
+	store := &ladderStatefulStore{}
+	app := &Application{Config: store}
+	capability := &fakeLadderCapability{t: t, baseline: testBaseline()}
+
+	require.NoError(t, app.executeLadderRun(ctx, &dbCfg, capability, "123456789012",
+		pkgladder.Term1Year, pkgladder.PaymentNoUpfront, now))
+	gen1 := store.scheduledTrancheIDs(cfgID)
+	require.Len(t, gen1, 2, "run1 must build both ramp steps")
+	require.InDelta(t, targetMinusE, store.scheduledSum(cfgID), 1e-9)
+
+	// Run 2 at +36h: the +1d tranche is 12h past due, well inside the one-day
+	// grace, and the +7d tranche is not due at all. Both are still in flight.
+	require.NoError(t, app.executeLadderRun(ctx, &dbCfg, capability, "123456789012",
+		pkgladder.Term1Year, pkgladder.PaymentNoUpfront, now.Add(36*time.Hour)))
+
+	assert.Equal(t, gen1, store.scheduledTrancheIDs(cfgID),
+		"a tranche that is only just past due must stay in flight (expiring it risks a double purchase)")
+	assert.InDelta(t, targetMinusE, store.scheduledSum(cfgID), 1e-9,
+		"in-flight commitment must be unchanged while the ramp can still fire")
+	require.Len(t, store.runs, 2)
+	assert.Equal(t, 0.0, store.runs[1].TotalHourlyCommit,
+		"run2 must Hold: the live ramp already covers target-E")
+}
+
+// TestExecuteLadderRun_ExpiryFailure_FailsLoud proves the expiry error is not
+// swallowed. A failed expiry means the in-flight sum may still contain dead
+// tranches, which would silently under-purchase; the run must abort before any
+// planning is persisted so the config is counted Errored.
+func TestExecuteLadderRun_ExpiryFailure_FailsLoud(t *testing.T) {
+	ctx := testutil.TestContext(t)
+	now := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	const cfgID = "cfg-1605-expire-err"
+	dbCfg := validTestDBConfig(cfgID)
+	dbCfg.RampSchedule = fullyDelayedRamp(t)
+
+	store := &ladderStatefulStore{expireErr: errors.New("connection reset by peer")}
+	app := &Application{Config: store}
+	capability := &fakeLadderCapability{t: t, baseline: testBaseline()}
+
+	err := app.executeLadderRun(ctx, &dbCfg, capability, "123456789012",
+		pkgladder.Term1Year, pkgladder.PaymentNoUpfront, now)
+	require.Error(t, err, "a failed tranche expiry must abort the run, never plan on a stale in-flight sum")
+	assert.Contains(t, err.Error(), "connection reset by peer", "the underlying cause must be surfaced")
+	assert.Empty(t, store.runs, "no run may be persisted after a failed expiry")
+	assert.Empty(t, store.tranches, "no tranche may be persisted after a failed expiry")
+}
+
+// TestLadderCadencePeriod pins the expiry grace to each cadence's nominal
+// planning period and requires an unknown cadence to fail loud: defaulting it
+// to daily would silently shorten the window that protects a due tranche from
+// premature expiry.
+func TestLadderCadencePeriod(t *testing.T) {
+	daily, err := ladderCadencePeriod(pkgladder.CadenceDaily)
+	require.NoError(t, err)
+	assert.Equal(t, 24*time.Hour, daily)
+
+	weekly, err := ladderCadencePeriod(pkgladder.CadenceWeekly)
+	require.NoError(t, err)
+	assert.Equal(t, 7*24*time.Hour, weekly)
+
+	_, err = ladderCadencePeriod(pkgladder.LadderCadence("monthly"))
+	require.Error(t, err, "an unrecognized cadence must not silently fall back to a default period")
+	assert.Contains(t, err.Error(), "monthly")
 }
