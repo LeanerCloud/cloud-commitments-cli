@@ -53,15 +53,98 @@ func TestResolveAccountConfigsForRecs_EmptyRecs(t *testing.T) {
 	assert.Zero(t, reader.overrideCalls)
 }
 
-func TestResolveAccountConfigsForRecs_NilCloudAccountSkipped(t *testing.T) {
-	reader := &fakeAccountConfigReader{}
+// TestResolveAccountConfigsForRecs_NilCloudAccount_GlobalApplied is the
+// regression test for issue #1604: a rec with no cloud account (ambient
+// credentials, cloud_account_id NULL) must still resolve against the global
+// service_configs row. Pre-fix the rec was skipped before the global lookup,
+// so the operator's Settings -> Services policy was a no-op for it.
+func TestResolveAccountConfigsForRecs_NilCloudAccount_GlobalApplied(t *testing.T) {
+	reader := &fakeAccountConfigReader{
+		globals: map[string]*ServiceConfig{
+			"aws|rds": {Provider: "aws", Service: "rds", Enabled: false, MinCount: 10},
+		},
+	}
 	recs := []RecommendationRecord{
 		{Provider: "aws", Service: "rds", CloudAccountID: nil}, // ambient
 	}
 	got, err := ResolveAccountConfigsForRecs(context.Background(), reader, recs)
 	assert.NoError(t, err)
-	assert.Empty(t, got, "nil CloudAccountID recs are skipped")
-	assert.Zero(t, reader.globalCalls)
+
+	resolved := got[AccountConfigKey(AmbientAccountKey, "aws", "rds")]
+	assert.NotNil(t, resolved, "ambient rec must resolve under the ambient account key")
+	assert.False(t, resolved.Enabled, "global Enabled=false applies to account-less recs")
+	assert.Equal(t, 10, resolved.MinCount, "global MinCount applies to account-less recs")
+	assert.Equal(t, 1, reader.globalCalls, "the global row is fetched for account-less recs")
+	assert.Zero(t, reader.overrideCalls, "no per-account override lookup without an account")
+}
+
+// TestResolveAccountConfigsForRecs_NilCloudAccount_NoGlobal_Skipped is the
+// other direction of #1604: with nothing configured there is still no entry,
+// so callers keep passing account-less recs through untouched.
+func TestResolveAccountConfigsForRecs_NilCloudAccount_NoGlobal_Skipped(t *testing.T) {
+	reader := &fakeAccountConfigReader{}
+	recs := []RecommendationRecord{
+		{Provider: "aws", Service: "rds", CloudAccountID: nil},
+	}
+	got, err := ResolveAccountConfigsForRecs(context.Background(), reader, recs)
+	assert.NoError(t, err)
+	assert.Empty(t, got, "no global row -> nothing to apply -> no entry")
+	assert.Zero(t, reader.overrideCalls)
+}
+
+// TestResolveAccountConfigsForRecs_EmptyAccountIDTreatedAsAmbient guards the
+// aliasing hazard: a non-nil pointer to "" must resolve exactly like a nil
+// pointer, not attempt a per-account override lookup on an empty account ID.
+func TestResolveAccountConfigsForRecs_EmptyAccountIDTreatedAsAmbient(t *testing.T) {
+	reader := &fakeAccountConfigReader{
+		globals: map[string]*ServiceConfig{
+			"aws|rds": {Provider: "aws", Service: "rds", Enabled: false},
+		},
+	}
+	empty := ""
+	recs := []RecommendationRecord{
+		{Provider: "aws", Service: "rds", CloudAccountID: &empty},
+		{Provider: "aws", Service: "rds", CloudAccountID: nil},
+	}
+	got, err := ResolveAccountConfigsForRecs(context.Background(), reader, recs)
+	assert.NoError(t, err)
+	assert.Len(t, got, 1, "both spellings of 'no account' share one ambient entry")
+	assert.NotNil(t, got[AccountConfigKey(AmbientAccountKey, "aws", "rds")])
+	assert.Zero(t, reader.overrideCalls, "no override lookup on an empty account ID")
+}
+
+// TestResolveAccountConfigsForRecs_AmbientAndAccountRecsBothResolved checks
+// that fixing the ambient path leaves the account-scoped path intact: both
+// entries appear, each resolved with its own override state.
+func TestResolveAccountConfigsForRecs_AmbientAndAccountRecsBothResolved(t *testing.T) {
+	reader := &fakeAccountConfigReader{
+		globals: map[string]*ServiceConfig{
+			"aws|rds": {Provider: "aws", Service: "rds", Enabled: true, MinCount: 2},
+		},
+		overrides: map[string]*AccountServiceOverride{
+			"acct-A|aws|rds": {Enabled: boolPtr(false)},
+		},
+	}
+	recs := []RecommendationRecord{
+		{Provider: "aws", Service: "rds", CloudAccountID: nil},
+		acctRec("acct-A", "aws", "rds"),
+	}
+
+	got, err := ResolveAccountConfigsForRecs(context.Background(), reader, recs)
+	assert.NoError(t, err)
+	assert.Len(t, got, 2)
+
+	ambient := got[AccountConfigKey(AmbientAccountKey, "aws", "rds")]
+	assert.NotNil(t, ambient)
+	assert.Equal(t, 2, ambient.MinCount, "ambient entry carries the global MinCount")
+	assert.True(t, ambient.Enabled, "ambient entry is the global row, unaffected by acct-A's override")
+
+	scoped := got[AccountConfigKey("acct-A", "aws", "rds")]
+	assert.NotNil(t, scoped)
+	assert.False(t, scoped.Enabled, "account entry still reflects its override")
+	assert.Equal(t, 2, scoped.MinCount, "account entry inherits the global MinCount")
+	assert.Equal(t, 1, reader.globalCalls, "global lookup shared between both")
+	assert.Equal(t, 1, reader.overrideCalls, "override looked up only for the account-scoped rec")
 }
 
 func TestResolveAccountConfigsForRecs_OverridePresent_ResolvedConfigReflectsOverride(t *testing.T) {

@@ -44,10 +44,14 @@ func (s *Scheduler) applyAccountOverrides(ctx context.Context, recs []config.Rec
 // ServiceConfig says enabled=false, or whose engine / region / resource_type
 // is rejected by the resolved include/exclude lists.
 //
-// Recs without a CloudAccountID (e.g. AWS ambient-credentials path) and
-// recs whose triple has no resolved entry (no global ServiceConfig row, or
-// the resolver caller skipped them) pass through unfiltered — there is no
-// per-account policy to enforce on them.
+// Recs without a CloudAccountID (e.g. AWS ambient-credentials path) are
+// filtered by the global ServiceConfig alone, which the resolver stores under
+// config.AmbientAccountKey: no per-account override can exist for them, but
+// the operator's global enabled / min_count / include / exclude policy must
+// still apply (issue #1604).
+//
+// Recs whose triple has no resolved entry (neither a global ServiceConfig row
+// nor an override) pass through unfiltered — there is no policy to enforce.
 func filterRecsByResolvedConfigs(
 	recs []config.RecommendationRecord,
 	resolved map[string]*config.ServiceConfig,
@@ -57,11 +61,7 @@ func filterRecsByResolvedConfigs(
 	out := make([]config.RecommendationRecord, 0, len(recs))
 	for i := range recs {
 		rec := recs[i]
-		if rec.CloudAccountID == nil {
-			out = append(out, rec)
-			continue
-		}
-		cfg := resolved[config.AccountConfigKey(*rec.CloudAccountID, rec.Provider, rec.Service)]
+		cfg := resolved[config.RecConfigKey(&rec)]
 		if cfg == nil {
 			out = append(out, rec)
 			continue

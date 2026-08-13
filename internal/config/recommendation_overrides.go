@@ -23,6 +23,32 @@ func AccountConfigKey(accountID, provider, service string) string {
 	return accountID + "|" + provider + "|" + service
 }
 
+// AmbientAccountKey is the account segment used for recommendations that carry
+// no cloud account: the AWS ambient-credentials path writes
+// cloud_account_id = NULL when the executing identity matches no registered
+// cloud_accounts row. Only the per-account override is inapplicable to those
+// recs; the global service_configs row still governs them (issue #1604).
+const AmbientAccountKey = ""
+
+// recAccountID returns the account segment for rec. A nil CloudAccountID and a
+// pointer to an empty string both resolve to AmbientAccountKey, so the two
+// spellings of "no account" cannot alias onto the same map key through
+// different resolution paths.
+func recAccountID(rec *RecommendationRecord) string {
+	if rec.CloudAccountID == nil {
+		return AmbientAccountKey
+	}
+	return *rec.CloudAccountID
+}
+
+// RecConfigKey returns the AccountConfigKey under which ResolveAccountConfigsForRecs
+// stores the resolved config for rec. Callers must use it rather than composing
+// the key themselves, so account-less recs look up the same ambient entry the
+// resolver wrote.
+func RecConfigKey(rec *RecommendationRecord) string {
+	return AccountConfigKey(recAccountID(rec), rec.Provider, rec.Service)
+}
+
 // globalConfigCache holds a fetched-once cache of global ServiceConfig values
 // keyed by (provider, service).
 type globalConfigCache struct {
@@ -68,12 +94,18 @@ func (c *globalConfigCache) lookup(ctx context.Context, store AccountConfigReade
 // ResolveServiceConfig(provider, service, global, override). Returns a map
 // keyed by AccountConfigKey -> resolved *ServiceConfig.
 //
-// Triples are skipped (not present in the map) when:
-//   - rec.CloudAccountID is nil — no per-account override possible (e.g.
-//     AWS ambient-credentials path).
-//   - Neither a global ServiceConfig nor a per-account override exists for the
-//     (provider, service) pair — no configuration to apply, so callers treat
-//     the triple as "no filter applies".
+// Recs with no cloud account (AWS ambient-credentials path, cloud_account_id
+// NULL) are resolved under AmbientAccountKey against the global
+// ServiceConfig alone: no per-account override can exist for them, but the
+// global row's enabled / min_count / include / exclude policy still applies.
+// Skipping them entirely made the global policy a no-op for single-account
+// ambient deployments, so a service disabled in Settings stayed visible and
+// purchasable (issue #1604).
+//
+// A triple is skipped (not present in the map) only when neither a global
+// ServiceConfig nor a per-account override exists for the (provider, service)
+// pair — there is no configuration to apply, so callers treat the triple as
+// "no filter applies".
 //
 // When a per-account override exists but no global ServiceConfig does, the
 // override is applied against a synthesized default baseline (Enabled: true)
@@ -105,11 +137,8 @@ func ResolveAccountConfigsForRecs(
 
 	for i := range recs {
 		rec := &recs[i]
-		if rec.CloudAccountID == nil {
-			continue
-		}
-		accountID := *rec.CloudAccountID
-		key := AccountConfigKey(accountID, rec.Provider, rec.Service)
+		accountID := recAccountID(rec)
+		key := RecConfigKey(rec)
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -120,9 +149,13 @@ func ResolveAccountConfigsForRecs(
 			return resolved, err
 		}
 
-		override, err := store.GetAccountServiceOverride(ctx, accountID, rec.Provider, rec.Service)
-		if err != nil {
-			return resolved, fmt.Errorf("get override %s/%s/%s: %w", accountID, rec.Provider, rec.Service, err)
+		// No account to key an override on — the global row is the whole policy.
+		var override *AccountServiceOverride
+		if accountID != AmbientAccountKey {
+			override, err = store.GetAccountServiceOverride(ctx, accountID, rec.Provider, rec.Service)
+			if err != nil {
+				return resolved, fmt.Errorf("get override %s/%s/%s: %w", accountID, rec.Provider, rec.Service, err)
+			}
 		}
 
 		// Skip the triple only when both global and override are absent — there is

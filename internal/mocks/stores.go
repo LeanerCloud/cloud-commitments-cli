@@ -120,8 +120,16 @@ func (m *MockConfigStore) UpdateGlobalConfigAtomic(ctx context.Context, apply fu
 }
 
 // GetServiceConfig mocks the GetServiceConfig operation.
+// Defaults to (nil, nil) — "no global service_configs row" — when no
+// expectation is registered, mirroring GetAccountServiceOverride. Both are
+// read by config.ResolveAccountConfigsForRecs on every recommendation-list
+// read, including for recs with no cloud account (issue #1604), so tests that
+// do not exercise service configuration must not have to stub them.
 func (m *MockConfigStore) GetServiceConfig(ctx context.Context, provider, service string) (*config.ServiceConfig, error) {
 	m.record("GetServiceConfig", ctx, provider, service)
+	if !isExpected(&m.Mock, "GetServiceConfig") {
+		return nil, nil
+	}
 	args := m.Called(ctx, provider, service)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
