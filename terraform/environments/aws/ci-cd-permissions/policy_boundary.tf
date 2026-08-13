@@ -32,23 +32,36 @@
 #
 # THE ALLOW LIST IS A CEILING, NOT A GRANT. A boundary grants nothing on its
 # own; effective permissions are the intersection of it and the role's identity
-# policy. Every service listed below is already reachable by at least one
-# workload role today, so this document removes no permission any role currently
-# has. Granularity is deliberately per-service rather than per-action: a
-# too-narrow boundary fails at RUNTIME (a Lambda 403s in production) rather than
-# at apply time, which is a far worse failure mode than the apply-time 403s this
-# module has produced before (#1496, #1514, #1671, #1698). Per-service keeps the
-# blast radius of a miss to "a whole new AWS service was added", which is a
-# conscious change, rather than "someone added one more action".
+# policy. Everything listed below is already reachable by at least one workload
+# role today, so this document removes no permission any role currently has.
 #
-# DRIFT IS GUARDED IN CI. Granting a workload role an action in a service that
-# is not listed here would deploy cleanly and then 403 at runtime. That is
-# exactly the invisible failure the per-service granularity is meant to make
-# rare, and TestBoundaryCoversWorkloadServices in
-# terraform/environments/aws/ci-cd-permissions/policy_guard_test.go turns what
-# is left of it into a CI failure: it re-derives the service set from the IAM
-# policy documents in terraform/modules and fails if any of them is missing
-# here. Add the service to the list below in the same change.
+# Granularity defaults to per-service rather than per-action: a too-narrow
+# boundary fails at RUNTIME (a Lambda 403s in production) rather than at apply
+# time, which is a far worse failure mode than the apply-time 403s this module
+# has produced before (#1496, #1514, #1671, #1698). Per-service keeps the blast
+# radius of a miss to "a whole new AWS service was added", which is a conscious
+# change, rather than "someone added one more action".
+#
+# ecs, lambda and ssm are the exception and are pinned per action (#1723),
+# because at `service:*` width each one lets a boundaried principal execute code
+# as a DIFFERENT principal, which is not a widening within the ceiling but a
+# complete exit from it: see the escape criterion spelled out in
+# OrganizationsDiscoveryCeiling below. The runtime-403 risk that argues for
+# per-service granularity does not apply to those three, because their action
+# lists are the union of what terraform/modules grants and what the AWS managed
+# policies those modules attach grant, i.e. a superset of every identity policy
+# any workload role can carry. Effective permissions are identity AND ceiling,
+# so a ceiling that already covers the whole identity side changes nothing.
+#
+# DRIFT IS GUARDED IN CI, in both directions, by policy_guard_test.go in this
+# directory. TestBoundaryCoversWorkloadServices re-derives the action set from
+# the IAM policy documents in terraform/modules and fails if this document does
+# not cover it; TestBoundaryCoversSSMManagedInstanceCore does the same for the
+# one AWS managed policy whose contents this document enumerates rather than
+# wildcards; TestBoundaryDeniesCrossPrincipalEscapes fails if ecs, lambda or ssm
+# is ever widened back to a form that permits one of the escape actions. A grant
+# added to a module without the matching entry here would otherwise deploy
+# cleanly and then 403 at runtime; make both edits in the same change.
 resource "aws_iam_policy" "workload_boundary" {
   name        = "cudly-deploy-boundary"
   description = "CUDly Terraform deploy: permissions ceiling for every role the deploy role creates or manages"
@@ -57,12 +70,34 @@ resource "aws_iam_policy" "workload_boundary" {
     Version = "2012-10-17"
     Statement = [
       {
-        # The services CUDly workload roles actually use. Derived from the IAM
-        # policy documents in terraform/modules plus the four AWS managed
-        # policies those modules attach: AWSLambdaBasicExecutionRole (logs),
+        # What CUDly workload roles actually use. Derived from the IAM policy
+        # documents in terraform/modules plus the four AWS managed policies
+        # those modules attach: AWSLambdaBasicExecutionRole (logs),
         # AWSLambdaVPCAccessExecutionRole (ec2, logs),
         # AmazonECSTaskExecutionRolePolicy (ecr, logs) and
-        # AmazonSSMManagedInstanceCore (ssm, ssmmessages, ec2messages, s3, ec2).
+        # AmazonSSMManagedInstanceCore (ssm, ssmmessages, ec2messages).
+        #
+        # The three per-action services, and where each entry comes from:
+        #
+        #   - ecs:RunTask is the only ecs action any module grants (the four
+        #     EventBridge invoker roles in modules/compute/aws/fargate). None of
+        #     the attached managed policies grants an ecs action. The ecs:cluster
+        #     condition and the task-definition Resource stay on the module
+        #     policy; a boundary cannot re-apply them, and does not need to.
+        #   - lambda:InvokeFunction (the API Lambda self-invoking for the async
+        #     refresh path, #257) and lambda:GetFunctionUrlConfig (OIDC issuer
+        #     lookup at cold start, modules/compute/aws/lambda/signing-key.tf)
+        #     are the only two any module grants. The lambda:InvokeFunction and
+        #     lambda:InvokeFunctionUrl in aws_lambda_permission blocks are
+        #     RESOURCE policies granting a service principal, not grants to a
+        #     workload role, so this ceiling never gates them.
+        #   - the ssm entries are AmazonSSMManagedInstanceCore v2 verbatim (the
+        #     fck-nat instance role in modules/networking/aws is the only role
+        #     that carries it, for Session Manager access). No module grants an
+        #     ssm action of its own. Every one of them is an agent reporting on
+        #     the instance it already runs on; the operator-side verbs that
+        #     reach a DIFFERENT instance, ssm:SendCommand and ssm:StartSession
+        #     above all, are deliberately absent.
         #
         # `iam:` is absent on purpose and is the whole point of the statement:
         # because a boundary caps by intersection, omitting a service denies it
@@ -83,7 +118,8 @@ resource "aws_iam_policy" "workload_boundary" {
           "elasticache:*",
           "es:*",
           "kms:*",
-          "lambda:*",
+          "lambda:GetFunctionUrlConfig",
+          "lambda:InvokeFunction",
           "logs:*",
           "memorydb:*",
           "rds:*",
@@ -92,18 +128,33 @@ resource "aws_iam_policy" "workload_boundary" {
           "savingsplans:*",
           "secretsmanager:*",
           "ses:*",
-          "ssm:*",
+          "ssm:DescribeAssociation",
+          "ssm:DescribeDocument",
+          "ssm:GetDeployablePatchSnapshotForInstance",
+          "ssm:GetDocument",
+          "ssm:GetManifest",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:ListAssociations",
+          "ssm:ListInstanceAssociations",
+          "ssm:PutComplianceItems",
+          "ssm:PutConfigurePackageResult",
+          "ssm:PutInventory",
+          "ssm:UpdateAssociationStatus",
+          "ssm:UpdateInstanceAssociationStatus",
+          "ssm:UpdateInstanceInformation",
           "ssmmessages:*",
         ]
         Resource = "*"
       },
       {
-        # organizations and sts are the two services narrowed in THIS change,
-        # because at `service:*` granularity each of them is a complete escape
-        # from this boundary rather than a widening within it: the criterion is
-        # "does this let a boundaried role keep running as a DIFFERENT
-        # principal, with no iam:PassRole involved" (PassRoleCeiling below is
-        # what scopes PassRole itself, so it does not help here).
+        # organizations and sts are narrowed for the same reason ecs, lambda and
+        # ssm are pinned per action in WorkloadServiceCeiling above: at
+        # `service:*` granularity each of them is a complete escape from this
+        # boundary rather than a widening within it. The criterion is "does this
+        # let a boundaried role keep running as a DIFFERENT principal, with no
+        # iam:PassRole involved" (PassRoleCeiling below is what scopes PassRole
+        # itself, so it does not help here).
         #
         #   - organizations:* includes CreateAccount (mints a fresh account that
         #     trusts this one), AttachPolicy/DetachPolicy (rewrites SCPs) and
@@ -116,17 +167,22 @@ resource "aws_iam_policy" "workload_boundary" {
         #     account trusts the management account root) and the ceiling is
         #     simply gone.
         #
-        # THIS IS NOT THE COMPLETE SET, and the statement below should not be
-        # read as a finished escape analysis. At least three more services meet
-        # the same criterion and are left at full service width in
-        # WorkloadServiceCeiling above: lambda:* (UpdateFunctionCode on any
-        # function, then invoke, runs as that function's execution role),
-        # ssm:* (SendCommand / StartSession to any SSM-managed instance, runs
-        # as its instance profile) and ecs:* (UpdateService onto an existing
-        # task definition revision, or ExecuteCommand into a running task).
-        # None of those three needs iam:PassRole, so PassRoleCeiling's
-        # cudly-*-only scoping does not constrain them either. Narrowing them
-        # is out of scope for this change and tracked in #1723.
+        # The three services that used to be left at full width here have been
+        # narrowed in WorkloadServiceCeiling above (#1723): lambda
+        # (UpdateFunctionCode on any function, then invoke, runs as that
+        # function's execution role), ssm (SendCommand / StartSession to any
+        # SSM-managed instance, runs as its instance profile) and ecs
+        # (UpdateService onto an existing task definition revision, or
+        # ExecuteCommand into a running task). None of the three needs
+        # iam:PassRole, so PassRoleCeiling's cudly-*-only scoping does not
+        # constrain them either, which is why the action lists and not a
+        # PassRole scope are what closes them.
+        #
+        # THIS IS STILL NOT A FINISHED ESCAPE ANALYSIS. The criterion applies to
+        # every service in WorkloadServiceCeiling, and the ones left at
+        # `service:*` are there because no cross-principal execution path
+        # through them is known, not because one was ruled out. Apply the
+        # criterion again before adding a service at full width.
         #
         # organizations and sts are therefore pinned to exactly what the
         # modules grant. organizations is action-scoped rather than

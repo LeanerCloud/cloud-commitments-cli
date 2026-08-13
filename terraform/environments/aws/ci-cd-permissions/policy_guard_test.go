@@ -498,6 +498,178 @@ func equalStringSets(got, want []string) bool {
 	return true
 }
 
+// boundaryAllowedActions returns every action named by an Allow statement in
+// policy_boundary.tf, comments stripped.
+//
+// Callers ask "does this document permit X" through actionPermitted rather than
+// by substring-searching the file, which is what the coverage check used to do.
+// A substring check answers a weaker question than it looks like it does: an
+// action named inside a DENY statement satisfies it just as well as a real
+// grant, so a boundary that had moved ecs:RunTask from its Allow list into a
+// Deny would still have read as "covered". Splitting into statement objects and
+// keeping only the Allow ones is what makes the answer mean what the caller
+// needs it to mean.
+//
+// Deny statements are deliberately NOT subtracted here. The one Deny this
+// document carries (DenyPassDeployRole) is resource-scoped, so "the action
+// appears in a Deny" does not imply the action is unreachable, and pretending
+// otherwise would produce a wrong answer in the direction that hides a gap.
+func boundaryAllowedActions(t *testing.T) []string {
+	t.Helper()
+
+	stmts := extractStatementBlocks(readPolicySource(t, boundaryFile))
+	if len(stmts) == 0 {
+		t.Fatalf("%s: found zero Statement objects; the statement splitter in this test is broken and would otherwise pass vacuously", boundaryFile)
+	}
+
+	var allowed []string
+	for _, stmt := range stmts {
+		if statementEffect(stmt) != "Allow" {
+			continue
+		}
+		allowed = append(allowed, extractActionListActions(stmt)...)
+	}
+	if len(allowed) == 0 {
+		t.Fatalf("%s: parsed zero actions out of its Allow statements; every coverage assertion below would otherwise report the whole ceiling as missing, or (in the escape direction) report every escape as closed", boundaryFile)
+	}
+	sort.Strings(allowed)
+	return allowed
+}
+
+// actionPermitted reports whether any entry in allowed matches action, treating
+// "*" in an entry as a wildcard over any run of characters. Matching is a whole
+// -string anchored comparison, never a substring or prefix test: "ecs:Run" must
+// not match "ecs:RunTask", and "ecs:*" must match "ecs:RunTask" but not
+// "ecsx:RunTask".
+func actionPermitted(allowed []string, action string) bool {
+	for _, entry := range allowed {
+		parts := strings.Split(entry, "*")
+		for i, p := range parts {
+			parts[i] = regexp.QuoteMeta(p)
+		}
+		if regexp.MustCompile(`^` + strings.Join(parts, `.*`) + `$`).MatchString(action) {
+			return true
+		}
+	}
+	return false
+}
+
+// crossPrincipalEscapeActions are actions that let whoever holds them execute
+// code as a DIFFERENT principal, which is a complete exit from this boundary
+// rather than a widening within it: a permissions boundary constrains the
+// principal it is attached to and does not follow the principal the code ends
+// up running as. None of them needs iam:PassRole, so PassRoleCeiling's cudly-*
+// scoping does not constrain them either (#1723).
+//
+// The value is the principal the escape lands on, quoted in the failure so the
+// next reader does not have to rediscover why the entry is here.
+var crossPrincipalEscapeActions = map[string]string{
+	"ecs:ExecuteCommand":                 "the task role of the running task the command lands in",
+	"ecs:UpdateService":                  "the task role of the task definition revision the service is pointed at",
+	"lambda:UpdateFunctionCode":          "the execution role of the function whose code is replaced",
+	"lambda:UpdateFunctionConfiguration": "the execution role of the function whose handler, layers or environment is replaced",
+	"ssm:SendCommand":                    "the instance profile of the SSM-managed instance the command runs on",
+	"ssm:StartSession":                   "the instance profile of the SSM-managed instance the session opens on",
+}
+
+// TestBoundaryDeniesCrossPrincipalEscapes asserts policy_boundary.tf permits
+// none of crossPrincipalEscapeActions. It is the negative half of the coverage
+// check above: that one fails when the ceiling is too narrow for what the
+// modules need, this one fails when it is wide enough to leave the boundary.
+//
+// It keys off actionPermitted rather than off the literal strings "ecs:*",
+// "lambda:*" and "ssm:*", because the ways to reopen this are not limited to
+// restoring those three tokens: "*", "lambda:Update*" and a plain
+// "ssm:SendCommand" entry all permit an escape while leaving a check written
+// against the wildcard spellings green.
+func TestBoundaryDeniesCrossPrincipalEscapes(t *testing.T) {
+	allowed := boundaryAllowedActions(t)
+
+	escapes := make([]string, 0, len(crossPrincipalEscapeActions))
+	for action := range crossPrincipalEscapeActions {
+		escapes = append(escapes, action)
+	}
+	sort.Strings(escapes)
+
+	for _, action := range escapes {
+		if actionPermitted(allowed, action) {
+			t.Errorf("%s permits %s, which runs code as %s. A permissions boundary caps the principal it is attached to and does not follow a different one, so this is not a widening of the ceiling but an exit from it, and it needs no iam:PassRole, so PassRoleCeiling does not constrain it either. The ceiling currently allows %v (#1723)", boundaryFile, action, crossPrincipalEscapeActions[action], allowed)
+		}
+	}
+}
+
+// ssmManagedInstanceCorePolicyARN is the one AWS managed policy whose contents
+// policy_boundary.tf enumerates action by action instead of covering with a
+// service wildcard, because ssm at service width is a cross-principal escape
+// (see crossPrincipalEscapeActions). It is attached to the fck-nat instance
+// role in terraform/modules/networking/aws.
+const ssmManagedInstanceCorePolicyARN = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+
+// ssmManagedInstanceCoreActions is AmazonSSMManagedInstanceCore v2 (the current
+// default version; created 2019-03-15, last edited 2019-05-23) verbatim, per
+// https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AmazonSSMManagedInstanceCore.html
+//
+// This list is hardcoded because its source of truth is AWS, not this repo, so
+// unlike every other assertion in this file it cannot be re-derived from the
+// tree. That makes it the one thing here that can go stale without any local
+// edit: if AWS adds an action to the policy, the SSM agent on the fck-nat
+// instance calls it, the boundary does not cover it, and the call 403s at
+// RUNTIME with `terraform apply` still green. Re-check the document above when
+// touching this.
+var ssmManagedInstanceCoreActions = []string{
+	"ec2messages:AcknowledgeMessage",
+	"ec2messages:DeleteMessage",
+	"ec2messages:FailMessage",
+	"ec2messages:GetEndpoint",
+	"ec2messages:GetMessages",
+	"ec2messages:SendReply",
+	"ssm:DescribeAssociation",
+	"ssm:DescribeDocument",
+	"ssm:GetDeployablePatchSnapshotForInstance",
+	"ssm:GetDocument",
+	"ssm:GetManifest",
+	"ssm:GetParameter",
+	"ssm:GetParameters",
+	"ssm:ListAssociations",
+	"ssm:ListInstanceAssociations",
+	"ssm:PutComplianceItems",
+	"ssm:PutConfigurePackageResult",
+	"ssm:PutInventory",
+	"ssm:UpdateAssociationStatus",
+	"ssm:UpdateInstanceAssociationStatus",
+	"ssm:UpdateInstanceInformation",
+	"ssmmessages:CreateControlChannel",
+	"ssmmessages:CreateDataChannel",
+	"ssmmessages:OpenControlChannel",
+	"ssmmessages:OpenDataChannel",
+}
+
+// TestBoundaryCoversSSMManagedInstanceCore closes the one hole
+// TestBoundaryCoversWorkloadServices cannot see. That test derives what the
+// ceiling must cover from the Action lists in terraform/modules, but a role's
+// identity policy is the union of its inline policies AND the AWS managed
+// policies attached to it, and a managed policy's actions appear nowhere in
+// this tree. ssm is the only service where that matters, because it is the only
+// one whose entire need comes from a managed policy and which is pinned per
+// action rather than covered by a wildcard.
+func TestBoundaryCoversSSMManagedInstanceCore(t *testing.T) {
+	if attached := moduleAttachedManagedPolicyARNs(t); !attached[ssmManagedInstanceCorePolicyARN] {
+		t.Fatalf("no module under %s attaches %s any more, so the ssm: entries pinned in %s and the list in this test are now a grant nothing needs. Drop both in the same change as the attachment", modulesDir, ssmManagedInstanceCorePolicyARN, boundaryFile)
+	}
+
+	allowed := boundaryAllowedActions(t)
+
+	var missing []string
+	for _, action := range ssmManagedInstanceCoreActions {
+		if !actionPermitted(allowed, action) {
+			missing = append(missing, action)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("%s does not cover %v, granted by %s which %s/networking/aws attaches to the fck-nat instance role. A permissions boundary caps effective permissions to the intersection of the role's identity policy and this ceiling, so `terraform apply` stays green and the SSM agent 403s at RUNTIME, taking Session Manager access to the NAT instance with it. The ceiling currently allows %v", boundaryFile, missing, ssmManagedInstanceCorePolicyARN, modulesDir, allowed)
+	}
+}
+
 // sortedKeys returns the keys of set, sorted, for stable failure messages.
 func sortedKeys(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
@@ -508,15 +680,19 @@ func sortedKeys(set map[string]bool) []string {
 	return out
 }
 
-// TestBoundaryCoversWorkloadServices re-derives the set of AWS service
-// prefixes granted to workload roles by the Terraform modules under
-// terraform/modules/**/aws and asserts policy_boundary.tf's
-// WorkloadServiceCeiling covers every one of them (via a "<svc>:*" wildcard
-// or an explicit "<svc>:<Action>" grant for that exact action), except iam
-// (see iamServiceExemption). A service missing here deploys cleanly and then
+// TestBoundaryCoversWorkloadServices re-derives every action granted to a
+// workload role by the Terraform modules under terraform/modules/**/aws and
+// asserts policy_boundary.tf's Allow statements permit each one, whether
+// through a "<svc>:*" wildcard or an entry for that exact action, except iam
+// (see iamServiceExemption). An action missing here deploys cleanly and then
 // 403s the first time the workload role calls it, because a permissions
 // boundary caps effective permissions to the intersection of the role's
 // identity policy and this ceiling (#1705).
+//
+// It sees only what this tree declares. The other half of a workload role's
+// identity policy is the AWS managed policies the modules attach, whose actions
+// appear nowhere in the tree; TestBoundaryCoversSSMManagedInstanceCore covers
+// the one of those the ceiling enumerates rather than wildcards.
 func TestBoundaryCoversWorkloadServices(t *testing.T) {
 	files := findAwsModuleFiles(t)
 	if len(files) == 0 {
@@ -540,15 +716,24 @@ func TestBoundaryCoversWorkloadServices(t *testing.T) {
 		t.Fatalf("parsed zero IAM actions out of %d aws module files; the Action/actions extraction in this test is broken and would otherwise pass vacuously", len(files))
 	}
 
-	boundaryContent := readPolicySource(t, boundaryFile)
+	allowed := boundaryAllowedActions(t)
 
-	// iam is exempt from the loop below (see iamServiceExemption), but
-	// granting "iam:*" in the ceiling would silently defeat the entire
-	// boundary: a boundaried role's effective IAM permissions would then be
-	// whatever its identity policy allows, with no cap at all. Assert the
-	// exemption stays narrow (PassRoleCeiling only), not wide open.
-	if strings.Contains(boundaryContent, `"iam:*"`) {
-		t.Errorf("%s grants \"iam:*\" in the WorkloadServiceCeiling statement; that defeats the boundary entirely, because iam is otherwise deliberately omitted from the ceiling so no workload role can create a role, attach a policy, or touch a permissions boundary, no matter what its identity policy says. iam:PassRole is meant to be covered only by the scoped PassRoleCeiling statement", boundaryFile)
+	// iam is exempt from the loop below (see iamServiceExemption), but an
+	// iam grant wider than iam:PassRole in the ceiling would silently defeat
+	// the entire boundary: a boundaried role's effective IAM permissions
+	// would then be whatever its identity policy allows, with no cap at all.
+	// Assert the exemption stays narrow (PassRoleCeiling only), not wide
+	// open. A bare "*" is checked with it because it is the same hole
+	// spelled shorter, and it would also make every other assertion in this
+	// file pass vacuously.
+	for _, action := range allowed {
+		if action == "*" {
+			t.Errorf("%s grants \"*\" in an Allow statement; that is not a ceiling at all, it caps nothing and makes every other coverage and escape assertion in this file pass vacuously", boundaryFile)
+			continue
+		}
+		if strings.HasPrefix(action, iamServiceExemption+":") && action != "iam:PassRole" {
+			t.Errorf("%s grants %s; iam is deliberately omitted from the ceiling so no workload role can create a role, attach a policy, or touch a permissions boundary, no matter what its identity policy says. iam:PassRole is the one exception and is meant to be covered only by the scoped PassRoleCeiling statement", boundaryFile, action)
+		}
 	}
 
 	services := make([]string, 0, len(serviceActions))
@@ -562,21 +747,15 @@ func TestBoundaryCoversWorkloadServices(t *testing.T) {
 			continue
 		}
 
-		wildcard := `"` + svc + `:*"`
-		if strings.Contains(boundaryContent, wildcard) {
-			continue
-		}
-
 		var missing []string
 		for action := range serviceActions[svc] {
-			literal := `"` + action + `"`
-			if !strings.Contains(boundaryContent, literal) {
+			if !actionPermitted(allowed, action) {
 				missing = append(missing, action)
 			}
 		}
 		if len(missing) > 0 {
 			sort.Strings(missing)
-			t.Errorf("policy_boundary.tf's WorkloadServiceCeiling does not cover service %q: found neither %s nor an explicit grant for %v (used by terraform/modules). Add the service to WorkloadServiceCeiling in %s in the same change, or the workload role that calls one of these actions will deploy cleanly and then 403 at runtime, because a permissions boundary caps effective permissions to the intersection of the role's identity policy and this ceiling", svc, wildcard, missing, boundaryFile)
+			t.Errorf("%s does not cover %v (granted to a workload role by terraform/modules): its Allow statements permit %v, which matches neither %q:* nor those actions individually. Add them to WorkloadServiceCeiling in the same change, or the workload role that calls one will deploy cleanly and then 403 at runtime, because a permissions boundary caps effective permissions to the intersection of the role's identity policy and this ceiling", boundaryFile, missing, allowed, svc)
 		}
 	}
 }

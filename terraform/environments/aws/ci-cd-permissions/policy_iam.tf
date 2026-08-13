@@ -23,6 +23,19 @@
 # reached from a workload role because those are capped by the boundary.
 # Denying policy creation instead would break every apply that manages the
 # module-level managed policy in modules/secrets/aws.
+#
+# The deploy role also keeps iam:AddRoleToInstanceProfile (policy_data.tf,
+# IAMRolesAndPolicies, scoped to arn:aws:iam::*:instance-profile/cudly-* and
+# arn:aws:iam::*:role/cudly-*). That action supports no condition key at all, so
+# it cannot be gated on the target role carrying the boundary the way
+# iam:AttachRolePolicy is below, and it is left unconditioned. It is not
+# exploitable on its own: putting a role into an instance profile only matters
+# once that profile reaches an instance, and that needs iam:PassRole, which
+# IAMPassRoleScopedByService in policy_data.tf scopes to cudly-* roles. Its
+# residual is the same one PassRoleCeiling in policy_boundary.tf already admits,
+# namely a cudly-* role created by hand or from the console that carries no
+# boundary; every cudly-* role Terraform manages is boundaried after the first
+# apply (#1723).
 resource "aws_iam_policy" "iam" {
   name        = "cudly-deploy-iam"
   description = "CUDly Terraform deploy: IAM role mutation gated on the cudly-deploy-boundary permissions boundary"
