@@ -134,6 +134,8 @@ Threshold filters drop individual recommendations that fall below a quality or s
 
 Drop recommendations where the adjusted instance count (after coverage scaling) is below this number. Useful for ignoring one-off or very small recommendations that are not worth the operational overhead.
 
+The floor applies on both paths, including `--input-csv`: a row already below it is dropped, and a row `--max-instances` would truncate below it is dropped rather than purchased short.
+
 ```bash
 # Only purchase recommendations for 3 or more instances
 cudly --services rds --min-count 3
@@ -180,9 +182,9 @@ The cap covers the whole run on both code paths: it is applied once to the combi
 Which recommendations survive depends on the path:
 
 - **Default (recommendation-driven) runs** apply the cap after scoring, so the surviving instances are the highest-savings-percentage ones across every service and region. Recommendations the cap reduces or drops are listed by name before the confirmation prompt and counted in the end-of-run drop summary, so a capped run never shrinks silently.
-- **`--input-csv` runs** are not scored, so the cap consumes the file in row order and keeps rows from the top until the budget is exhausted. Order the CSV deliberately if you expect the cap to bind.
+- **`--input-csv` runs** apply the cap the same way, on rows sorted by savings. A CSV row carries no savings percentage, so the ordering resolves on the `EstimatedSavings` column: the highest-savings rows are kept and the rest are dropped, regardless of where they sit in the file. Reduced and dropped rows are named on stdout.
 
-If the cap would truncate a recommendation below `--min-count`, that recommendation is dropped rather than purchased at the smaller size, because `--min-count` is a floor rather than a preference. The freed budget is not reallocated to the next recommendation.
+If the cap would truncate a recommendation below `--min-count`, that recommendation is dropped rather than purchased at the smaller size, because `--min-count` is a floor rather than a preference. The freed budget is not reallocated to the next recommendation. This holds on both paths.
 
 ```bash
 # Never purchase more than 100 instances in a single run

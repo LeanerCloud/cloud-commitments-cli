@@ -604,16 +604,43 @@ func filterAndAdjustRecommendations(recs []common.Recommendation, csvModeCoverag
 		recs = ApplyCountOverride(recs, cfg.OverrideCount)
 	}
 
-	// Apply instance limit if specified
-	if cfg.MaxInstances > 0 {
-		beforeLimit := len(recs)
-		recs = ApplyInstanceLimit(recs, cfg.MaxInstances)
-		if len(recs) < beforeLimit {
-			AppLogger.Printf("🔒 Applied instance limit: %d recs after limiting to %d instances\n", len(recs), cfg.MaxInstances)
-		}
-	}
+	// Enforce --min-count and the run-wide --max-instances cap.
+	return scoreAndLimitCSVRecs(recs, cfg)
+}
 
-	return recs
+// scoreAndLimitCSVRecs enforces --min-count and the run-wide --max-instances
+// cap on recommendations loaded from --input-csv, so both spend guards behave
+// on the CSV path as they do on the recommendation-driven path. Both are
+// documented in docs/cli/filtering.md as flags of the tool, not of a mode.
+//
+// Previously the CSV path handed the load-ordered slice straight to
+// ApplyInstanceLimit, which consumes its input in slice order and drops the
+// tail: whichever rows appeared first in the file spent the budget, and
+// --min-count was never consulted, so a row the cap truncated below the floor
+// was purchased short.
+//
+// Only MinCount is handed to the scorer. A CSV row carries no savings
+// percentage and no break-even figure — writeMultiServiceCSVReport emits
+// neither column and parseCSVRecord reads neither — so both fields load as
+// zero and gating on them would reject every row of every file.
+// --min-savings-pct and --max-break-even-months therefore remain outside this
+// path's reach; that gap is tracked separately rather than papered over here.
+//
+// Because SavingsPercentage is uniformly zero on loaded rows, scorer.Score's
+// ordering resolves on its secondary key, EstimatedSavings descending — the
+// savings signal a CSV does carry — with the Service|Region|ResourceType
+// tie-break keeping it deterministic. applyGlobalInstanceLimit consumes that
+// order, so the cap keeps the highest-savings rows, names every row it reduces
+// or drops, and drops rather than shortens anything truncated below
+// --min-count.
+func scoreAndLimitCSVRecs(recs []common.Recommendation, cfg Config) []common.Recommendation {
+	scored := scorer.Score(recs, scorer.Config{MinCount: cfg.MinCount})
+	for i := range scored.Filtered {
+		f := scored.Filtered[i]
+		AppLogger.Printf("🔒 --min-count dropped %s %s %s: %s\n",
+			f.Recommendation.Service, f.Recommendation.Region, f.Recommendation.ResourceType, f.FilterReason)
+	}
+	return applyGlobalInstanceLimit(scored.Passed, cfg, nil)
 }
 
 // processService processes a single service and returns recommendations and results.
