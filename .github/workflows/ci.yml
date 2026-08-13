@@ -717,6 +717,25 @@ jobs:
       - name: Run guard script self-tests
         run: bash scripts/test-gcp-secret-scope.sh
 
+  # Assert that the ECR repository selector used by destroy-fargate-dev.yml
+  # picks the repository that state owns and nothing else. The consumer
+  # force-deletes what the selector prints, so both directions are asserted:
+  # over-matching deletes images the workflow does not own, and matching
+  # nothing leaves the dev repository behind. Fast (shell only), so it always
+  # runs.
+  ecr-delete-selection:
+    name: ECR delete selection scope
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run selector self-tests
+        run: bash scripts/test-select-ecr-repos-to-delete.sh
+
   # Summary job - all checks must pass
   ci-success:
     name: CI Success
@@ -732,6 +751,7 @@ jobs:
       - azure-role-parity
       - aws-iam-parity
       - gcp-secret-scope
+      - ecr-delete-selection
     if: always()
 
     steps:

@@ -128,15 +128,29 @@ jobs:
           cd terraform/environments/aws
           terraform init -backend-config=/tmp/backend.tfbackend
 
+      # Runs before `terraform destroy` because the repository is created with
+      # force_delete = false (terraform/modules/registry/aws/main.tf), so the
+      # destroy fails while images remain.
+      #
+      # Deletes only the repository this state owns, read from `terraform
+      # output` and compared by exact equality against every repository in the
+      # account. The `contains(repositoryName,'cudly-dev')` filter this step
+      # used to run also force-deleted `backup-cudly-dev` and
+      # `cudly-dev-prod-mirror`, with every image in them (#1592).
+      # scripts/select-ecr-repos-to-delete.sh holds the comparison and the name
+      # table pinning it, including why a `cudly-dev*` prefix is not enough.
       - name: Force-delete ECR repo
         run: |
-          for REPO in $(aws ecr describe-repositories \
-            --query "repositories[?contains(repositoryName,'cudly-dev')].repositoryName" \
-            --output text 2>/dev/null); do
-            echo "Force-deleting ECR repo $REPO..."
-            aws ecr delete-repository --repository-name "$REPO" --force 2>/dev/null \
-              || echo "  Failed to delete $REPO (may already be gone)"
-          done
+          set -euo pipefail
+          OWNED_REPO="$(terraform -chdir=terraform/environments/aws output -raw ecr_repository_name)"
+          echo "This state owns ECR repository '$OWNED_REPO'"
+          aws ecr describe-repositories --query 'repositories[].repositoryName' --output text \
+            | tr '\t' '\n' \
+            | ./scripts/select-ecr-repos-to-delete.sh "$OWNED_REPO" \
+            | while IFS= read -r REPO; do
+                echo "Force-deleting ECR repo $REPO..."
+                aws ecr delete-repository --repository-name "$REPO" --force
+              done
 
       - name: Disable RDS deletion protection
         run: |
