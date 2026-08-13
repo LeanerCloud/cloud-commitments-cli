@@ -35,10 +35,7 @@ func TestAnalyticsNestedRollup_COR02(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping test: could not setup postgres container: %v", err)
-	}
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	defer container.Cleanup(ctx)
 
 	require.NoError(t, migrations.RunMigrations(ctx, container.DB.Pool(), getMigrationsPath(), "", ""))

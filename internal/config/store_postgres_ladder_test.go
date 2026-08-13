@@ -34,19 +34,18 @@ import (
 )
 
 // setupLadderStore starts a container, runs migrations, and returns a store.
-// It skips (not fails) when Docker is unavailable so the suite degrades
-// gracefully in environments without a container runtime.
+// It skips (not fails) only when this environment has no usable Docker daemon,
+// so the suite degrades gracefully without a container runtime. A migration that
+// will not apply is a broken schema, not a missing runtime, and fails loudly
+// (issue #1597).
 func setupLadderStore(ctx context.Context, t *testing.T) *PostgresStore {
 	t.Helper()
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping integration test: cannot start PostgreSQL container: %v", err)
-	}
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	t.Cleanup(func() { container.Cleanup(context.Background()) })
 
-	if err := migrations.RunMigrations(ctx, container.DB.Pool(), getTestMigrationsPath(), "", ""); err != nil {
-		t.Skipf("Skipping integration test: migrations failed: %v", err)
-	}
+	require.NoError(t,
+		migrations.RunMigrations(ctx, container.DB.Pool(), getTestMigrationsPath(), "", ""),
+		"migrations failed to apply to a fresh database")
 	return NewPostgresStore(container.DB)
 }
 

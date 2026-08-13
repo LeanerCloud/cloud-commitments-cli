@@ -37,34 +37,26 @@ func setupTestContainerDB(t *testing.T) *database.Connection {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping DB test: cannot start PostgreSQL container: %v", err)
-		return nil
-	}
-
-	// Run migrations
-	err = migrations.RunMigrations(ctx, container.DB.Pool(), getTestMigrationsPath(), "", "")
-	if err != nil {
-		container.Cleanup(ctx)
-		t.Skipf("Skipping DB test: cannot run migrations: %v", err)
-		return nil
-	}
-
-	// The store code uses ON CONFLICT (execution_id) but the migration schema
-	// does not create a UNIQUE constraint on execution_id. Add it for tests.
-	_, err = container.DB.Exec(ctx,
-		"CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_executions_execution_id_unique ON purchase_executions(execution_id)")
-	if err != nil {
-		container.Cleanup(ctx)
-		t.Skipf("Skipping DB test: cannot add unique index on execution_id: %v", err)
-		return nil
-	}
-
-	// Register cleanup
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	t.Cleanup(func() {
 		container.Cleanup(context.Background())
 	})
+
+	// Migrating is the thing under test here, not a precondition of it: a
+	// migration that will not apply is a broken schema, and skipping on it would
+	// report the whole suite green on exactly the defect it exists to catch
+	// (issue #1597).
+	require.NoError(t,
+		migrations.RunMigrations(ctx, container.DB.Pool(), getTestMigrationsPath(), "", ""),
+		"migrations failed to apply to a fresh database")
+
+	// The store code uses ON CONFLICT (execution_id) but the migration schema
+	// does not create a UNIQUE constraint on execution_id. Add it for tests.
+	_, err := container.DB.Exec(ctx,
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_purchase_executions_execution_id_unique ON purchase_executions(execution_id)")
+	require.NoError(t, err,
+		"could not add the unique index on execution_id the ON CONFLICT paths need; "+
+			"a migrated schema this DDL cannot be applied to is a failure, not a reason to skip")
 
 	return container.DB
 }

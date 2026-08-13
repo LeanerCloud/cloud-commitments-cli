@@ -37,18 +37,14 @@ func TestPostgresStoreDB_ListPurchasePlans_UnassignedBucket(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping integration test: cannot start PostgreSQL container: %v", err)
-		return
-	}
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	t.Cleanup(func() { container.Cleanup(context.Background()) })
 
-	err = migrations.RunMigrations(ctx, container.DB.Pool(), getTestMigrationsPath(), "", "")
-	if err != nil {
-		t.Skipf("Skipping integration test: migrations failed: %v", err)
-		return
-	}
+	// A migration that will not apply is a broken schema, not a missing
+	// container runtime: fail rather than report the suite green (issue #1597).
+	require.NoError(t,
+		migrations.RunMigrations(ctx, container.DB.Pool(), getTestMigrationsPath(), "", ""),
+		"migrations failed to apply to a fresh database")
 
 	conn := container.DB
 	store := NewPostgresStore(conn)

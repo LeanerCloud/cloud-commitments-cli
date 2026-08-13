@@ -109,10 +109,7 @@ func TestMigration095_PurchaseHistoryAccountIDWidth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping test: could not setup postgres container: %v", err)
-	}
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	defer container.Cleanup(ctx)
 
 	pool := container.DB.Pool()
@@ -201,10 +198,7 @@ func TestMigration095_DownNarrowsWhenSafe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping test: could not setup postgres container: %v", err)
-	}
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	defer container.Cleanup(ctx)
 
 	pool := container.DB.Pool()
@@ -240,10 +234,7 @@ func TestMigration095_DownRefusesToTruncate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping test: could not setup postgres container: %v", err)
-	}
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	defer container.Cleanup(ctx)
 
 	pool := container.DB.Pool()

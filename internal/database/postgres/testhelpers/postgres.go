@@ -9,6 +9,7 @@ import (
 
 	"github.com/LeanerCloud/CUDly/internal/database"
 	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -84,6 +85,34 @@ func SetupPostgresContainer(ctx context.Context, t *testing.T) (*PostgresContain
 		Config:    config,
 		DB:        db,
 	}, nil
+}
+
+// RequirePostgresContainer starts a PostgreSQL test container for t, skipping
+// the test only when this environment has no usable Docker provider and failing
+// loudly for every other error.
+//
+// Drawing that line is the whole point (issue #1597). "No Docker daemon on this
+// machine" is an environment fact and the one legitimate reason to skip, so it
+// is probed explicitly before anything is started. Past that probe the daemon is
+// known healthy, which makes a container that still refuses to come up -- a
+// missing image, an exhausted host, a database that never accepts connections --
+// a real failure. Reporting it as a skip would turn a broken run green, which is
+// indistinguishable from a run that had nothing to say.
+//
+// Callers remain responsible for Cleanup, matching SetupPostgresContainer.
+func RequirePostgresContainer(ctx context.Context, t *testing.T) *PostgresContainer {
+	t.Helper()
+
+	// Probes the Docker provider and skips with its own diagnostic when the
+	// daemon is unreachable or unhealthy.
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+
+	container, err := SetupPostgresContainer(ctx, t)
+	require.NoError(t, err,
+		"Docker is healthy but the PostgreSQL test container did not come up; "+
+			"this is a real failure, not an environment without Docker")
+
+	return container
 }
 
 // Cleanup terminates the test container and closes database connection.

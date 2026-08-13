@@ -40,21 +40,18 @@ func setupAuthTestDB(t *testing.T) *database.Connection {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	container, err := testhelpers.SetupPostgresContainer(ctx, t)
-	if err != nil {
-		t.Skipf("Skipping DB test: cannot start PostgreSQL container: %v", err)
-		return nil
-	}
-
-	if err := migrations.RunMigrations(ctx, container.DB.Pool(), getAuthTestMigrationsPath(), "", ""); err != nil {
-		container.Cleanup(ctx)
-		t.Skipf("Skipping DB test: cannot run migrations: %v", err)
-		return nil
-	}
-
+	container := testhelpers.RequirePostgresContainer(ctx, t)
 	t.Cleanup(func() {
 		container.Cleanup(context.Background())
 	})
+
+	// Migrating is the thing under test here, not a precondition of it: a
+	// migration that will not apply is a broken schema, and skipping on it would
+	// report the whole suite green on exactly the defect it exists to catch
+	// (issue #1597).
+	require.NoError(t,
+		migrations.RunMigrations(ctx, container.DB.Pool(), getAuthTestMigrationsPath(), "", ""),
+		"migrations failed to apply to a fresh database")
 
 	return container.DB
 }
