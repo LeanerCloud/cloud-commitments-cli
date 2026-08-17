@@ -1615,10 +1615,14 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 		},
 		{
 			name: "Instance limit applied",
+			// EstimatedSavings is set because a binding --max-instances has to
+			// rank the rows it chooses between; requireRankingSignal refuses a
+			// run whose rows carry no savings value rather than capping them by
+			// name.
 			recommendations: []common.Recommendation{
-				{Service: common.ServiceRDS, ResourceType: "db.t3.small", Count: 10},
-				{Service: common.ServiceRDS, ResourceType: "db.t3.medium", Count: 10},
-				{Service: common.ServiceRDS, ResourceType: "db.t3.large", Count: 10},
+				{Service: common.ServiceRDS, ResourceType: "db.t3.small", Count: 10, EstimatedSavings: 100},
+				{Service: common.ServiceRDS, ResourceType: "db.t3.medium", Count: 10, EstimatedSavings: 200},
+				{Service: common.ServiceRDS, ResourceType: "db.t3.large", Count: 10, EstimatedSavings: 300},
 			},
 			coverage: 100.0,
 			setupFilters: func() {
@@ -1638,7 +1642,8 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 			// Suppress logger
 			// Logger output disabled for testing
 
-			result := filterAndAdjustRecommendations(tt.recommendations, tt.coverage, toolCfg)
+			result, err := filterAndAdjustRecommendations(tt.recommendations, tt.coverage, toolCfg)
+			require.NoError(t, err)
 
 			// Verify result is within expected range
 			assert.GreaterOrEqual(t, len(result), tt.expectedMin)
@@ -1812,10 +1817,14 @@ func TestRunToolFromCSV_WithMaxInstances(t *testing.T) {
 	defer func() { toolCfg = origCfg }()
 	isolateAWSEnv(t)
 
-	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
-rds,us-east-1,db.t3.small,postgres,10,1yr,All Upfront,123456789012
-rds,us-east-1,db.t3.medium,mysql,10,1yr,All Upfront,123456789012
-rds,us-east-1,db.t3.large,postgres,10,1yr,All Upfront,123456789012
+	// EstimatedSavings is populated because a binding --max-instances has to
+	// rank the rows it chooses between. A file without that column is refused
+	// rather than capped by name; that case is covered by
+	// TestCSVCapRefusesRowsWithoutARankingSignal.
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,EstimatedSavings,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,10,100.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,mysql,10,200.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.large,postgres,10,300.00,1yr,All Upfront,123456789012
 `)
 
 	reportPath := filepath.Join(t.TempDir(), "report.csv")

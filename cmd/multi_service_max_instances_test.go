@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
@@ -361,7 +362,7 @@ func TestApplyGlobalInstanceLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			drops := common.NewDropSummary()
-			got := applyGlobalInstanceLimit(recs, Config{MaxInstances: tt.maxInstances}, drops)
+			got := applyGlobalInstanceLimit(recs, Config{MaxInstances: tt.maxInstances}, rankBySavingsPercentage, drops)
 
 			assert.Len(t, got, tt.expectedLen)
 			assert.Equal(t, tt.expectedTotal, CalculateTotalInstances(got))
@@ -414,7 +415,7 @@ func TestReportInstanceLimitNamesEveryChange(t *testing.T) {
 
 	drops := common.NewDropSummary()
 	out := captureAppOutput(t, func() {
-		reportInstanceLimit(before, after, 0, CalculateTotalInstances(before), 7, drops)
+		reportInstanceLimit(before, after, 0, CalculateTotalInstances(before), 7, rankBySavingsPercentage, drops)
 	})
 
 	assert.Contains(t, out, "--max-instances=7")
@@ -422,4 +423,478 @@ func TestReportInstanceLimitNamesEveryChange(t *testing.T) {
 	assert.Contains(t, out, "m5.large")
 	assert.Contains(t, out, "dropped")
 	assert.Contains(t, out, "m5.xlarge")
+}
+
+// ==================== --input-csv path (#1741) ====================
+
+// csvFixtureHeader matches writeMultiServiceCSVReport's column names for the
+// fields these tests exercise, so the fixtures parse the way a real
+// round-tripped report does.
+const csvFixtureHeader = "Service,Region,ResourceType,Engine,Count,EstimatedSavings,Term,PaymentOption,Account\n"
+
+// csvNoSavingsHeader is csvFixtureHeader without the EstimatedSavings column,
+// the shape of a hand-written minimal CSV. getCSVField returns "" for a column
+// that is not in the header and parseCSVFloat leaves the field at zero, so
+// every row of such a file loads with EstimatedSavings == 0.
+const csvNoSavingsHeader = "Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account\n"
+
+// csvRecsFrom writes rows to a temporary recommendations CSV, loads them back
+// through the production parser, and returns the recommendations exactly as a
+// --input-csv run sees them.
+//
+// Building the fixture through loadRecommendationsFromCSV rather than by hand
+// keeps these tests honest about what a CSV row actually carries: neither
+// writeMultiServiceCSVReport nor parseCSVRecord knows a savings-percentage
+// column, so every loaded row has SavingsPercentage == 0 and any
+// savings-ordered selection has to resolve on EstimatedSavings. A hand-built
+// fixture could quietly set SavingsPercentage and prove nothing about the real
+// input.
+func csvRecsFrom(t *testing.T, rows string) []common.Recommendation {
+	t.Helper()
+	return csvRecsFromHeader(t, csvFixtureHeader, rows)
+}
+
+// csvRecsFromHeader is csvRecsFrom over an arbitrary header, for fixtures that
+// exercise a CSV missing a column the selection depends on.
+func csvRecsFromHeader(t *testing.T, header, rows string) []common.Recommendation {
+	t.Helper()
+	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, header+rows))
+	require.NoError(t, err)
+	require.NotEmpty(t, recs)
+	for i := range recs {
+		require.Zero(t, recs[i].SavingsPercentage,
+			"a CSV row carries no savings percentage; the ordering under test must come from EstimatedSavings")
+	}
+	return recs
+}
+
+// TestCSVCapKeepsHighestSavingsNotFileOrder is the selection-order regression
+// for #1741.
+//
+// filterAndAdjustRecommendations used to hand the load-ordered slice straight
+// to ApplyInstanceLimit, which consumes its input in slice order and drops the
+// tail, so whichever rows appeared first in the file spent the whole budget.
+// Both the old and the new behavior respect the cap total, so only a fixture
+// whose best-value rows are *not* first can tell them apart: the $10 row leads
+// the file and the $500 row sits in the middle.
+func TestCSVCapKeepsHighestSavingsNotFileOrder(t *testing.T) {
+	isolateAWSEnv(t)
+	const (
+		maxInstances = 10
+		countPerRow  = 6
+	)
+
+	recs := csvRecsFrom(t, `rds,us-east-1,db.t3.small,postgres,6,10.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,All Upfront,123456789012
+`)
+
+	var (
+		got []common.Recommendation
+		err error
+	)
+	out := captureAppOutput(t, func() {
+		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: maxInstances})
+	})
+	require.NoError(t, err)
+
+	// Asserted only to keep the fixture honest: a file-ordered cap satisfies
+	// the total too, so the total on its own proves nothing here.
+	require.Equal(t, maxInstances, CalculateTotalInstances(got))
+
+	// The property under test is the selection ORDER. The budget must go to
+	// the highest-savings rows, best first, not to the rows the file happened
+	// to list first.
+	require.Len(t, got, 2)
+	assert.Equal(t, "db.t3.medium", got[0].ResourceType,
+		"the cap must consume savings order, not file order; got %s first", got[0].ResourceType)
+	assert.InDelta(t, 500.00, got[0].EstimatedSavings, 0.001)
+	assert.Equal(t, countPerRow, got[0].Count)
+	assert.Equal(t, "db.t3.large", got[1].ResourceType)
+	assert.InDelta(t, 100.00, got[1].EstimatedSavings, 0.001)
+	assert.Equal(t, maxInstances-countPerRow, got[1].Count)
+
+	// Nothing shrinks silently: the row the cap dropped is named.
+	assert.Contains(t, out, "db.t3.small")
+}
+
+// TestCSVCapDropsTruncationBelowMinCount pins that the CSV path cannot deliver
+// a purchase smaller than the operator's --min-count floor, the property #1608
+// and #1725 established on the recommendation-driven path.
+//
+// Fixture: two rows of 6 instances, cap 10, floor 5. The budget leaves room
+// for 6 + 4, and 4 is under the floor, so the second row is dropped rather
+// than purchased short. The run buys 6.
+func TestCSVCapDropsTruncationBelowMinCount(t *testing.T) {
+	isolateAWSEnv(t)
+	const (
+		maxInstances = 10
+		minCount     = 5
+		countPerRow  = 6
+	)
+
+	recs := csvRecsFrom(t, `rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
+`)
+
+	var (
+		got []common.Recommendation
+		err error
+	)
+	out := captureAppOutput(t, func() {
+		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: maxInstances, MinCount: minCount})
+	})
+	require.NoError(t, err)
+
+	for i := range got {
+		assert.GreaterOrEqual(t, got[i].Count, minCount,
+			"--min-count %d was set, but %s would be purchased at count=%d",
+			minCount, got[i].ResourceType, got[i].Count)
+	}
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "db.t3.medium", got[0].ResourceType)
+	assert.Equal(t, countPerRow, got[0].Count)
+	assert.Equal(t, countPerRow, CalculateTotalInstances(got))
+	assert.Contains(t, out, "below --min-count 5")
+}
+
+// TestCSVMinCountDropsRowsUnderTheFloor pins the floor with no cap in play: a
+// CSV row that is already under --min-count is dropped, not purchased. The
+// higher-value row is the one under the floor, so a selection that sorts by
+// savings without gating on the floor still buys it.
+func TestCSVMinCountDropsRowsUnderTheFloor(t *testing.T) {
+	isolateAWSEnv(t)
+	const minCount = 5
+
+	recs := csvRecsFrom(t, `rds,us-east-1,db.t3.small,postgres,2,500.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,postgres,6,100.00,1yr,All Upfront,123456789012
+`)
+
+	var (
+		got []common.Recommendation
+		err error
+	)
+	out := captureAppOutput(t, func() {
+		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MinCount: minCount})
+	})
+	require.NoError(t, err)
+
+	require.Len(t, got, 1, "the row at count=2 is below --min-count 5 and must not be purchased")
+	assert.Equal(t, "db.t3.medium", got[0].ResourceType)
+	assert.Equal(t, 6, got[0].Count)
+	assert.Contains(t, out, "--min-count dropped")
+	assert.Contains(t, out, "db.t3.small")
+}
+
+// TestRunToolFromCSVEnforcesMinCountAndCap drives the guards end to end
+// through the real --input-csv entry point and asserts on the purchase report,
+// in both directions: the guards bind when they should, and a legitimate run
+// under the same flags still purchases every row at its full count.
+func TestRunToolFromCSVEnforcesMinCountAndCap(t *testing.T) {
+	origCfg := toolCfg
+	t.Cleanup(func() { toolCfg = origCfg })
+	isolateAWSEnv(t)
+
+	// Worst-value row first, so file order and savings order disagree.
+	csvPath := writeTestRecommendationsCSV(t, csvFixtureHeader+
+		`rds,us-east-1,db.t3.small,postgres,6,10.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,All Upfront,123456789012
+`)
+
+	tests := []struct {
+		name         string
+		wantRows     []string
+		maxInstances int32
+		minCount     int
+	}{
+		{
+			// Budget 10 across rows of 6: the best row takes 6, the next is
+			// truncated to 4, and 4 is under the floor, so it is dropped.
+			// A file-ordered cap would instead buy db.t3.small at 6.
+			name:         "cap and floor bind",
+			maxInstances: 10,
+			minCount:     5,
+			wantRows:     []string{"db.t3.medium@6"},
+		},
+		{
+			// Same floor, cap above the natural total: nothing is dropped and
+			// every row is purchased at its CSV count. A guard that
+			// over-blocks is as wrong as one that never fires.
+			name:         "legitimate run purchases every row",
+			maxInstances: 100,
+			minCount:     5,
+			wantRows:     []string{"db.t3.small@6", "db.t3.medium@6", "db.t3.large@6"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reportPath := filepath.Join(t.TempDir(), "report.csv")
+			toolCfg.CSVInput = csvPath
+			toolCfg.CSVOutput = reportPath
+			toolCfg.ActualPurchase = false
+			toolCfg.Coverage = 100.0
+			toolCfg.TargetCoverage = 0
+			toolCfg.OverrideCount = 0
+			toolCfg.MaxInstances = tt.maxInstances
+			toolCfg.MinCount = tt.minCount
+
+			require.NoError(t, runToolFromCSV(context.Background(), toolCfg))
+
+			header, rows := readPurchaseReport(t, reportPath)
+			assert.ElementsMatch(t, tt.wantRows, reportRowPairs(t, header, rows))
+		})
+	}
+}
+
+// reportRowPairs pairs each purchase-report row's ResourceType with its Count.
+// Asserting the two columns independently would pass a result that put the
+// right counts against the wrong rows, which is precisely what a wrong
+// selection order produces.
+func reportRowPairs(t *testing.T, header []string, rows [][]string) []string {
+	t.Helper()
+	types := reportColumn(t, header, rows, "ResourceType")
+	counts := reportColumn(t, header, rows, "Count")
+	require.Len(t, counts, len(types))
+
+	pairs := make([]string, 0, len(types))
+	for i := range types {
+		pairs = append(pairs, types[i]+"@"+counts[i])
+	}
+	return pairs
+}
+
+// TestCSVCapRanksBySavingsPerInstance pins the ranking key the cap consumes.
+//
+// --max-instances is a budget in instances, so the rows worth keeping are the
+// ones returning the most savings per instance bought. Ranking on the
+// EstimatedSavings column directly ranks a whole-row dollar total against a
+// per-instance budget: the fixture's bulk row is larger in total ($600) and
+// worse per instance ($6) than the rich row ($500 total, $83 each), so a
+// total-ranked cap spends the entire 10-instance budget on bulk for about $60
+// of real value and drops rich outright.
+//
+// Every earlier fixture in this file uses equal counts, where ranking by total
+// and ranking by rate are indistinguishable. The counts here are deliberately
+// unequal, which is the only way to tell the two rules apart.
+func TestCSVCapRanksBySavingsPerInstance(t *testing.T) {
+	isolateAWSEnv(t)
+	const maxInstances = 10
+
+	recs := csvRecsFrom(t, `rds,us-east-1,db.bulk.large,postgres,100,600.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.rich.large,postgres,6,500.00,1yr,All Upfront,123456789012
+`)
+
+	var (
+		got []common.Recommendation
+		err error
+	)
+	out := captureAppOutput(t, func() {
+		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: maxInstances})
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, maxInstances, CalculateTotalInstances(got),
+		"the cap total is respected by both the right and the wrong ranking, and is asserted only to keep the fixture honest")
+
+	// The substance: ORDER, and the count each row is bought at. The
+	// best-value row must be taken whole before the bulk row gets the
+	// remainder.
+	require.Len(t, got, 2)
+	assert.Equal(t, "db.rich.large", got[0].ResourceType,
+		"the budget must go to the highest savings-per-instance row first; got %s", got[0].ResourceType)
+	assert.Equal(t, 6, got[0].Count)
+	assert.Equal(t, "db.bulk.large", got[1].ResourceType)
+	assert.Equal(t, maxInstances-6, got[1].Count, "the bulk row takes only the remaining budget")
+
+	assert.Contains(t, out, "savings-per-instance",
+		"the cap must name the ranking rule it applied, not claim a savings percentage a CSV row does not carry")
+}
+
+// TestCSVCapRefusesRowsWithoutARankingSignal covers the absent-vs-zero trap.
+//
+// A CSV with no EstimatedSavings column, or with a blank cell in it, loads
+// every affected row at zero savings. Nothing downstream can tell that apart
+// from a row genuinely worth $0, so a binding cap would rank on a value that
+// is not there and silently fall through to the Service|Region|ResourceType
+// tie-break, buying by instance-type name while stdout promises it is buying
+// by savings. The run is refused instead.
+//
+// Both directions are covered: the two refusal cases, a case proving the
+// refusal is scoped to a cap that actually binds, and a legitimate file that
+// still ranks and caps normally.
+func TestCSVCapRefusesRowsWithoutARankingSignal(t *testing.T) {
+	isolateAWSEnv(t)
+
+	t.Run("no EstimatedSavings column at all", func(t *testing.T) {
+		// Worst alphabetically first, so a name-ordered cap is visible: it
+		// keeps db.aaa.large and drops db.zzz.large regardless of file order.
+		recs := csvRecsFromHeader(t, csvNoSavingsHeader,
+			`rds,us-east-1,db.zzz.large,postgres,6,1yr,All Upfront,123456789012
+rds,us-east-1,db.aaa.large,postgres,6,1yr,All Upfront,123456789012
+`)
+
+		var err error
+		captureAppOutput(t, func() {
+			_, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 6})
+		})
+
+		require.Error(t, err, "a binding cap with nothing to rank on must refuse, not pick by name")
+		assert.Contains(t, err.Error(), "EstimatedSavings")
+		assert.Contains(t, err.Error(), "db.zzz.large", "the error must name the rows it cannot rank")
+		assert.Contains(t, err.Error(), "db.aaa.large")
+	})
+
+	t.Run("one blank EstimatedSavings cell among populated rows", func(t *testing.T) {
+		// The partial case is the worse one: the blank row loads as $0, ranks
+		// last, and is dropped first, with nothing saying the value was absent
+		// rather than genuinely zero.
+		recs := csvRecsFrom(t, `rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.small,postgres,6,,1yr,All Upfront,123456789012
+`)
+
+		var err error
+		captureAppOutput(t, func() {
+			_, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 10})
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "db.t3.small", "the blank row must be named")
+		assert.NotContains(t, err.Error(), "db.t3.medium", "a row with a real savings value is rankable and must not be blamed")
+	})
+
+	t.Run("no savings column but the cap does not bind", func(t *testing.T) {
+		// Nothing has to be chosen between, so nothing has to be ranked. A
+		// guard that over-blocks is as wrong as one that never fires.
+		recs := csvRecsFromHeader(t, csvNoSavingsHeader,
+			`rds,us-east-1,db.zzz.large,postgres,6,1yr,All Upfront,123456789012
+rds,us-east-1,db.aaa.large,postgres,6,1yr,All Upfront,123456789012
+`)
+
+		var (
+			got []common.Recommendation
+			err error
+		)
+		captureAppOutput(t, func() {
+			got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 12})
+		})
+
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+		assert.Equal(t, 12, CalculateTotalInstances(got))
+	})
+
+	t.Run("populated savings column still ranks and caps", func(t *testing.T) {
+		recs := csvRecsFrom(t, `rds,us-east-1,db.t3.small,postgres,6,10.00,1yr,All Upfront,123456789012
+rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
+`)
+
+		var (
+			got []common.Recommendation
+			err error
+		)
+		captureAppOutput(t, func() {
+			got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 6})
+		})
+
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "db.t3.medium", got[0].ResourceType)
+		assert.Equal(t, 6, got[0].Count)
+	})
+}
+
+// TestApplyMinCountFloorAfterDuplicateAdjustment covers the floor's second
+// call site, the one inside runToolFromCSV's purchase loop.
+//
+// adjustRecsForDuplicates subtracts recent matching commitments from Count
+// after filterAndAdjustRecommendations has already applied the floor, so a row
+// that cleared --min-count 5 at Count 6 with 5 existing commitments arrives at
+// the purchase loop at Count 1. Without a second application the operator's
+// floor is defeated on the very path #1741 is about.
+//
+// This exercises applyMinCountFloor on the post-deduction counts rather than
+// through runToolFromCSV, because createServiceClient is not injectable: there
+// is no seam to drive a fake GetExistingCommitments through the CSV entry
+// point, and with invalid credentials adjustRecsForDuplicates errors and falls
+// back to the unadjusted slice.
+func TestApplyMinCountFloorAfterDuplicateAdjustment(t *testing.T) {
+	const minCount = 5
+
+	// Counts as adjustRecsForDuplicates leaves them: the first row had 6 and
+	// 5 existing commitments deducted, the second was untouched.
+	adjusted := []common.Recommendation{
+		{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.large", Count: 1, EstimatedSavings: 500},
+		{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.medium", Count: 6, EstimatedSavings: 100},
+	}
+
+	// Snapshot before the first call. applyMinCountFloor returns its input slice
+	// untouched at a floor of 0, and scorer.Score may reorder adjusted below, so
+	// asserting against adjusted itself would compare the result to itself.
+	original := append([]common.Recommendation(nil), adjusted...)
+
+	var got []common.Recommendation
+	out := captureAppOutput(t, func() {
+		got = applyMinCountFloor(adjusted, minCount)
+	})
+
+	require.Len(t, got, 1, "the row the deduction left at 1 is below --min-count 5 and must not be purchased")
+	assert.Equal(t, "db.t3.medium", got[0].ResourceType)
+	assert.Equal(t, 6, got[0].Count)
+	assert.Contains(t, out, "db.t3.large", "the drop must be named")
+	assert.Contains(t, out, "--min-count")
+
+	// A floor of 0 disables the flag: every row survives, in the order given.
+	var unfiltered []common.Recommendation
+	quiet := captureAppOutput(t, func() {
+		unfiltered = applyMinCountFloor(adjusted, 0)
+	})
+	assert.Equal(t, original, unfiltered, "--min-count 0 must not drop or reorder anything")
+	assert.Empty(t, quiet)
+}
+
+// TestCSVCapOrderIsIndependentOfFileOrder pins that equal-rate rows are not
+// separated by where they sit in the file.
+//
+// --min-count 0 skips the scorer, so the per-instance sort is the only
+// ordering the cap sees. If it left equal rates in input order, file order
+// would still decide which of two equally-valuable rows the budget buys, which
+// is the defect #1741 reported, surviving one layer down.
+func TestCSVCapOrderIsIndependentOfFileOrder(t *testing.T) {
+	isolateAWSEnv(t)
+
+	// Two rows at the identical rate ($100 for 6 instances), listed
+	// worst-alphabetically-first.
+	rows := []string{
+		"rds,us-east-1,db.t3.zulu,postgres,6,100.00,1yr,All Upfront,123456789012\n",
+		"rds,us-east-1,db.t3.alpha,postgres,6,100.00,1yr,All Upfront,123456789012\n",
+	}
+
+	selection := func(t *testing.T, rows []string) []string {
+		t.Helper()
+		recs := csvRecsFrom(t, rows[0]+rows[1])
+		var (
+			got []common.Recommendation
+			err error
+		)
+		captureAppOutput(t, func() {
+			got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 6})
+		})
+		require.NoError(t, err)
+
+		names := make([]string, 0, len(got))
+		for i := range got {
+			names = append(names, got[i].ResourceType)
+		}
+		return names
+	}
+
+	forward := selection(t, rows)
+	reversed := selection(t, []string{rows[1], rows[0]})
+
+	assert.Equal(t, []string{"db.t3.alpha"}, forward,
+		"equal rates must tie-break on Service|Region|ResourceType, not on file position")
+	assert.Equal(t, forward, reversed, "reversing the file must not change what the cap buys")
 }

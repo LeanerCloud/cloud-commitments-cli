@@ -723,7 +723,8 @@ func TestFilterAndAdjustRecommendations_ZeroCoverage(t *testing.T) {
 	toolCfg.MaxInstances = 0
 	toolCfg.OverrideCount = 0
 
-	result := filterAndAdjustRecommendations(recommendations, 0.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(recommendations, 0.0, toolCfg)
+	require.NoError(t, err)
 
 	// 0% coverage should return empty
 	assert.Empty(t, result)
@@ -749,7 +750,8 @@ func TestFilterAndAdjustRecommendations_WithEngineVersionFiltering(t *testing.T)
 	toolCfg.OverrideCount = 0
 	toolCfg.IncludeExtendedSupport = false
 
-	result := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	require.NoError(t, err)
 
 	// Should return recommendations (engine version filtering is done inside the function)
 	assert.NotEmpty(t, result)
@@ -760,14 +762,18 @@ func TestFilterAndAdjustRecommendations_MaxInstancesApplied(t *testing.T) {
 	defer saved.restore()
 
 	recommendations := []common.Recommendation{
-		{Service: common.ServiceRDS, ResourceType: "db.t3.small", Count: 20},
-		{Service: common.ServiceRDS, ResourceType: "db.t3.medium", Count: 20},
+		// EstimatedSavings is set because a binding --max-instances has to rank
+		// the rows it chooses between; requireRankingSignal refuses a run whose
+		// rows carry no savings value rather than capping them by name.
+		{Service: common.ServiceRDS, ResourceType: "db.t3.small", Count: 20, EstimatedSavings: 100},
+		{Service: common.ServiceRDS, ResourceType: "db.t3.medium", Count: 20, EstimatedSavings: 200},
 	}
 
 	toolCfg.MaxInstances = 15
 	toolCfg.OverrideCount = 0
 
-	result := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	require.NoError(t, err)
 
 	// Total instances should not exceed maxInstances
 	totalInstances := 0
@@ -789,7 +795,8 @@ func TestFilterAndAdjustRecommendations_OverrideCountApplied(t *testing.T) {
 	toolCfg.MaxInstances = 0
 	toolCfg.OverrideCount = 5
 
-	result := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	require.NoError(t, err)
 
 	// All recommendations should have count = OverrideCount
 	for _, rec := range result {

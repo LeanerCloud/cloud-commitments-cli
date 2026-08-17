@@ -134,6 +134,8 @@ Threshold filters drop individual recommendations that fall below a quality or s
 
 Drop recommendations where the adjusted instance count (after coverage scaling) is below this number. Useful for ignoring one-off or very small recommendations that are not worth the operational overhead.
 
+The floor applies on both paths, including `--input-csv`: a row already below it is dropped, and a row `--max-instances` would truncate below it is dropped rather than purchased short. On `--input-csv` runs it is re-checked after existing matching commitments are deducted, so a row whose remaining count falls under the floor is dropped rather than purchased at the smaller size.
+
 ```bash
 # Only purchase recommendations for 3 or more instances
 cudly --services rds --min-count 3
@@ -149,6 +151,8 @@ Drop recommendations whose estimated savings percentage falls below this thresho
 
 **Important naming distinction:** `--min-savings-pct` is a **percentage** value (e.g. `10` means "at least 10% savings"). This is different from the GUI and API `min_savings` parameter, which filters by **dollar amount**. A value of `30` in `--min-savings-pct` means "30% savings", but `min_savings=30` in the API means "$30 in savings". Mixing up the two by copying a CLI value into the GUI filter (or vice versa) produces silent, incorrect filtering.
 
+**Refused on `--input-csv` runs.** A recommendations CSV carries no savings-percentage column, so this filter has nothing to read. Combining the two flags fails at startup rather than running with the threshold silently unenforced; drop the flag, or filter the CSV before passing it in. Teaching the CSV format to carry the column is tracked in [#1819](https://github.com/LeanerCloud/CUDly/issues/1819).
+
 ```bash
 # Only recommendations with at least 20% projected savings
 cudly --services rds,elasticache --min-savings-pct 20
@@ -161,6 +165,8 @@ cudly --services rds,elasticache --min-savings-pct 20
 ```
 
 Drop recommendations where the break-even period exceeds this many months. A break-even period is the number of months until the upfront cost of the RI is recovered by the recurring discount. Recommendations without a computable break-even period (e.g. no-upfront) pass through unfiltered.
+
+**Refused on `--input-csv` runs.** A recommendations CSV carries no break-even column, so this filter has nothing to read. Combining the two flags fails at startup rather than running with the threshold silently unenforced; drop the flag, or filter the CSV before passing it in. Teaching the CSV format to carry the column is tracked in [#1819](https://github.com/LeanerCloud/CUDly/issues/1819).
 
 ```bash
 # Only commitments that break even within 18 months
@@ -180,9 +186,11 @@ The cap covers the whole run on both code paths: it is applied once to the combi
 Which recommendations survive depends on the path:
 
 - **Default (recommendation-driven) runs** apply the cap after scoring, so the surviving instances are the highest-savings-percentage ones across every service and region. Recommendations the cap reduces or drops are listed by name before the confirmation prompt and counted in the end-of-run drop summary, so a capped run never shrinks silently.
-- **`--input-csv` runs** are not scored, so the cap consumes the file in row order and keeps rows from the top until the budget is exhausted. Order the CSV deliberately if you expect the cap to bind.
+- **`--input-csv` runs** apply the same cap but rank on a different key, because a CSV row carries no savings percentage. Rows are ordered by **savings per instance** (`EstimatedSavings / Count`), so the budget buys the rows returning the most per instance rather than the rows whose dollar total happens to be largest, and file position is irrelevant. Reduced and dropped rows are named on stdout, alongside the ranking rule that selected them.
 
-If the cap would truncate a recommendation below `--min-count`, that recommendation is dropped rather than purchased at the smaller size, because `--min-count` is a floor rather than a preference. The freed budget is not reallocated to the next recommendation.
+  Because that ordering is the only thing deciding what gets bought, a run whose cap actually binds is **refused** when any surviving row has no usable `EstimatedSavings` value. A blank cell, or a file written without the column at all, loads as `0` and is indistinguishable from a row genuinely worth $0: capping on it would silently select by instance-type name. Populate `EstimatedSavings` on every row, or drop `--max-instances` and cap the file itself. A cap that does not bind chooses nothing and is never refused.
+
+If the cap would truncate a recommendation below `--min-count`, that recommendation is dropped rather than purchased at the smaller size, because `--min-count` is a floor rather than a preference. The freed budget is not reallocated to the next recommendation. This holds on both paths.
 
 ```bash
 # Never purchase more than 100 instances in a single run

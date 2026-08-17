@@ -619,3 +619,70 @@ func TestValidateRecLookbackPeriod(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateCSVModeFilterFlags pins that --input-csv refuses the two scorer
+// thresholds it cannot enforce, instead of accepting them and buying as if
+// they were never set.
+//
+// A recommendations CSV carries neither a savings-percentage column nor a
+// break-even column, so both fields load as zero on every row and any gate on
+// them is either vacuous or rejects the whole file. #1741's complaint is
+// exactly that silent partial enforcement of a spend guard is worse than not
+// offering the guard.
+func TestValidateCSVModeFilterFlags(t *testing.T) {
+	tests := []struct {
+		name               string
+		csvInput           string
+		errSubstr          string
+		minSavingsPct      float64
+		maxBreakEvenMonths int
+	}{
+		{
+			name:          "min-savings-pct refused in CSV mode",
+			csvInput:      "recs.csv",
+			minSavingsPct: 20,
+			errSubstr:     "--min-savings-pct cannot be applied to --input-csv",
+		},
+		{
+			name:               "max-break-even-months refused in CSV mode",
+			csvInput:           "recs.csv",
+			maxBreakEvenMonths: 12,
+			errSubstr:          "--max-break-even-months cannot be applied to --input-csv",
+		},
+		{
+			// Both flags default to 0, so an ordinary CSV run is unaffected.
+			name:     "CSV mode without the thresholds is accepted",
+			csvInput: "recs.csv",
+		},
+		{
+			// The thresholds are enforced normally off the CSV path.
+			name:               "thresholds accepted without --input-csv",
+			minSavingsPct:      20,
+			maxBreakEvenMonths: 12,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			origCfg := toolCfg
+			defer func() { toolCfg = origCfg }()
+			toolCfg.CSVInput = tt.csvInput
+			toolCfg.MinSavingsPct = tt.minSavingsPct
+			toolCfg.MaxBreakEvenMonths = tt.maxBreakEvenMonths
+
+			err := validateCSVModeFilterFlags()
+			if tt.errSubstr == "" {
+				if err != nil {
+					t.Errorf("validateCSVModeFilterFlags() unexpected error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validateCSVModeFilterFlags() expected error containing %q, got nil", tt.errSubstr)
+			}
+			if !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("validateCSVModeFilterFlags() error = %v, want substring %q", err, tt.errSubstr)
+			}
+		})
+	}
+}

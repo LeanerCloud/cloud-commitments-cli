@@ -29,6 +29,10 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := validateCSVModeFilterFlags(); err != nil {
+		return err
+	}
+
 	if err := validateRecLookbackPeriod(); err != nil {
 		return err
 	}
@@ -162,6 +166,34 @@ func warnRDS3YearNoUpfront() error {
 		log.Println("⚠️  WARNING: AWS does not offer 3-year no-upfront Reserved Instances for RDS.")
 		log.Println("    RDS 3-year RIs only support: all-upfront, partial-upfront")
 		log.Println("    No RDS recommendations will be found with this combination.")
+	}
+
+	return nil
+}
+
+// validateCSVModeFilterFlags refuses the scorer thresholds that --input-csv
+// cannot enforce, instead of accepting them and buying as if they were unset.
+//
+// A recommendations CSV carries neither a savings-percentage column nor a
+// break-even column (writeMultiServiceCSVReport emits neither and
+// parseCSVRecord reads neither), so both fields load as zero on every row.
+// Gating on a zero field would reject every row of every file, and skipping
+// the gate silently drops a spend guard the operator believes is in force.
+// Refusing the combination is the only honest option until #1819 teaches the
+// format to carry the columns.
+//
+// Both flags default to 0, so this can only fire when one was set explicitly.
+func validateCSVModeFilterFlags() error {
+	if toolCfg.CSVInput == "" {
+		return nil
+	}
+
+	if toolCfg.MinSavingsPct > 0 {
+		return fmt.Errorf("--min-savings-pct cannot be applied to --input-csv runs: a recommendations CSV carries no savings-percentage column, so the threshold would be silently ignored (see #1819). Remove --min-savings-pct, or filter the CSV before passing it in")
+	}
+
+	if toolCfg.MaxBreakEvenMonths > 0 {
+		return fmt.Errorf("--max-break-even-months cannot be applied to --input-csv runs: a recommendations CSV carries no break-even column, so the threshold would be silently ignored (see #1819). Remove --max-break-even-months, or filter the CSV before passing it in")
 	}
 
 	return nil
