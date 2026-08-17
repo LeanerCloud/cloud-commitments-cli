@@ -598,7 +598,7 @@ runtimes.
 
 - Terraform >= 1.6.0
 - Docker with buildx
-- Go 1.25+
+- Go 1.26.6+
 - Cloud CLI authenticated: `aws`, `gcloud`, or `az`
 
 #### Quick deploy (using the helper script)
@@ -682,7 +682,7 @@ reload, and debugging workflows.
 
 ### Prerequisites
 
-- Go 1.23 or later
+- Go 1.26.6 or later
 - AWS/Azure/GCP credentials for integration testing
 
 ### Building

@@ -48,7 +48,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Prerequisites
 
-- Go 1.23 or later
+- Go 1.26.6 or later (the floor set by the `go` directive in `go.mod`)
 - AWS/Azure/GCP credentials for integration testing
 - Git
 
@@ -88,7 +88,9 @@ from a copy of the committed `go.work` and append your active worktrees:
 
 ```go
 // go.work.local -- gitignored, developer-local
-go 1.25.0
+// Keep this `go` line at or above the modules' own directive, otherwise the
+// workspace is rejected. Copy it from the committed go.work.
+go 1.26.6
 
 use (
     .
