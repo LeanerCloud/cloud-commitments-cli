@@ -492,25 +492,6 @@ func applySizing(recs []common.Recommendation, cfg Config, coverage float64, dro
 	return applyCoverage(recs, coverage, drops)
 }
 
-// ApplyCountOverride overrides the count for all recommendations.
-//
-// It does NOT rescale the count-derived money fields, so an overridden row
-// still carries the savings of the count the provider proposed. That is the
-// same defect ApplyInstanceLimit had before #1830, on a neighboring flag,
-// and it runs upstream of the cap. Tracked by #1844.
-func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []common.Recommendation {
-	if overrideCount <= 0 {
-		return recs
-	}
-	result := make([]common.Recommendation, len(recs))
-	for i := range recs {
-		rec := recs[i]
-		result[i] = rec
-		result[i].Count = int(overrideCount)
-	}
-	return result
-}
-
 // ApplyInstanceLimit truncates recs so their total Count does not exceed
 // maxInstances. It is a single-shot cap over whatever slice it is handed: the
 // caller is responsible for handing it the complete run-wide set, because

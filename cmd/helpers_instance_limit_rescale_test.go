@@ -151,12 +151,15 @@ func TestApplyInstanceLimitNonPositiveCountIsNotRescaled(t *testing.T) {
 }
 
 // TestApplyInstanceLimitRescalesSavingsPlanHourlyCommitment covers the Savings
-// Plan case. SP recs are parsed at Count 1 and so are normally undivisible,
-// but --override-count sets Count on every rec without discriminating by
-// commitment type (ApplyCountOverride), which lets an SP reach the cap at a
-// count the budget can truncate. HourlyCommitment is the SP's actual money
-// quantity, so leaving it whole while the cost fields shrink produces exactly
-// the internally-inconsistent row #1830 warns about.
+// Plan case. The provider parser pins SP recs at Count 1, so they are normally
+// undivisible, but the --input-csv path builds Service straight from the CSV
+// column (parseCSVRecords), so a file naming a savingsplans service at a count
+// above the budget reaches this branch. HourlyCommitment is the SP's actual
+// money quantity, so leaving it whole while the cost fields shrink produces
+// exactly the internally-inconsistent row #1830 warns about.
+//
+// --override-count no longer routes SPs here: it leaves them alone precisely
+// because an SP is dollar-denominated rather than count-denominated (#1844).
 func TestApplyInstanceLimitRescalesSavingsPlanHourlyCommitment(t *testing.T) {
 	const ratio = 2.0 / 5.0
 
