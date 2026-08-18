@@ -143,19 +143,22 @@ func applyCoverage(recs []common.Recommendation, coverage float64, drops *common
 		adjusted := rec
 
 		// For Savings Plans, reduce the hourly commitment instead of count.
-		// If the type assertion fails (defensive — Details should always
-		// be *SavingsPlanDetails for SP recs), preserve the recommendation
-		// at its original values rather than silently dropping it. A
-		// missing-Details record is a logged anomaly, not a reason to
-		// erase coverage from the run.
+		// If Details is the wrong type or a nil pointer (defensive — it
+		// should always be a non-nil *SavingsPlanDetails for SP recs),
+		// preserve the recommendation at its original values rather than
+		// silently dropping it. A missing-Details record is a logged
+		// anomaly, not a reason to erase coverage from the run.
+		//
+		// The nil check matters: an interface holding a typed nil satisfies
+		// the assertion, so testing ok alone would send an unscalable rec
+		// down the scaling path.
 		if common.IsSavingsPlan(rec.Service) {
-			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
-				newDetails := *details // Copy the struct
-				newDetails.HourlyCommitment *= ratio
+			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok && details != nil {
+				// ScaleRecommendationCosts scales HourlyCommitment along with
+				// the cost fields and replaces Details with a scaled copy.
 				adjusted = common.ScaleRecommendationCosts(adjusted, ratio)
-				adjusted.Details = &newDetails
 			} else {
-				AppLogger.Printf("WARNING: SP recommendation for service %q has unexpected Details type %T; passing through unscaled\n", rec.Service, rec.Details)
+				AppLogger.Printf("WARNING: SP recommendation for service %q has missing or unexpected Details (%T); passing through unscaled\n", rec.Service, rec.Details)
 			}
 			result = append(result, adjusted)
 			continue
@@ -426,12 +429,26 @@ func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common
 	if rec.RecommendedUtilization <= 0 {
 		return rec, false
 	}
+	// If Details isn't a non-nil *SavingsPlanDetails (defensive — it should
+	// always be one for SP recs), log a warning and pass through UNCHANGED —
+	// including leaving ProjectedUtilization at zero. Setting projection
+	// fields on a rec whose commitment fields couldn't be scaled would
+	// produce a misleading row (projection=target%, savings=full-unscaled).
+	//
+	// The nil check must precede the HourlyCommitment read below: an
+	// interface holding a typed nil satisfies the assertion, so reading the
+	// field off it would dereference nil.
+	details, ok := rec.Details.(*common.SavingsPlanDetails)
+	if !ok || details == nil {
+		AppLogger.Printf("WARNING: SP recommendation for service %q has missing or unexpected Details (%T); passing through unscaled\n", rec.Service, rec.Details)
+		return rec, true
+	}
 	// Also treat a $0 HourlyCommitment as "no signal" — CE occasionally
 	// returns placeholder recs with zero commitment. Sizing such a rec
 	// would produce nonsense ($0 commitment * ratio = $0) while still
 	// claiming the target coverage is achieved, which is incoherent.
 	// Pass through unchanged and count in the skip summary.
-	if details, ok := rec.Details.(*common.SavingsPlanDetails); ok && details.HourlyCommitment <= 0 {
+	if details.HourlyCommitment <= 0 {
 		return rec, false
 	}
 
@@ -442,22 +459,10 @@ func applyTargetCoverageSP(rec common.Recommendation, targetPct float64) (common
 	// zero value means we can't sanity-check the result); the scaling itself
 	// uses targetPct directly rather than a recUtil/target ratio so the flag's
 	// intent is honored even when AWS already projects above target.
-	//
-	// If Details isn't a *SavingsPlanDetails (defensive — should always be
-	// for SP recs), log a warning and pass through UNCHANGED — including
-	// leaving ProjectedUtilization at zero. Setting projection fields on a
-	// rec whose commitment fields couldn't be scaled would produce a
-	// misleading row (projection=target%, savings=full-unscaled).
-	details, ok := rec.Details.(*common.SavingsPlanDetails)
-	if !ok {
-		AppLogger.Printf("WARNING: SP recommendation for service %q has unexpected Details type %T; passing through unscaled\n", rec.Service, rec.Details)
-		return rec, true
-	}
 	ratio := targetPct / 100.0
-	newDetails := *details // copy
-	newDetails.HourlyCommitment *= ratio
+	// ScaleRecommendationCosts scales HourlyCommitment along with the cost
+	// fields and replaces Details with a scaled copy.
 	adjusted := common.ScaleRecommendationCosts(rec, ratio)
-	adjusted.Details = &newDetails
 	// Shrinking commitment raises projected utilization by 1/ratio
 	// (used is fixed = orig_commit * RecUtil, bought is orig_commit * ratio).
 	// Clamp to 100 since utilization caps at full use.
@@ -488,6 +493,11 @@ func applySizing(recs []common.Recommendation, cfg Config, coverage float64, dro
 }
 
 // ApplyCountOverride overrides the count for all recommendations.
+//
+// It does NOT rescale the count-derived money fields, so an overridden row
+// still carries the savings of the count the provider proposed. That is the
+// same defect ApplyInstanceLimit had before #1830, on a neighboring flag,
+// and it runs upstream of the cap. Tracked by #1844.
 func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []common.Recommendation {
 	if overrideCount <= 0 {
 		return recs
@@ -511,6 +521,15 @@ func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []com
 // Recommendations are consumed in slice order, so the caller controls which
 // ones survive by ordering the slice (the main path caps the scorer's
 // savings-sorted output, keeping the highest-value commitments).
+//
+// A truncated recommendation has its extensive money fields scaled by the
+// discrete count ratio, like every other sizing path (see
+// common.ScaleRecommendationCosts). EstimatedSavings and friends are
+// whole-row totals for the count the provider proposed, so cutting Count
+// alone leaves the row claiming the savings of instances the run will not
+// buy. The run summary and the purchase report then overstate the benefit
+// of a capped run, which is the wrong direction to be wrong in on a money
+// path (#1830).
 func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []common.Recommendation {
 	if maxInstances <= 0 {
 		return recs
@@ -525,7 +544,13 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 			break
 		}
 		adjusted := rec
+		// rec.Count > remaining and remaining >= 1 together imply rec.Count
+		// >= 2, so the denominator is always positive here. A non-positive
+		// Count can never enter this branch and so is never rescaled: it
+		// buys nothing, there is nothing to scale down to, and a zero or
+		// negative denominator would produce NaN or a sign flip.
 		if rec.Count > remaining {
+			adjusted = common.ScaleRecommendationCosts(rec, float64(remaining)/float64(rec.Count))
 			adjusted.Count = remaining
 		}
 		result = append(result, adjusted)

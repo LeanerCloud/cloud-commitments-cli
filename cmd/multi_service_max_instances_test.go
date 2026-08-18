@@ -511,8 +511,12 @@ rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,All Upfront,123456789012
 	assert.InDelta(t, 500.00, got[0].EstimatedSavings, 0.001)
 	assert.Equal(t, countPerRow, got[0].Count)
 	assert.Equal(t, "db.t3.large", got[1].ResourceType)
-	assert.InDelta(t, 100.00, got[1].EstimatedSavings, 0.001)
 	assert.Equal(t, maxInstances-countPerRow, got[1].Count)
+	// This row is truncated, so its savings are the file's figure scaled by
+	// the share of the row the budget actually buys (#1830). Asserting the
+	// unscaled 100.00 here is what the bug looked like.
+	assert.InDelta(t, 100.00*float64(maxInstances-countPerRow)/float64(countPerRow),
+		got[1].EstimatedSavings, 0.001)
 
 	// Nothing shrinks silently: the row the cap dropped is named.
 	assert.Contains(t, out, "db.t3.small")
