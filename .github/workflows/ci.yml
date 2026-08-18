@@ -736,6 +736,28 @@ jobs:
       - name: Run selector self-tests
         run: bash scripts/test-select-ecr-repos-to-delete.sh
 
+  # Assert that no Terraform file declares an azurerm_key_vault_access_policy
+  # resource. This project's only Key Vault sets enable_rbac_authorization =
+  # true, and an RBAC-enabled vault ignores access policies entirely, so such a
+  # grant applies cleanly and then does nothing at runtime (#1621). The nested
+  # `access_policy` block form is deliberately not covered; #1839 tracks it.
+  # Fast (shell only), so it always runs.
+  azure-kv-access-policy:
+    name: Azure Key Vault grant model
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert no Key Vault access policies
+        run: bash scripts/check-azure-kv-access-policy.sh
+
+      - name: Run guard script self-tests
+        run: bash scripts/test-azure-kv-access-policy.sh
+
   # Summary job - all checks must pass
   ci-success:
     name: CI Success
@@ -752,6 +774,7 @@ jobs:
       - aws-iam-parity
       - gcp-secret-scope
       - ecr-delete-selection
+      - azure-kv-access-policy
     if: always()
 
     steps:
