@@ -236,7 +236,12 @@ jobs:
 
       - name: Install golang-migrate
         run: |
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
+          # -tags 'pgx5', matching the Dockerfile and the library import in
+          # internal/database/postgres/migrations: the postgres tag links
+          # lib/pq, which carries unfixable advisories (issue #1849). No
+          # @version suffix: installed as a package of this module, so the
+          # version and dependency set come from go.mod.
+          go install -tags 'pgx5' github.com/golang-migrate/migrate/v4/cmd/migrate
 
       - name: Run database migrations
         env:
@@ -248,7 +253,7 @@ jobs:
         run: |
           if [ -d "internal/database/postgres/migrations" ]; then
             migrate -path internal/database/postgres/migrations \
-              -database "postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
+              -database "pgx5://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
               up
           fi
 

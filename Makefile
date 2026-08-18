@@ -15,7 +15,9 @@ GIT_SHA?=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 GOLANGCI_LINT_VERSION?=v2.10.1
 GOSEC_VERSION?=v2.28.0
 GOCYCLO_VERSION?=v0.6.0
-MIGRATE_VERSION?=v4.19.1
+# golang-migrate deliberately has no version variable: it is installed as a
+# package of this module (see install-tools), so its version and its whole
+# dependency set come from go.mod. See issue #1849.
 # staticcheck has no CI pin; it is used by scripts/security-scan.sh
 STATICCHECK_VERSION?=v0.7.0
 LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitSHA=$(GIT_SHA)"
@@ -246,8 +248,8 @@ install-dev-tools:
 	@go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 	@echo "Installing gocyclo $(GOCYCLO_VERSION)..."
 	@go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
-	@echo "Installing golang-migrate $(MIGRATE_VERSION)..."
-	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@$(MIGRATE_VERSION)
+	@echo "Installing golang-migrate $$(go list -m -f '{{.Version}}' github.com/golang-migrate/migrate/v4)..."
+	@go install -tags 'pgx5' github.com/golang-migrate/migrate/v4/cmd/migrate
 	@echo "✓ Development tools installed"
 	@echo ""
 	@echo "Additional tools to install manually:"
