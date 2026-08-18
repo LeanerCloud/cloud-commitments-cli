@@ -340,6 +340,10 @@ jobs:
         with:
           context: .
           push: false
+          # Export the built image into the local docker image store so the
+          # scan step below inspects the artifact this job just produced,
+          # rather than rebuilding one and hoping it is the same.
+          load: true
           tags: cudly:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -351,6 +355,33 @@ jobs:
           docker build -t cudly:test .
           docker run --rm cudly:test /app/cudly --version || true
           docker run --rm cudly:test /app/cudly --help || true
+
+      # Nothing else in the pipeline looks at the artifact: govulncheck runs in
+      # source mode, and Trivy runs with scan-type fs and config, all against
+      # the repository. A vulnerable binary baked into the image was invisible
+      # by construction, which is how #1833 shipped twice (issue #1836). These
+      # steps live in this job rather than a new one so the image is scanned
+      # without being built a third time; docker-build is already in
+      # ci-success's needs, so the gate is wired.
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install govulncheck
+        run: |
+          # Same pin as the security-scan job: a govulncheck release with new
+          # detection logic must not silently change this gate's verdict
+          # between PRs.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run image scan self-tests
+        # Asserts both directions of the verdict against recorded govulncheck
+        # output, so a scanner that can no longer fail cannot ship as coverage.
+        run: bash scripts/test-scan-shipped-image.sh
+
+      - name: Scan the shipped image for Go advisories
+        run: bash scripts/scan-shipped-image.sh cudly:${{ github.sha }}
 
   # Terraform validation for all environments
   terraform-validate:
@@ -779,19 +810,27 @@ jobs:
 
     steps:
       - name: Check all jobs
+        # Allowlist on success instead of denylisting 'failure' and
+        # 'cancelled'. A job that never dispatched reports 'skipped', and the
+        # denylist form reported that as a pass -- so a gate could satisfy this
+        # summary by not running at all, which is the same shape as the scanner
+        # gap in #1836. Anything that is not exactly 'success' now fails, and
+        # names itself in the log.
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "One or more CI jobs failed"
-            exit 1
-          fi
-          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
-            echo "One or more CI jobs were cancelled"
+          # jq is preinstalled on the GitHub Ubuntu runner image (no new deps).
+          not_success="$(jq -r 'to_entries[]
+            | select(.value.result != "success")
+            | "  \(.key): \(.value.result)"' <<<"$NEEDS_JSON")"
+          if [[ -n "$not_success" ]]; then
+            echo "::error::not every required CI job succeeded"
+            echo "$not_success"
             exit 1
           fi
           echo "All CI checks passed!"
 
       - name: Post status
-        if: always()
         run: |
           echo "## CI Status" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
