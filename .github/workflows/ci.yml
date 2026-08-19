@@ -762,6 +762,10 @@ jobs:
   # destroy steps still call scripts/force-delete-owned-ecr-repo.sh, that script
   # still deletes only what the selector yields, and nothing else under
   # .github/workflows or scripts/ runs `aws ecr delete-repository` unguarded.
+  # That last claim is checked over a GLOB of both directories, not a list of
+  # known files, so a script added later is covered without anyone remembering
+  # to name it; the sweep is asserted to have opened a non-zero number of files
+  # first, since an empty swept set has no violations either.
   # Fast (shell only), so it always runs.
   ecr-delete-selection:
     name: ECR delete selection scope
@@ -781,7 +785,44 @@ jobs:
           persist-credentials: false
 
       - name: Run selector self-tests
-        run: bash scripts/test-select-ecr-repos-to-delete.sh
+        run: bash scripts/test-ecr-delete-selection.sh
+
+  # Assert that the RDS instance selector used by destroy-fargate-dev.yml and
+  # cleanup-staging.yml unprotects the instance each state owns and nothing
+  # else. Deletion protection is the last line of defence on a database, so
+  # stripping it from an instance a state does not own leaves that database
+  # exposed to the next destroy that does match it. Both directions are
+  # asserted: a prefix near-miss is refused, and the owned instance is still
+  # selected, since a selector matching nothing passes every refusal assertion
+  # while leaving the destroy broken. The suite also asserts the wiring, which
+  # is what #1592, #1820 and #1821 each escaped: all three destroy steps call
+  # scripts/disable-owned-rds-deletion-protection.sh, that script unprotects
+  # only what the selector yields and swallows nothing, and nothing else under
+  # .github/workflows or scripts/ runs `aws rds modify-db-instance` unguarded.
+  # That last claim is checked over a GLOB of both directories, not a list of
+  # known files, so a script added later is covered without anyone remembering
+  # to name it; the sweep is asserted to have opened a non-zero number of files
+  # first, since an empty swept set has no violations either.
+  # It additionally runs the script end to end against stubbed terraform and aws,
+  # so "a failed strip is not swallowed" is asserted as behaviour, not as text.
+  # Fast (shell only), so it always runs.
+  rds-deletion-protection-scope:
+    name: RDS deletion protection scope
+    runs-on: ubuntu-latest
+    # Same shape as ecr-delete-selection above: this job checks out the tree and
+    # runs a shell script against it, so the repository-default read/write token
+    # is narrowed to `contents: read`.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run RDS scope self-tests
+        run: bash scripts/test-rds-deletion-protection-scope.sh
 
   # Assert that no Terraform file declares an azurerm_key_vault_access_policy
   # resource. This project's only Key Vault sets enable_rbac_authorization =
@@ -821,6 +862,7 @@ jobs:
       - aws-iam-parity
       - gcp-secret-scope
       - ecr-delete-selection
+      - rds-deletion-protection-scope
       - azure-kv-access-policy
     if: always()
 
