@@ -89,6 +89,52 @@ repos:
         entry: ghcr.io/hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d hadolint
         types: [dockerfile]
 
+  # GitHub Actions workflow linting
+  #
+  # Runs the same two linters as ci.yml's workflow-lint job, at the same pinned
+  # versions, so an expression injection is caught before the push rather than
+  # after. Keep the versions here and in ci.yml in lockstep.
+  #
+  # actionlint is a local docker_image hook rather than the upstream
+  # rhysd/actionlint hook for the reason spelled out above for hadolint: the
+  # upstream actionlint-docker hook's entry pins the image by mutable tag, and
+  # `rev:` only pins the hook definition, not the image it runs. This entry
+  # pins the digest, so the ruleset can only change by editing this line.
+  #
+  # The image bundles shellcheck. actionlint silently skips every run: block
+  # and still exits 0 when shellcheck is absent from PATH, which is how the
+  # rollback.yml injection (#1542) went unflagged, so a system hook that
+  # depends on each developer having shellcheck installed would reintroduce
+  # exactly that gap.
+  - repo: local
+    hooks:
+      - id: actionlint
+        name: Lint GitHub Actions workflows
+        language: docker_image
+        entry: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        types: [yaml]
+        files: ^\.github/workflows/
+
+      # zizmor is what actually closes the injection gap: actionlint only
+      # catches this class indirectly, through shellcheck on the expanded
+      # script, and against the pre-fix rollback.yml it never flagged the
+      # injected heredoc at all. zizmor's template-injection audit named that
+      # exact line. Upstream publishes no .pre-commit-hooks.yaml, so this is a
+      # local hook with the version pinned in additional_dependencies.
+      #
+      # Flags mirror ci.yml exactly; keep them in lockstep. --persona=pedantic
+      # because the default regular persona hides high-severity findings this
+      # repo had, and --min-severity=medium is a threshold rather than a
+      # suppression: no baseline file and no per-finding ignores, so every
+      # medium and high finding fails. The pre-fix injection scored high.
+      - id: zizmor
+        name: Audit GitHub Actions workflows for injection
+        language: python
+        additional_dependencies: ['zizmor==1.29.0']
+        entry: zizmor --offline --persona=pedantic --min-severity=medium
+        types: [yaml]
+        files: ^\.github/workflows/
+
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.47.0

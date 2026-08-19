@@ -15,6 +15,9 @@
 
 name: CI - Build & Test
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [main, develop]
@@ -32,6 +35,8 @@ jobs:
   lint:
     name: Lint Code
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -73,10 +78,120 @@ jobs:
           fi
           echo "✅ All functions have acceptable cyclomatic complexity (≤10)"
 
+  # GitHub Actions workflow linting
+  #
+  # Nothing else in this repo reads .github/workflows/ for defects. govulncheck
+  # and gosec are Go source scanners, trivy-config targets Terraform/Dockerfile/
+  # Kubernetes, and check-yaml only proves the YAML parses. That gap is why the
+  # rollback.yml and deploy-aws-lambda.yml expression injections (#1542, #1649),
+  # both reaching production cloud credentials, passed every CI run.
+  #
+  # Both linters are needed and neither substitutes for the other:
+  #   - actionlint catches workflow-level defects and, via shellcheck, shell
+  #     bugs inside run: blocks.
+  #   - zizmor has a template-injection audit that names the injection itself.
+  #     Measured against the pre-fix rollback.yml, actionlint exited 1 only on
+  #     unrelated SC2086 noise and never flagged the injected heredoc at all;
+  #     zizmor flagged that exact line high severity, high confidence. actionlint
+  #     alone would not have caught the bug this job exists to prevent.
+  workflow-lint:
+    name: Lint Workflows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # Pinned by digest, not only by tag. A tag is mutable, and a linter whose
+      # ruleset changes without a change in this repo turns main red on its own
+      # schedule -- the hadolint :latest failure in #1695.
+      ACTIONLINT_IMAGE: 'rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667'
+      ZIZMOR_VERSION: '1.29.0'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Assert there are workflows to lint
+        run: |
+          set -euo pipefail
+          count=$(find .github/workflows -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | wc -l | tr -d ' ')
+          # Defence in depth, not the only guard: both linters do exit 3 on an
+          # empty input set. This catches the case they cannot, where the path
+          # still resolves but the set silently shrinks, and it prints the count
+          # so a drop is visible in the log rather than inferred from silence.
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no workflow files found under .github/workflows"
+            exit 1
+          fi
+          echo "Linting $count workflow files"
+
+      - name: Assert shellcheck is available to actionlint
+        # actionlint does not fail when shellcheck is missing from PATH: it
+        # silently skips every run: block and still exits 0. That silent skip is
+        # the failure mode this job exists to close, so assert the binary is
+        # present rather than trusting the image to keep bundling it.
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint sh "$ACTIONLINT_IMAGE" -c '
+            command -v shellcheck >/dev/null || {
+              echo "::error::shellcheck is not present in the actionlint image; shell linting would be silently skipped"
+              exit 1
+            }
+            shellcheck --version | sed -n "1,3p"'
+
+      - name: Run actionlint
+        # No file arguments: actionlint discovers .github/workflows itself, so
+        # it also covers .yaml files and any workflow added later. Passing an
+        # explicit *.yml glob would silently skip a .yaml workflow that the
+        # count step above still counts.
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD:/repo" -w /repo "$ACTIONLINT_IMAGE" -color
+
+      - name: Run zizmor
+        # --offline on purpose: the online audits query the GitHub API for action
+        # metadata, so findings could change without a change in this repo and
+        # redden main, the same class of failure the hadolint digest pin fixed.
+        #
+        # Coverage note: zizmor reads the directory non-recursively, while
+        # actionlint walks it. A workflow under .github/workflows/sub/ would
+        # therefore reach actionlint but not zizmor. GitHub itself ignores
+        # workflows in subdirectories, so this is not a live hole, and the
+        # -maxdepth 1 count above fails loud if the set ever moves down a level.
+        #
+        # Two independent filters, and it matters which does what.
+        #
+        # --persona=pedantic rather than the default regular: regular hides
+        # three high-severity findings this repo actually had (workflow-level
+        # id-token: write in both sanity workflows, and an unpinned postgres
+        # service image). Those are fixed rather than filtered, so the stricter
+        # persona costs nothing today and gates more. auditor is the one level
+        # up and is documented as accepting false positives, so it is not used.
+        #
+        # --min-severity=medium is a threshold, not a suppression: no baseline
+        # file, no per-finding ignore, no only-new-issues. Every medium and
+        # high finding the pedantic persona surfaces fails this job, and the
+        # injection class this job exists to catch scores high. Below the line
+        # sit 106 findings, none above low: 66 template-injection on values
+        # #1649 already assessed as non-injectable (github.actor, github.sha
+        # and similar), plus undocumented-permissions, concurrency-limits and
+        # anonymous-definition. Clearing those means rewriting the deploy
+        # workflows, so they are left to a follow-up rather than silenced here.
+        run: |
+          set -euo pipefail
+          # `pipx run --spec` rather than `pipx install`: it pins the version in
+          # the same statement that invokes it and does not assume pipx's bin
+          # directory is on PATH.
+          pipx run --spec "zizmor==${ZIZMOR_VERSION}" zizmor \
+            --offline --persona=pedantic --min-severity=medium \
+            --color=always .github/workflows/
+
   # Unit tests with race detection
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -206,10 +321,15 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # Pinned by digest for the same reason as the linter images below: a
+        # floating tag lets the service container change under an unchanged
+        # repo, which is how #1695 turned main red.
+        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
         env:
           POSTGRES_DB: cudly_test
           POSTGRES_USER: cudly_test
@@ -331,6 +451,8 @@ jobs:
   docker-build:
     name: Build Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -392,6 +514,8 @@ jobs:
   terraform-validate:
     name: Validate Terraform (${{ matrix.cloud }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         cloud: [aws, gcp, azure]
@@ -644,6 +768,8 @@ jobs:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -671,6 +797,8 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -702,6 +830,8 @@ jobs:
   azure-role-parity:
     name: Azure role actions parity (ARM vs TF)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -721,6 +851,8 @@ jobs:
   aws-iam-parity:
     name: AWS IAM actions parity (CFN vs TF)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -740,6 +872,8 @@ jobs:
   gcp-secret-scope:
     name: GCP Secret Manager grant scope
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -770,11 +904,12 @@ jobs:
   ecr-delete-selection:
     name: ECR delete selection scope
     runs-on: ubuntu-latest
-    # ci.yml declares no workflow-level `permissions`, so a job without its own
-    # block gets the repository default, which is read/write on this repo. This
-    # job checks out the tree and runs a shell script against it; `contents:
-    # read` is all of that needs, and it is the same shape security-scan above
-    # uses (which adds `security-events: write` only because it uploads SARIF).
+    # This job checks out the tree and runs a shell script against it, so
+    # `contents: read` is all it needs. Same shape as security-scan above,
+    # which adds `security-events: write` only because it uploads SARIF.
+    # ci.yml now also declares `contents: read` at workflow level, so this
+    # block narrows nothing on its own; it is kept explicit so the job states
+    # its own requirement rather than inheriting silently.
     permissions:
       contents: read
 
@@ -810,8 +945,7 @@ jobs:
     name: RDS deletion protection scope
     runs-on: ubuntu-latest
     # Same shape as ecr-delete-selection above: this job checks out the tree and
-    # runs a shell script against it, so the repository-default read/write token
-    # is narrowed to `contents: read`.
+    # runs a shell script against it, so `contents: read` is all it needs.
     permissions:
       contents: read
 
@@ -844,8 +978,7 @@ jobs:
     name: AWS Terraform state namespace per platform
     runs-on: ubuntu-latest
     # Same shape as ecr-delete-selection above: this job checks out the tree and
-    # runs a shell script against it, so the repository-default read/write token
-    # is narrowed to `contents: read`.
+    # runs a shell script against it, so `contents: read` is all it needs.
     permissions:
       contents: read
 
@@ -867,6 +1000,8 @@ jobs:
   azure-kv-access-policy:
     name: Azure Key Vault grant model
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -886,6 +1021,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - lint
+      - workflow-lint
       - unit-tests
       - integration-tests
       - docker-build
@@ -900,6 +1036,8 @@ jobs:
       - aws-tfstate-platform-key
       - azure-kv-access-policy
     if: always()
+    permissions:
+      contents: read
 
     steps:
       - name: Check all jobs
@@ -925,6 +1063,8 @@ jobs:
 
       - name: Post status
         run: |
-          echo "## CI Status" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All CI checks completed successfully!" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## CI Status"
+            echo ""
+            echo "✅ All CI checks completed successfully!"
+          } >> "$GITHUB_STEP_SUMMARY"
