@@ -528,3 +528,104 @@ func TestApplyFilters_DropExtendedSupport(t *testing.T) {
 	assert.Contains(t, d.FormatOneLine(), common.DropExtendedSupport,
 		"drop summary should name the --include-extended-support category")
 }
+
+// TestApplyFilters_SavingsPlansRegionFilters covers the CLI half of #1582.
+// Savings Plans recommendations never populate the top-level rec.Region
+// (parser_sp.go stores the CE-supplied region in Details.Region instead), so
+// filtering on the bare field dropped every SP recommendation whenever
+// --include-regions was set, and leaked region-scoped EC2Instance SPs past
+// --exclude-regions. The provider-side filters were fixed first; these cases
+// pin the same semantics on the CLI path.
+func TestApplyFilters_SavingsPlansRegionFilters(t *testing.T) {
+	ec2SP := func(region string) common.Recommendation {
+		return common.Recommendation{
+			Provider:       common.ProviderAWS,
+			Service:        common.ServiceSavingsPlansEC2Instance,
+			CommitmentType: common.CommitmentSavingsPlan,
+			Count:          1,
+			Details: &common.SavingsPlanDetails{
+				PlanType:       "EC2Instance",
+				InstanceFamily: "m5",
+				Region:         region,
+			},
+		}
+	}
+	computeSP := func() common.Recommendation {
+		return common.Recommendation{
+			Provider:       common.ProviderAWS,
+			Service:        common.ServiceSavingsPlansCompute,
+			CommitmentType: common.CommitmentSavingsPlan,
+			Count:          1,
+			Details:        &common.SavingsPlanDetails{PlanType: "Compute"},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		rec            common.Recommendation
+		includeRegions []string
+		excludeRegions []string
+		wantKept       bool
+	}{
+		{
+			name:           "EC2Instance SP in the included region survives",
+			rec:            ec2SP("us-east-1"),
+			includeRegions: []string{"us-east-1"},
+			wantKept:       true,
+		},
+		{
+			name:           "EC2Instance SP outside the included region is dropped",
+			rec:            ec2SP("eu-west-1"),
+			includeRegions: []string{"us-east-1"},
+			wantKept:       false,
+		},
+		{
+			name:           "region-agnostic Compute SP survives an include filter",
+			rec:            computeSP(),
+			includeRegions: []string{"us-east-1"},
+			wantKept:       true,
+		},
+		{
+			name:           "EC2Instance SP in an excluded region is dropped",
+			rec:            ec2SP("eu-west-1"),
+			excludeRegions: []string{"eu-west-1"},
+			wantKept:       false,
+		},
+		{
+			name:           "region-agnostic Compute SP survives an exclude filter",
+			rec:            computeSP(),
+			excludeRegions: []string{"eu-west-1"},
+			wantKept:       true,
+		},
+		{
+			// Cost Explorer omitted SavingsPlansDetails.Region. An EC2Instance
+			// SP is region-scoped, so an unknown region must not be treated as
+			// region-agnostic and waved past an explicit region filter.
+			name:           "EC2Instance SP with an unknown region is not over-included",
+			rec:            ec2SP(""),
+			includeRegions: []string{"us-east-1"},
+			wantKept:       false,
+		},
+		{
+			name:           "reservation rec with an unknown region is still dropped",
+			rec:            common.Recommendation{Service: common.ServiceRDS, CommitmentType: common.CommitmentReservedInstance, Count: 1},
+			includeRegions: []string{"us-east-1"},
+			wantKept:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := Config{
+				IncludeRegions: tt.includeRegions,
+				ExcludeRegions: tt.excludeRegions,
+			}
+			want := 0
+			if tt.wantKept {
+				want = 1
+			}
+			got := applyFilters([]common.Recommendation{tt.rec}, &cfg, nil, nil, "", common.NewDropSummary())
+			assert.Len(t, got, want, "region filter kept the wrong number of recommendations")
+		})
+	}
+}

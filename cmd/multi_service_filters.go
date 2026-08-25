@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
+	awsprovider "github.com/LeanerCloud/CUDly/providers/aws"
 )
 
 // applyFilters applies region, instance type, engine, and engine version filters to recommendations.
@@ -86,7 +87,7 @@ func processRecommendation(rec *common.Recommendation, cfg *Config, instanceVers
 // dimension filters here are pure functions of rec + cfg with no side
 // effects. Pool-size filtering is handled with logging in applyFilters.
 func passesDimensionFilters(rec *common.Recommendation, cfg *Config) bool {
-	if !shouldIncludeRegion(rec.Region, cfg) {
+	if !shouldIncludeRecommendationRegion(rec, cfg) {
 		return false
 	}
 	if !shouldIncludeInstanceType(rec.ResourceType, cfg) {
@@ -120,6 +121,25 @@ func shouldIncludePoolSize(rec *common.Recommendation, cfg *Config) bool {
 		return true
 	}
 	return rec.AverageInstancesUsedPerHour >= cfg.MinPoolSize
+}
+
+// shouldIncludeRecommendationRegion applies the region filters to a whole
+// recommendation rather than to its bare Region field. Savings Plans
+// recommendations leave the top-level Region empty and carry the
+// EC2Instance-scoped region in Details instead, so matching on rec.Region
+// alone dropped every SP recommendation under --include-regions and leaked
+// region-scoped ones past --exclude-regions (#1582).
+//
+// Both predicates are the provider package's, which already filters AWS
+// recommendations on these semantics, rather than a second implementation.
+// Recommendations from other providers are unaffected: both predicates are
+// gated on common.CommitmentSavingsPlan and fall through to the plain
+// rec.Region comparison for everything else.
+func shouldIncludeRecommendationRegion(rec *common.Recommendation, cfg *Config) bool {
+	if awsprovider.IsRegionAgnostic(*rec) {
+		return true
+	}
+	return shouldIncludeRegion(awsprovider.EffectiveRegion(*rec), cfg)
 }
 
 // shouldIncludeRegion checks if a region should be included based on filters.
