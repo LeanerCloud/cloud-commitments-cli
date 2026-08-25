@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,11 +29,30 @@ import (
 // TestExecutePurchaseRealPurchaseGate is the one test that deliberately
 // overrides this default, and it does so non-parallel (see its doc comment)
 // so no parallel test in this package ever observes a transient override.
+//
+// It also pins EnvAuditLog to a path inside a run-scoped temp directory.
+// Auditing is on by default (see EnvAuditLog), so without this every test in
+// this file that calls ExecutePurchase would append to the developer's real
+// ~/.local/state/cudly/mcp-audit.jsonl. Individual tests that need to assert
+// on audit file contents override this with their own t.Setenv.
 func TestMain(m *testing.M) {
 	if err := os.Setenv(EnvEnableRealPurchases, "1"); err != nil {
 		panic(err)
 	}
-	os.Exit(m.Run())
+
+	auditDir, err := os.MkdirTemp("", "cudly-mcp-audit-testmain")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv(EnvAuditLog, filepath.Join(auditDir, "mcp-audit.jsonl")); err != nil {
+		panic(err)
+	}
+
+	// os.Exit skips deferred calls, so the temp dir is removed explicitly
+	// before exiting rather than via defer.
+	code := m.Run()
+	os.RemoveAll(auditDir)
+	os.Exit(code)
 }
 
 // fakeServiceClient is a minimal provider.ServiceClient test double. Only

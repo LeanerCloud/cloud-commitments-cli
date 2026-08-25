@@ -603,6 +603,7 @@ func ExecutePurchase(ctx context.Context, req PurchaseRequest) (*PurchaseRespons
 
 	rec := req.Recommendation
 	if mode == modePreview {
+		recordPurchaseAudit(rec, common.PurchaseResult{DryRun: true}, auditStatusSkipped, true)
 		return &PurchaseResponse{
 			Success:           true,
 			DryRun:            true,
@@ -638,11 +639,13 @@ func ExecutePurchase(ctx context.Context, req PurchaseRequest) (*PurchaseRespons
 	result, err := client.PurchaseCommitment(ctx, rec, opts)
 	if err != nil {
 		logPurchaseOutcome(rec, token, "", false, err)
+		recordPurchaseAudit(rec, common.PurchaseResult{Error: err}, auditStatusError, false)
 		// Full provider error text surfaces to the caller (feedback:
 		// providers must never swallow the underlying SDK/HTTP error).
 		return nil, fmt.Errorf("purchase commitment failed: %w", err)
 	}
 	logPurchaseOutcome(rec, token, result.CommitmentID, result.Success, result.Error)
+	recordPurchaseAudit(rec, result, auditStatusFor(result), false)
 
 	resp := &PurchaseResponse{
 		Success:           result.Success,

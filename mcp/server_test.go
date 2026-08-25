@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,11 +15,73 @@ import (
 	"github.com/LeanerCloud/CUDly/mcp/tools"
 )
 
+// TestMain pins tools.EnvAuditLog to a path inside a run-scoped temp
+// directory for this package's test binary. Auditing is on by default (see
+// tools.EnvAuditLog), and every test in this file calls NewServer, which now
+// probes the audit log path at construction time -- without this, the whole
+// suite would touch the developer's real ~/.local/state/cudly/mcp-audit.jsonl.
+// Tests that need a specific audit configuration override this with their
+// own t.Setenv.
+func TestMain(m *testing.M) {
+	auditDir, err := os.MkdirTemp("", "cudly-mcp-server-audit-testmain")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv(tools.EnvAuditLog, filepath.Join(auditDir, "mcp-audit.jsonl")); err != nil {
+		panic(err)
+	}
+
+	// os.Exit skips deferred calls, so the temp dir is removed explicitly
+	// before exiting rather than via defer.
+	code := m.Run()
+	os.RemoveAll(auditDir)
+	os.Exit(code)
+}
+
 func TestNewServerBuildsWithoutError(t *testing.T) {
 	t.Parallel()
 	s, err := NewServer("test")
 	require.NoError(t, err)
 	require.NotNil(t, s)
+}
+
+// TestNewServerFailsOnBadAuditPath proves NewServer refuses to build when
+// the resolved audit log path is unwritable, rather than silently dropping
+// every audit record for the session. The path's parent is a regular file
+// (not a directory), so os.MkdirAll deterministically fails. Not parallel:
+// t.Setenv forbids it.
+func TestNewServerFailsOnBadAuditPath(t *testing.T) {
+	dir := t.TempDir()
+	blockingFile := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blockingFile, []byte("x"), 0o600))
+	t.Setenv(tools.EnvAuditLog, filepath.Join(blockingFile, "nested.jsonl"))
+
+	s, err := NewServer("test")
+	require.Error(t, err)
+	assert.Nil(t, s)
+	assert.Contains(t, err.Error(), "audit log")
+}
+
+// TestNewServerSucceedsWhenAuditDisabled proves the audit gate does not
+// interfere with server construction when auditing is explicitly disabled.
+// Not parallel: t.Setenv forbids it.
+func TestNewServerSucceedsWhenAuditDisabled(t *testing.T) {
+	t.Setenv(tools.EnvAuditLog, "")
+
+	s, err := NewServer("test")
+	require.NoError(t, err)
+	assert.NotNil(t, s)
+}
+
+// TestNewServerSucceedsWithWritableAuditPath proves a writable, explicitly
+// configured audit path also builds without error. Not parallel: t.Setenv
+// forbids it.
+func TestNewServerSucceedsWithWritableAuditPath(t *testing.T) {
+	t.Setenv(tools.EnvAuditLog, filepath.Join(t.TempDir(), "mcp-audit.jsonl"))
+
+	s, err := NewServer("test")
+	require.NoError(t, err)
+	assert.NotNil(t, s)
 }
 
 // TestRegistryNonEmpty proves the tool registry is never accidentally empty:
