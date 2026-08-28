@@ -149,6 +149,39 @@ func TestCheckAuditLogWritable_WritablePath(t *testing.T) {
 	assert.NoError(t, CheckAuditLogWritable(path))
 }
 
+func TestCheckAuditLogWritable_AllowsAbsentPath(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	require.NoError(t, CheckAuditLogWritable(path))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, info.Mode().IsRegular())
+}
+
+func TestCheckAuditLogWritable_AllowsSymlinkToRegularFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "audit.jsonl")
+	require.NoError(t, os.WriteFile(target, []byte("existing\n"), 0o600))
+	link := filepath.Join(dir, "audit-link.jsonl")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	require.NoError(t, CheckAuditLogWritable(link))
+}
+
+func TestCheckAuditLogWritable_RejectsNonRegularTargets(t *testing.T) {
+	t.Parallel()
+
+	err := CheckAuditLogWritable(t.TempDir())
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "non-regular audit log target")
+}
+
 // The unwritable path is a child of a regular file rather than a 0555
 // directory: a root process ignores the permission bits, so a chmod-based
 // case would pass vacuously in root-based CI.

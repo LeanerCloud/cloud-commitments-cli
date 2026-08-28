@@ -2,7 +2,9 @@ package common
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"time"
@@ -24,10 +26,9 @@ func WriteAuditRecord(record AuditRecord, path string) error {
 	// ops tooling and reconciled against purchase_history; restricting to
 	// 0600 would break that workflow without adding meaningful protection
 	// since the file lives under the run-owned working dir.
-	// #nosec G302,G304 -- 0644 perms required for downstream readers; path is operator-configured audit log location.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := openAuditLogForAppend(path, 0644)
 	if err != nil {
-		return fmt.Errorf("open audit log %s: %w", path, err)
+		return err
 	}
 	defer f.Close()
 
@@ -40,11 +41,67 @@ func WriteAuditRecord(record AuditRecord, path string) error {
 // CheckAuditLogWritable opens the audit log file in append mode to verify it is writable.
 // Returns an error if the path cannot be opened for writing.
 func CheckAuditLogWritable(path string) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644) // #nosec G302,G304 -- 0644 intentionally matches WriteAuditRecord; path is operator-configured.
+	f, err := openAuditLogForAppend(path, 0644)
 	if err != nil {
 		return fmt.Errorf("audit log %q not writable: %w", path, err)
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close audit log %q: %w", path, err)
+	}
+	return nil
+}
+
+func openAuditLogForAppend(path string, perm fs.FileMode) (*os.File, error) {
+	if err := validateAuditLogTarget(path); err != nil {
+		return nil, err
+	}
+
+	// #nosec G302,G304 -- audit log path is operator-configured; WriteAuditRecord intentionally uses 0644 for downstream readers.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, perm)
+	if err != nil {
+		return nil, fmt.Errorf("open audit log %s: %w", path, err)
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		closeErr := f.Close()
+		return nil, errors.Join(fmt.Errorf("stat opened audit log %s: %w", path, err), closeErr)
+	}
+	if !info.Mode().IsRegular() {
+		closeErr := f.Close()
+		return nil, errors.Join(nonRegularAuditLogTargetError(path, info.Mode()), closeErr)
+	}
+	return f, nil
+}
+
+func validateAuditLogTarget(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat audit log target %q: %w", path, err)
+	}
+
+	if info.Mode()&os.ModeSymlink != 0 {
+		targetInfo, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("resolve audit log symlink %q: %w", path, err)
+		}
+		if !targetInfo.Mode().IsRegular() {
+			return nonRegularAuditLogTargetError(path, targetInfo.Mode())
+		}
+		return nil
+	}
+
+	if !info.Mode().IsRegular() {
+		return nonRegularAuditLogTargetError(path, info.Mode())
+	}
+	return nil
+}
+
+func nonRegularAuditLogTargetError(path string, mode fs.FileMode) error {
+	return fmt.Errorf("non-regular audit log target %q has mode %s", path, mode.Type())
 }
 
 // NewAuditRecord constructs an AuditRecord from a Recommendation and a PurchaseResult.

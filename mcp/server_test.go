@@ -62,6 +62,26 @@ func TestNewServerFailsOnBadAuditPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "audit log")
 }
 
+// TestNewServerRejectsNonRegularAuditPath proves startup rejects paths like
+// /dev/null before the server accepts MCP traffic and loses every audit line.
+// Not parallel: t.Setenv forbids it.
+func TestNewServerRejectsNonRegularAuditPath(t *testing.T) {
+	info, err := os.Stat("/dev/null")
+	if err != nil {
+		t.Skipf("/dev/null unavailable: %v", err)
+	}
+	if info.Mode().IsRegular() {
+		t.Skip("/dev/null is a regular file in this environment")
+	}
+	t.Setenv(tools.EnvAuditLog, "/dev/null")
+
+	s, err := NewServer("test")
+	require.Error(t, err)
+	assert.Nil(t, s)
+	assert.Contains(t, err.Error(), "audit log")
+	assert.Contains(t, err.Error(), "non-regular audit log target")
+}
+
 // TestNewServerSucceedsWhenAuditDisabled proves the audit gate does not
 // interfere with server construction when auditing is explicitly disabled.
 // Not parallel: t.Setenv forbids it.
