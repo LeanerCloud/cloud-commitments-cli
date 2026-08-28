@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -26,16 +27,7 @@ func WriteAuditRecord(record AuditRecord, path string) error {
 	// ops tooling and reconciled against purchase_history; restricting to
 	// 0600 would break that workflow without adding meaningful protection
 	// since the file lives under the run-owned working dir.
-	f, err := openAuditLogForAppend(path, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("write audit record: %w", err)
-	}
-	return nil
+	return appendJSONL(path, data, 0644)
 }
 
 // CheckAuditLogWritable opens the audit log file in append mode to verify it is writable.
@@ -72,6 +64,44 @@ func openAuditLogForAppend(path string, perm fs.FileMode) (*os.File, error) {
 		return nil, errors.Join(nonRegularAuditLogTargetError(path, info.Mode()), closeErr)
 	}
 	return f, nil
+}
+
+type auditLogFile interface {
+	Write([]byte) (int, error)
+	Sync() error
+	Close() error
+}
+
+func appendJSONL(path string, payload []byte, perm fs.FileMode) error {
+	f, err := openAuditLogForAppend(path, perm)
+	if err != nil {
+		return err
+	}
+	return appendJSONLFile(path, f, payload)
+}
+
+func appendJSONLFile(path string, f auditLogFile, payload []byte) error {
+	line := make([]byte, 0, len(payload)+1)
+	line = append(line, payload...)
+	line = append(line, '\n')
+
+	n, err := f.Write(line)
+	var opErr error
+	switch {
+	case err != nil:
+		opErr = fmt.Errorf("write audit record to %s: %w", path, err)
+	case n != len(line):
+		opErr = fmt.Errorf("write audit record to %s: %w", path, io.ErrShortWrite)
+	default:
+		if err := f.Sync(); err != nil {
+			opErr = fmt.Errorf("sync audit record to %s: %w", path, err)
+		}
+	}
+
+	if err := f.Close(); err != nil {
+		return errors.Join(opErr, fmt.Errorf("close audit log %s: %w", path, err))
+	}
+	return opErr
 }
 
 func validateAuditLogTarget(path string) error {
