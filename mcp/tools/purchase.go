@@ -397,6 +397,10 @@ func rfc3339OrNil(t time.Time) *string {
 	return &s
 }
 
+func purchaseSucceeded(result common.PurchaseResult) bool {
+	return result.Success && result.Error == nil
+}
+
 // idempotencyKeyFor derives a stable per-request key from every field that
 // identifies what is being bought: provider, region, service, resource type,
 // count, term, payment option, plus every service-specific dimension held in
@@ -641,11 +645,11 @@ func ExecutePurchase(ctx context.Context, req PurchaseRequest) (*PurchaseRespons
 		// providers must never swallow the underlying SDK/HTTP error).
 		return nil, fmt.Errorf("purchase commitment failed: %w", err)
 	}
-	logPurchaseOutcome(rec, token, result.CommitmentID, result.Success, result.Error)
+	logPurchaseOutcome(rec, token, result.CommitmentID, purchaseSucceeded(result), result.Error)
 	recordPurchaseAudit(rec, result, auditStatusFor(result), false)
 
 	resp := &PurchaseResponse{
-		Success:           result.Success,
+		Success:           purchaseSucceeded(result),
 		DryRun:            result.DryRun,
 		CommitmentID:      result.CommitmentID,
 		Cost:              nonZeroCostPtr(result.Cost),
@@ -663,7 +667,7 @@ func ExecutePurchase(ctx context.Context, req PurchaseRequest) (*PurchaseRespons
 	// Success=false (or carries an Error) bought nothing, so pitching a
 	// 7-day window against a purchase that did not happen would be wrong on
 	// the facts, not merely premature.
-	if result.Success && result.Error == nil {
+	if purchaseSucceeded(result) {
 		resp.Archera = archeraOffer()
 	}
 	return resp, nil

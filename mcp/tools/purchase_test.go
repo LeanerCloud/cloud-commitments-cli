@@ -91,6 +91,22 @@ func (f *fakeServiceClient) GetValidResourceTypes(_ context.Context) ([]string, 
 
 var _ provider.ServiceClient = (*fakeServiceClient)(nil)
 
+func captureStandardLogger(t *testing.T, fn func()) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+	}()
+
+	fn()
+	return buf.String()
+}
+
 // testRecommendation mirrors what a real purchase tool's *FromArgs
 // constructor actually builds: none of them populate
 // OnDemandCost/CommitmentCost/EstimatedSavings/SavingsPercentage (they build
@@ -806,23 +822,10 @@ func TestCredentialScopeResolution(t *testing.T) {
 // covers its "mcp audit log" warning when the audit path cannot be written.
 func TestExecutePurchaseAuditLogging(t *testing.T) {
 	// Not parallel: this test swaps the shared standard-logger output.
-	capture := func(fn func()) string {
-		var buf bytes.Buffer
-		prevOut, prevFlags := log.Writer(), log.Flags()
-		log.SetOutput(&buf)
-		log.SetFlags(0)
-		defer func() {
-			log.SetOutput(prevOut)
-			log.SetFlags(prevFlags)
-		}()
-		fn()
-		return buf.String()
-	}
-
 	rec := testRecommendation()
 
 	t.Run("a preview logs nothing", func(t *testing.T) {
-		out := capture(func() {
+		out := captureStandardLogger(t, func() {
 			_, err := ExecutePurchase(context.Background(), PurchaseRequest{
 				Region: "us-east-1", Recommendation: rec, DryRun: true,
 			})
@@ -833,7 +836,7 @@ func TestExecutePurchaseAuditLogging(t *testing.T) {
 
 	t.Run("a real purchase logs the attempt and the outcome", func(t *testing.T) {
 		fake := &fakeServiceClient{purchaseResult: common.PurchaseResult{Success: true, CommitmentID: "ri-abc123"}}
-		out := capture(func() {
+		out := captureStandardLogger(t, func() {
 			_, err := ExecutePurchase(context.Background(), PurchaseRequest{
 				Region: "us-east-1", Recommendation: rec, DryRun: false, Confirm: true,
 				CredentialScope: "subscription-a",
@@ -855,7 +858,7 @@ func TestExecutePurchaseAuditLogging(t *testing.T) {
 
 	t.Run("a failed purchase logs the failure", func(t *testing.T) {
 		fake := &fakeServiceClient{purchaseErr: errors.New("insufficient capacity")}
-		out := capture(func() {
+		out := captureStandardLogger(t, func() {
 			_, err := ExecutePurchase(context.Background(), PurchaseRequest{
 				Region: "us-east-1", Recommendation: rec, DryRun: false, Confirm: true, CredentialScope: "test-scope",
 				ResolveClient: func(_ context.Context) (provider.ServiceClient, error) { return fake, nil },
@@ -876,7 +879,7 @@ func TestExecutePurchaseAuditLogging(t *testing.T) {
 	// result.Success.
 	t.Run("a provider-reported failure is never logged as OK", func(t *testing.T) {
 		fake := &fakeServiceClient{purchaseResult: common.PurchaseResult{Success: false, Error: nil}}
-		out := capture(func() {
+		out := captureStandardLogger(t, func() {
 			_, err := ExecutePurchase(context.Background(), PurchaseRequest{
 				Region: "us-east-1", Recommendation: rec, DryRun: false, Confirm: true, CredentialScope: "test-scope",
 				ResolveClient: func(_ context.Context) (provider.ServiceClient, error) { return fake, nil },
@@ -887,6 +890,51 @@ func TestExecutePurchaseAuditLogging(t *testing.T) {
 			"Success=false must be logged as a failure even with a nil result.Error")
 		assert.NotContains(t, out, "mcp purchase OK")
 	})
+}
+
+// TestExecutePurchaseContradictoryProviderResultIsFailure pins the
+// contradictory provider result found in review: a provider can return a
+// nil Go error while embedding a non-nil result.Error alongside
+// Success=true. Every consumer-facing signal must still classify that as a
+// failed purchase.
+func TestExecutePurchaseContradictoryProviderResultIsFailure(t *testing.T) {
+	// Not parallel: this test swaps the shared standard-logger output and
+	// sets a process environment override for the audit path.
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv(EnvAuditLog, path)
+
+	injectedErr := errors.New("provider returned contradictory success with error detail")
+	fake := &fakeServiceClient{purchaseResult: common.PurchaseResult{
+		Success:      true,
+		CommitmentID: "ri-contradictory",
+		Error:        injectedErr,
+	}}
+
+	var resp *PurchaseResponse
+	out := captureStandardLogger(t, func() {
+		var err error
+		resp, err = ExecutePurchase(context.Background(), PurchaseRequest{
+			Region: "us-east-1", Recommendation: testRecommendation(), DryRun: false, Confirm: true,
+			CredentialScope: "test-scope",
+			ResolveClient:   func(_ context.Context) (provider.ServiceClient, error) { return fake, nil },
+		})
+		require.NoError(t, err, "provider-level contradictory result must surface via the structured response")
+	})
+
+	require.NotNil(t, resp)
+	assert.False(t, resp.Success)
+	assert.Equal(t, injectedErr.Error(), resp.Error)
+	assert.Nil(t, resp.Archera)
+	assert.Contains(t, out, "mcp purchase FAILED")
+	assert.Contains(t, out, injectedErr.Error())
+	assert.NotContains(t, out, "mcp purchase OK")
+
+	lines := readAuditLines(t, path)
+	require.Len(t, lines, 1)
+	var record common.AuditRecord
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
+	assert.Equal(t, "error", record.Status)
+	assert.Equal(t, injectedErr.Error(), record.ErrorMessage)
 }
 
 // TestResolveDryRunConfirm pins the shared default resolution now used by

@@ -227,6 +227,37 @@ func TestProviderReportedFailureMapsToErrorStatus(t *testing.T) {
 	assert.Equal(t, "error", record.Status, "Success=false must never be recorded as success")
 }
 
+// TestContradictoryProviderResultMapsToErrorStatus pins the provider result
+// found in review: Success=true with a non-nil Error must still record an
+// error audit line rather than a success line.
+func TestContradictoryProviderResultMapsToErrorStatus(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv(EnvAuditLog, path)
+
+	injectedErr := errors.New("provider returned contradictory success with error detail")
+	fake := &fakeServiceClient{purchaseResult: common.PurchaseResult{
+		Success:      true,
+		CommitmentID: "ri-contradictory",
+		Error:        injectedErr,
+	}}
+
+	resp, err := ExecutePurchase(context.Background(), PurchaseRequest{
+		Region: "us-east-1", Recommendation: auditTestRecommendation(), DryRun: false, Confirm: true,
+		CredentialScope: "test-scope",
+		ResolveClient:   func(_ context.Context) (provider.ServiceClient, error) { return fake, nil },
+	})
+	require.NoError(t, err, "the contradiction must surface via the response, not a Go error")
+	require.NotNil(t, resp)
+	assert.Equal(t, injectedErr.Error(), resp.Error)
+
+	lines := readAuditLines(t, path)
+	require.Len(t, lines, 1)
+	var record common.AuditRecord
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
+	assert.Equal(t, "error", record.Status, "Success=true with result.Error must never be recorded as success")
+	assert.Equal(t, injectedErr.Error(), record.ErrorMessage)
+}
+
 // TestTwoPurchasesShareOneRunID proves every purchase in one process
 // correlates through the same auditRunID. Not parallel: t.Setenv forbids it.
 func TestTwoPurchasesShareOneRunID(t *testing.T) {

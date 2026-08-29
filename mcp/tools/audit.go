@@ -46,11 +46,10 @@ const (
 )
 
 // auditStatusFor maps a provider PurchaseResult to the audit status it
-// represents, mirroring cmd/multi_service.go's purchaseSingleRec: a
-// provider call that returns without a Go error but reports Success=false
-// is still an error, never a success.
+// represents. A provider result counts as success only when it reports
+// Success=true and carries no embedded error detail.
 func auditStatusFor(result common.PurchaseResult) string {
-	if result.Success {
+	if purchaseSucceeded(result) {
 		return auditStatusSuccess
 	}
 	return auditStatusError
