@@ -514,21 +514,18 @@ func savingsPlanDetailsKey(d *common.SavingsPlanDetails) string {
 		d.PlanType, d.HourlyCommitment, d.Coverage, d.InstanceFamily, d.Region, d.OfferingID)
 }
 
-// logPurchaseAttempt and logPurchaseOutcome write the MCP server's audit
-// trail for real, money-spending purchases. Without them an MCP purchase
-// left no record anywhere: the CLI path emits a common.AuditRecord per
-// purchase (cmd/multi_service.go) and the web path persists a
-// purchase_executions row that also carries the approval history, but this
-// server has neither, so an operator asking "what did the assistant buy?"
-// had nothing to read. These lines are that record.
+// logPurchaseAttempt and logPurchaseOutcome write the MCP server's stderr
+// diagnostic trail for real, money-spending purchases. These lines are the
+// live human-readable counterpart to the server's durable JSONL audit log.
 //
 // They go to the standard logger, which writes to STDERR. That is load
 // bearing: the MCP stdio transport owns stdout for JSON-RPC framing, so
 // anything written there would corrupt the protocol stream.
 //
-// Preview calls are deliberately not logged: they contact no provider and
-// spend nothing, and logging every dry run would bury the real purchases in
-// the noise they need to stand out from.
+// Preview calls are deliberately silent on stderr: they contact no provider
+// and spend nothing, and logging every dry run would bury the real purchases
+// in the noise they need to stand out from. The durable JSONL audit log still
+// records previews as skipped entries.
 //
 // The idempotency token is masked (common.MaskToken) rather than written in
 // full, matching how every provider client logs it: it is a stable

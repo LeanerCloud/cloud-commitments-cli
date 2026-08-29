@@ -796,16 +796,13 @@ func TestCredentialScopeResolution(t *testing.T) {
 	})
 }
 
-// TestExecutePurchaseAuditLogging pins the MCP server's only record of a
-// real purchase. The CLI path emits a common.AuditRecord per purchase
-// (cmd/multi_service.go) and the web path persists a purchase_executions row
-// carrying the approval history; this server has neither, so before these
-// log lines an operator asking "what did the assistant actually buy?" had
-// nothing at all to read.
+// TestExecutePurchaseAuditLogging pins the MCP server's stderr diagnostic
+// trail for a real purchase. The durable JSONL audit log is covered
+// separately in audit_test.go.
 //
-// It also pins that a preview stays silent (it contacts no provider and
-// spends nothing, so logging every dry run would bury the real purchases)
-// and that the idempotency token is masked rather than written in full.
+// It also pins that a preview stays silent on stderr (the durable JSONL audit
+// log records it as a skipped entry) and that the idempotency token is masked
+// rather than written in full.
 func TestExecutePurchaseAuditLogging(t *testing.T) {
 	// Not parallel: this test swaps the shared standard-logger output.
 	capture := func(fn func()) string {
@@ -830,7 +827,7 @@ func TestExecutePurchaseAuditLogging(t *testing.T) {
 			})
 			require.NoError(t, err)
 		})
-		assert.Empty(t, out, "a dry run spends nothing and must not pollute the purchase audit trail")
+		assert.Empty(t, out, "a dry run spends nothing and must not pollute the stderr purchase diagnostic trail")
 	})
 
 	t.Run("a real purchase logs the attempt and the outcome", func(t *testing.T) {
