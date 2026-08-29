@@ -522,10 +522,10 @@ func savingsPlanDetailsKey(d *common.SavingsPlanDetails) string {
 // bearing: the MCP stdio transport owns stdout for JSON-RPC framing, so
 // anything written there would corrupt the protocol stream.
 //
-// Preview calls are deliberately silent on stderr: they contact no provider
-// and spend nothing, and logging every dry run would bury the real purchases
-// in the noise they need to stand out from. The durable JSONL audit log still
-// records previews as skipped entries.
+// Preview calls deliberately omit purchase attempt/outcome diagnostics on
+// stderr: they contact no provider and spend nothing, and logging every dry
+// run would bury real purchases. recordPurchaseAudit still runs for each
+// preview; audit path or write failures may emit an "mcp audit log" warning.
 //
 // The idempotency token is masked (common.MaskToken) rather than written in
 // full, matching how every provider client logs it: it is a stable

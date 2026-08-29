@@ -800,9 +800,10 @@ func TestCredentialScopeResolution(t *testing.T) {
 // trail for a real purchase. The durable JSONL audit log is covered
 // separately in audit_test.go.
 //
-// It also pins that a preview stays silent on stderr (the durable JSONL audit
-// log records it as a skipped entry) and that the idempotency token is masked
-// rather than written in full.
+// It also pins that a preview emits no purchase diagnostics on stderr and that
+// the idempotency token is masked rather than written in full.
+// recordPurchaseAudit still runs; TestUnwritablePathWarnsAndDoesNotChangeResult
+// covers its "mcp audit log" warning when the audit path cannot be written.
 func TestExecutePurchaseAuditLogging(t *testing.T) {
 	// Not parallel: this test swaps the shared standard-logger output.
 	capture := func(fn func()) string {
