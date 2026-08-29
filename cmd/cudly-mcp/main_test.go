@@ -25,7 +25,18 @@ func TestMain(m *testing.M) {
 		main()
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+
+	auditDir, err := os.MkdirTemp("", "cudly-mcp-audit-testmain")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv(tools.EnvAuditLog, filepath.Join(auditDir, "mcp-audit.jsonl")); err != nil {
+		panic(err)
+	}
+
+	code := m.Run()
+	os.RemoveAll(auditDir)
+	os.Exit(code)
 }
 
 // isolateFromAmbientAWS points the AWS SDK at deliberately nonexistent
@@ -67,7 +78,14 @@ func TestMainRejectsStdoutAuditLogBeforeProtocolTraffic(t *testing.T) {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, exe)
-	cmd.Env = append(os.Environ(), runAsMCPServerEnv+"=1", tools.EnvAuditLog+"=/dev/stdout")
+	childEnv := make([]string, 0, len(os.Environ())+2)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, tools.EnvAuditLog+"=") {
+			continue
+		}
+		childEnv = append(childEnv, entry)
+	}
+	cmd.Env = append(childEnv, runAsMCPServerEnv+"=1", tools.EnvAuditLog+"=/dev/stdout")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
