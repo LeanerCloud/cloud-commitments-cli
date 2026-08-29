@@ -1,8 +1,12 @@
 package common
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,14 +14,15 @@ import (
 )
 
 var (
-	errAuditTestWrite = errors.New("audit test write failed")
-	errAuditTestSync  = errors.New("audit test sync failed")
-	errAuditTestClose = errors.New("audit test close failed")
+	errAuditTestWrite          = errors.New("audit test write failed")
+	errAuditTestSeparatorWrite = errors.New("audit test separator write failed")
+	errAuditTestSync           = errors.New("audit test sync failed")
+	errAuditTestClose          = errors.New("audit test close failed")
 )
 
 func TestAppendJSONLReportsWriteErrorAndCloses(t *testing.T) {
 	t.Parallel()
-	f := &fakeAuditLogFile{writeN: 0, writeErr: errAuditTestWrite}
+	f := &fakeAuditLogFile{writeResults: []auditWriteResult{{n: 0, err: errAuditTestWrite}}}
 
 	err := appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`))
 
@@ -25,21 +30,73 @@ func TestAppendJSONLReportsWriteErrorAndCloses(t *testing.T) {
 	assert.Equal(t, 1, f.writeCalls)
 	assert.Equal(t, 0, f.syncCalls)
 	assert.Equal(t, 1, f.closeCalls)
-	assert.Equal(t, []byte(`{"ok":true}`+"\n"), f.wrote)
+	assert.Equal(t, [][]byte{[]byte(`{"ok":true}` + "\n")}, f.writes)
 }
 
 func TestAppendJSONLReportsShortWriteAndCloses(t *testing.T) {
 	t.Parallel()
 	payload := []byte(`{"ok":true}`)
-	f := &fakeAuditLogFile{writeN: len(payload)}
+	f := &fakeAuditLogFile{writeResults: []auditWriteResult{{n: len(payload)}, {n: 1}}}
 
 	err := appendJSONLFile("audit.jsonl", f, payload)
 
 	require.ErrorIs(t, err, io.ErrShortWrite)
-	assert.Equal(t, 1, f.writeCalls)
-	assert.Equal(t, 0, f.syncCalls)
+	assert.Equal(t, 2, f.writeCalls)
+	assert.Equal(t, 1, f.syncCalls)
 	assert.Equal(t, 1, f.closeCalls)
-	assert.Equal(t, []byte(`{"ok":true}`+"\n"), f.wrote)
+	assert.Equal(t, [][]byte{append(append([]byte(nil), payload...), '\n'), {'\n'}}, f.writes)
+}
+
+func TestAppendJSONLTerminatesPartialWriteBeforeNextAppend(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		writeErr error
+	}{
+		{name: "write error", writeErr: errAuditTestWrite},
+		{name: "short write"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "audit.jsonl")
+			first := []byte(`{"first":true}`)
+			second := []byte(`{"second":true}`)
+			fragmentLen := 5
+
+			file, err := openAuditLogForAppend(path, 0o644)
+			require.NoError(t, err)
+			partial := &partialWriteAuditLogFile{
+				File:     file,
+				writeN:   fragmentLen,
+				writeErr: tt.writeErr,
+			}
+
+			err = appendJSONLFile(path, partial, first)
+			assert.ErrorContains(t, err, "write audit record to "+path)
+			if tt.writeErr != nil {
+				require.ErrorIs(t, err, tt.writeErr)
+			} else {
+				require.ErrorIs(t, err, io.ErrShortWrite)
+			}
+
+			require.NoError(t, appendJSONL(path, second, 0o644))
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			expected := append(append(append([]byte(nil), first[:fragmentLen]...), '\n'), second...)
+			expected = append(expected, '\n')
+			require.Equal(t, expected, data)
+
+			lines := bytes.Split(data, []byte{'\n'})
+			require.Len(t, lines, 3)
+			var decoded map[string]bool
+			require.NoError(t, json.Unmarshal(lines[1], &decoded))
+			assert.True(t, decoded["second"])
+		})
+	}
 }
 
 func TestAppendJSONLReportsSyncErrorAndCloses(t *testing.T) {
@@ -69,7 +126,10 @@ func TestAppendJSONLJoinsSyncAndCloseErrors(t *testing.T) {
 
 func TestAppendJSONLJoinsWriteAndCloseErrors(t *testing.T) {
 	t.Parallel()
-	f := &fakeAuditLogFile{writeN: 0, writeErr: errAuditTestWrite, closeErr: errAuditTestClose}
+	f := &fakeAuditLogFile{
+		writeResults: []auditWriteResult{{n: 0, err: errAuditTestWrite}},
+		closeErr:     errAuditTestClose,
+	}
 
 	err := appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`))
 
@@ -83,14 +143,75 @@ func TestAppendJSONLJoinsWriteAndCloseErrors(t *testing.T) {
 func TestAppendJSONLJoinsShortWriteAndCloseErrors(t *testing.T) {
 	t.Parallel()
 	payload := []byte(`{"ok":true}`)
-	f := &fakeAuditLogFile{writeN: len(payload), closeErr: errAuditTestClose}
+	f := &fakeAuditLogFile{
+		writeResults: []auditWriteResult{{n: len(payload)}, {n: 1}},
+		closeErr:     errAuditTestClose,
+	}
 
 	err := appendJSONLFile("audit.jsonl", f, payload)
 
 	require.ErrorIs(t, err, io.ErrShortWrite)
 	require.ErrorIs(t, err, errAuditTestClose)
-	assert.Equal(t, 1, f.writeCalls)
-	assert.Equal(t, 0, f.syncCalls)
+	assert.Equal(t, 2, f.writeCalls)
+	assert.Equal(t, 1, f.syncCalls)
+	assert.Equal(t, 1, f.closeCalls)
+}
+
+func TestAppendJSONLJoinsPartialWriteAndSeparatorErrors(t *testing.T) {
+	t.Parallel()
+	payload := []byte(`{"ok":true}`)
+
+	tests := []struct {
+		name         string
+		separatorErr error
+		wantErr      error
+	}{
+		{name: "write error", separatorErr: errAuditTestSeparatorWrite, wantErr: errAuditTestSeparatorWrite},
+		{name: "short write", wantErr: io.ErrShortWrite},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeAuditLogFile{writeResults: []auditWriteResult{
+				{n: len(payload), err: errAuditTestWrite},
+				{n: 0, err: tt.separatorErr},
+			}}
+
+			err := appendJSONLFile("audit.jsonl", f, payload)
+
+			require.ErrorIs(t, err, errAuditTestWrite)
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.ErrorContains(t, err, "write audit record separator to audit.jsonl")
+			assert.Equal(t, 2, f.writeCalls)
+			assert.Equal(t, [][]byte{append(append([]byte(nil), payload...), '\n'), {'\n'}}, f.writes)
+			assert.Equal(t, 0, f.syncCalls)
+			assert.Equal(t, 1, f.closeCalls)
+		})
+	}
+}
+
+func TestAppendJSONLJoinsPartialWriteRepairSyncAndCloseErrors(t *testing.T) {
+	t.Parallel()
+	payload := []byte(`{"ok":true}`)
+	f := &fakeAuditLogFile{
+		writeResults: []auditWriteResult{
+			{n: len(payload), err: errAuditTestWrite},
+			{n: 1},
+		},
+		syncErr:  errAuditTestSync,
+		closeErr: errAuditTestClose,
+	}
+
+	err := appendJSONLFile("audit.jsonl", f, payload)
+
+	require.ErrorIs(t, err, errAuditTestWrite)
+	require.ErrorIs(t, err, errAuditTestSync)
+	require.ErrorIs(t, err, errAuditTestClose)
+	assert.ErrorContains(t, err, "sync audit record separator to audit.jsonl")
+	assert.Equal(t, 2, f.writeCalls)
+	assert.Equal(t, [][]byte{append(append([]byte(nil), payload...), '\n'), {'\n'}}, f.writes)
+	assert.Equal(t, 1, f.syncCalls)
 	assert.Equal(t, 1, f.closeCalls)
 }
 
@@ -107,22 +228,46 @@ func TestAppendJSONLReturnsCloseOnlyError(t *testing.T) {
 }
 
 type fakeAuditLogFile struct {
-	writeN   int
-	writeErr error
-	syncErr  error
-	closeErr error
+	writeResults []auditWriteResult
+	syncErr      error
+	closeErr     error
 
 	writeCalls int
 	syncCalls  int
 	closeCalls int
-	wrote      []byte
+	writes     [][]byte
+}
+
+type auditWriteResult struct {
+	n   int
+	err error
+}
+
+type partialWriteAuditLogFile struct {
+	*os.File
+	writeN   int
+	writeErr error
+	wrote    bool
+}
+
+func (f *partialWriteAuditLogFile) Write(p []byte) (int, error) {
+	if f.wrote {
+		return f.File.Write(p)
+	}
+	f.wrote = true
+	n, err := f.File.Write(p[:f.writeN])
+	if err != nil {
+		return n, err
+	}
+	return n, f.writeErr
 }
 
 func (f *fakeAuditLogFile) Write(p []byte) (int, error) {
 	f.writeCalls++
-	f.wrote = append([]byte(nil), p...)
-	if f.writeErr != nil || f.writeN != 0 {
-		return f.writeN, f.writeErr
+	f.writes = append(f.writes, append([]byte(nil), p...))
+	if f.writeCalls <= len(f.writeResults) {
+		result := f.writeResults[f.writeCalls-1]
+		return result.n, result.err
 	}
 	return len(p), nil
 }

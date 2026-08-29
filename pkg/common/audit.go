@@ -98,8 +98,31 @@ func appendJSONLFile(path string, f auditLogFile, payload []byte) error {
 		}
 	}
 
+	if opErr != nil && n > 0 && n < len(line) {
+		if err := terminatePartialAuditRecord(path, f); err != nil {
+			opErr = errors.Join(opErr, err)
+		}
+	}
+
 	if err := f.Close(); err != nil {
 		return errors.Join(opErr, fmt.Errorf("close audit log %s: %w", path, err))
+	}
+	return opErr
+}
+
+func terminatePartialAuditRecord(path string, f auditLogFile) error {
+	n, err := f.Write([]byte{'\n'})
+	var opErr error
+	switch {
+	case err != nil:
+		opErr = fmt.Errorf("write audit record separator to %s: %w", path, err)
+	case n != 1:
+		opErr = fmt.Errorf("write audit record separator to %s: %w", path, io.ErrShortWrite)
+	}
+	if n == 1 {
+		if err := f.Sync(); err != nil {
+			opErr = errors.Join(opErr, fmt.Errorf("sync audit record separator to %s: %w", path, err))
+		}
 	}
 	return opErr
 }
