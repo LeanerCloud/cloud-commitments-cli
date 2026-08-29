@@ -583,7 +583,7 @@ func TestNormalizeEngineName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := normalizeEngineName(tt.input)
+			result := common.NormalizeEngineName(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -649,7 +649,7 @@ func TestGetEngineFromRecommendation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := getEngineFromRecommendation(tt.rec)
+			result := common.EngineFromDetails(tt.rec.Details)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

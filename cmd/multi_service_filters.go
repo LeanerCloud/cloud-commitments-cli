@@ -1,43 +1,44 @@
 package main
 
 import (
-	"fmt"
 	"log"
-	"slices"
 	"strings"
 
 	"github.com/LeanerCloud/CUDly/pkg/common"
+	"github.com/LeanerCloud/CUDly/pkg/recfilter"
 	awsprovider "github.com/LeanerCloud/CUDly/providers/aws"
 )
+
+// filtersFromConfig maps the CLI Config's dimension-filter and min-pool-size
+// fields onto a recfilter.Filters value. Account filtering stays cmd-only
+// (see shouldIncludeAccount) so it is not part of recfilter.Filters.
+func filtersFromConfig(cfg *Config) recfilter.Filters {
+	return recfilter.Filters{
+		IncludeRegions:       cfg.IncludeRegions,
+		ExcludeRegions:       cfg.ExcludeRegions,
+		IncludeInstanceTypes: cfg.IncludeInstanceTypes,
+		ExcludeInstanceTypes: cfg.ExcludeInstanceTypes,
+		IncludeEngines:       cfg.IncludeEngines,
+		ExcludeEngines:       cfg.ExcludeEngines,
+		MinPoolSize:          cfg.MinPoolSize,
+	}
+}
 
 // applyFilters applies region, instance type, engine, and engine version filters to recommendations.
 // currentRegion is the region being processed in the current loop iteration; if non-empty, only
 // recommendations for that region are included.
 // drops accumulates per-reason drop counts for the end-of-run summary; pass nil to skip tracking.
 func applyFilters(recs []common.Recommendation, cfg *Config, instanceVersions map[string][]InstanceEngineVersion, versionInfo map[string]MajorEngineVersionInfo, currentRegion string, drops *common.DropSummary) []common.Recommendation {
-	var filtered []common.Recommendation
-	var poolDropCount int
-	var poolDropInstances float64
+	survivors := filtersFromConfig(cfg).ApplyMinPoolSize(recs, log.Printf, drops)
 
-	for i := range recs {
-		if cfg.MinPoolSize > 0 && !shouldIncludePoolSize(&recs[i], cfg) {
-			poolDropInstances += recs[i].AverageInstancesUsedPerHour
-			label := fmt.Sprintf("%s/%s/%s", recs[i].Service, recs[i].Region, recs[i].ResourceType)
-			log.Printf("INFO: --min-pool-size=%.1f dropped %s (avg=%.2f < threshold)", cfg.MinPoolSize, label, recs[i].AverageInstancesUsedPerHour)
-			poolDropCount++
-			drops.Add(common.DropMinPoolSize, 1)
-			continue
-		}
-		adjusted, include, dropReason := processRecommendation(&recs[i], cfg, instanceVersions, versionInfo, currentRegion)
+	var filtered []common.Recommendation
+	for i := range survivors {
+		adjusted, include, dropReason := processRecommendation(&survivors[i], cfg, instanceVersions, versionInfo, currentRegion)
 		if include {
 			filtered = append(filtered, adjusted)
 		} else if dropReason != "" {
 			drops.Add(dropReason, 1)
 		}
-	}
-
-	if poolDropCount > 0 {
-		log.Printf("INFO: --min-pool-size dropped %d recommendation(s) (%.2f avg instances/hr total)", poolDropCount, poolDropInstances)
 	}
 
 	return filtered
@@ -86,6 +87,11 @@ func processRecommendation(rec *common.Recommendation, cfg *Config, instanceVers
 // each function's cyclomatic complexity under the gocyclo limit; the
 // dimension filters here are pure functions of rec + cfg with no side
 // effects. Pool-size filtering is handled with logging in applyFilters.
+//
+// Region and account stay here rather than moving into recfilter: the
+// region-agnostic handling (#1881) needs providers/aws, which the pkg module
+// cannot import, and account filtering is name-substring matching backed by
+// AccountAliasCache. Only the instance-type and engine checks are portable.
 func passesDimensionFilters(rec *common.Recommendation, cfg *Config) bool {
 	if !shouldIncludeRecommendationRegion(rec, cfg) {
 		return false
@@ -96,31 +102,14 @@ func passesDimensionFilters(rec *common.Recommendation, cfg *Config) bool {
 	if !shouldIncludeEngine(rec, cfg) {
 		return false
 	}
-	if !shouldIncludeAccount(rec.AccountName, cfg) {
-		return false
-	}
-	return true
+	return shouldIncludeAccount(rec.AccountName, cfg)
 }
 
-// shouldIncludePoolSize filters out RI recommendations for pools whose
-// AverageInstancesUsedPerHour is below cfg.MinPoolSize. The purpose is to
-// drop tiny pools where integer-arithmetic sizing forces 100% coverage
-// regardless of --target-coverage (e.g. avg=1 with target=80% -> floor(0.8)=0
-// drops, ceil(0.8)=1 over-covers). Setting --min-pool-size=2 keeps pools
-// where target can be meaningfully approximated.
-//
-// Pass-through cases: filter disabled (MinPoolSize<=0), or rec has no
-// per-hour signal (avg<=0 -- SPs and recs CE didn't return usage for).
-// Those pools aren't sized via the per-hour formula so the filter doesn't
-// apply to them.
+// shouldIncludePoolSize checks if a recommendation's pool size meets cfg.MinPoolSize.
+// Thin wrapper over recfilter.Filters.IncludesPoolSize; kept so cmd's existing call sites
+// and tests are unchanged.
 func shouldIncludePoolSize(rec *common.Recommendation, cfg *Config) bool {
-	if cfg.MinPoolSize <= 0 {
-		return true
-	}
-	if rec.AverageInstancesUsedPerHour <= 0 {
-		return true
-	}
-	return rec.AverageInstancesUsedPerHour >= cfg.MinPoolSize
+	return filtersFromConfig(cfg).IncludesPoolSize(rec)
 }
 
 // shouldIncludeRecommendationRegion applies the region filters to a whole
@@ -143,71 +132,24 @@ func shouldIncludeRecommendationRegion(rec *common.Recommendation, cfg *Config) 
 }
 
 // shouldIncludeRegion checks if a region should be included based on filters.
+// Thin wrapper over recfilter.Filters.IncludesRegion; kept so cmd's existing call sites
+// and tests are unchanged.
 func shouldIncludeRegion(region string, cfg *Config) bool {
-	// If include list is specified, region must be in it.
-	if len(cfg.IncludeRegions) > 0 && !slices.Contains(cfg.IncludeRegions, region) {
-		return false
-	}
-
-	// If exclude list is specified, region must not be in it.
-	if slices.Contains(cfg.ExcludeRegions, region) {
-		return false
-	}
-
-	return true
+	return filtersFromConfig(cfg).IncludesRegion(region)
 }
 
 // shouldIncludeInstanceType checks if an instance type should be included based on filters.
+// Thin wrapper over recfilter.Filters.IncludesInstanceType; kept so cmd's existing call sites
+// and tests are unchanged.
 func shouldIncludeInstanceType(instanceType string, cfg *Config) bool {
-	// If include list is specified, instance type must be in it.
-	if len(cfg.IncludeInstanceTypes) > 0 && !slices.Contains(cfg.IncludeInstanceTypes, instanceType) {
-		return false
-	}
-
-	// If exclude list is specified, instance type must not be in it.
-	if slices.Contains(cfg.ExcludeInstanceTypes, instanceType) {
-		return false
-	}
-
-	return true
+	return filtersFromConfig(cfg).IncludesInstanceType(instanceType)
 }
 
 // shouldIncludeEngine checks if a recommendation should be included based on engine filters.
+// Thin wrapper over recfilter.Filters.IncludesEngine; kept so cmd's existing call sites
+// and tests are unchanged.
 func shouldIncludeEngine(rec *common.Recommendation, cfg *Config) bool {
-	// Extract engine from recommendation.
-	engine := getEngineFromRecommendation(*rec)
-	if engine == "" {
-		// If no engine info, include by default unless there's an include list.
-		return len(cfg.IncludeEngines) == 0
-	}
-
-	// Normalize engine name to lowercase for comparison.
-	engine = strings.ToLower(engine)
-
-	// If include list is specified, engine must be in it.
-	if len(cfg.IncludeEngines) > 0 {
-		found := false
-		for _, e := range cfg.IncludeEngines {
-			if strings.EqualFold(e, engine) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-
-	// If exclude list is specified, engine must not be in it.
-	if len(cfg.ExcludeEngines) > 0 {
-		for _, e := range cfg.ExcludeEngines {
-			if strings.EqualFold(e, engine) {
-				return false
-			}
-		}
-	}
-
-	return true
+	return filtersFromConfig(cfg).IncludesEngine(rec)
 }
 
 // shouldIncludeAccount checks if an account should be included based on filters.
