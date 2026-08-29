@@ -37,13 +37,13 @@ func CheckAuditLogWritable(path string) error {
 	if err != nil {
 		return fmt.Errorf("audit log %q not writable: %w", path, err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close audit log %q: %w", path, err)
+	if err := probeAuditLogWritable(path, f); err != nil {
+		return fmt.Errorf("audit log %q not writable: %w", path, err)
 	}
 	return nil
 }
 
-func openAuditLogForAppend(path string, perm fs.FileMode) (*os.File, error) {
+func openAuditLogForAppend(path string, perm fs.FileMode) (auditLogFile, error) {
 	if err := validateAuditLogTarget(path); err != nil {
 		return nil, err
 	}
@@ -63,13 +63,19 @@ func openAuditLogForAppend(path string, perm fs.FileMode) (*os.File, error) {
 		closeErr := f.Close()
 		return nil, errors.Join(nonRegularAuditLogTargetError(path, info.Mode()), closeErr)
 	}
-	return f, nil
+	return &auditOSFile{File: f}, nil
 }
 
 type auditLogFile interface {
+	Lock() error
 	Write([]byte) (int, error)
 	Sync() error
+	Unlock() error
 	Close() error
+}
+
+type auditOSFile struct {
+	*os.File
 }
 
 func appendJSONL(path string, payload []byte, perm fs.FileMode) error {
@@ -81,6 +87,16 @@ func appendJSONL(path string, payload []byte, perm fs.FileMode) error {
 }
 
 func appendJSONLFile(path string, f auditLogFile, payload []byte) error {
+	return withAuditLogTransaction(path, f, func() error {
+		return appendJSONLLocked(path, f, payload)
+	})
+}
+
+func probeAuditLogWritable(path string, f auditLogFile) error {
+	return withAuditLogTransaction(path, f, nil)
+}
+
+func appendJSONLLocked(path string, f auditLogFile, payload []byte) error {
 	line := make([]byte, 0, len(payload)+1)
 	line = append(line, payload...)
 	line = append(line, '\n')
@@ -104,6 +120,25 @@ func appendJSONLFile(path string, f auditLogFile, payload []byte) error {
 		}
 	}
 
+	return opErr
+}
+
+func withAuditLogTransaction(path string, f auditLogFile, work func() error) error {
+	if err := f.Lock(); err != nil {
+		return closeAuditLog(path, f, fmt.Errorf("lock audit log %s: %w", path, err))
+	}
+
+	var opErr error
+	if work != nil {
+		opErr = work()
+	}
+	if err := f.Unlock(); err != nil {
+		opErr = errors.Join(opErr, fmt.Errorf("unlock audit log %s: %w", path, err))
+	}
+	return closeAuditLog(path, f, opErr)
+}
+
+func closeAuditLog(path string, f auditLogFile, opErr error) error {
 	if err := f.Close(); err != nil {
 		return errors.Join(opErr, fmt.Errorf("close audit log %s: %w", path, err))
 	}
