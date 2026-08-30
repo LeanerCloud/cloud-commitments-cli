@@ -136,18 +136,23 @@ func TestPreviewWritesSkippedRecord(t *testing.T) {
 
 	resp, err := ExecutePurchase(context.Background(), PurchaseRequest{
 		Region: "us-east-1", Recommendation: auditTestRecommendation(), DryRun: true,
+		CredentialScope: "audit-scope-preview",
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
 	lines := readAuditLines(t, path)
 	require.Len(t, lines, 1, "a preview must write exactly one audit line")
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &raw))
+	assert.Equal(t, "audit-scope-preview", raw["credential_scope"])
 
 	var record common.AuditRecord
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
 	assert.Equal(t, "skipped", record.Status)
 	assert.True(t, record.DryRun)
 	assert.Equal(t, common.PurchaseSourceMCP, record.Source)
+	assert.Equal(t, "audit-scope-preview", record.CredentialScope)
 	assert.NotEmpty(t, record.RunID)
 	assert.Equal(t, 12, record.Term, `a "1yr" term must convert to 12 months`)
 }
@@ -175,6 +180,7 @@ func TestSuccessfulPurchaseWritesSuccessRecord(t *testing.T) {
 	assert.Equal(t, "success", record.Status)
 	assert.False(t, record.DryRun)
 	assert.Equal(t, "ri-success-1", record.CommitmentID)
+	assert.Equal(t, "test-scope", record.CredentialScope)
 }
 
 // TestProviderErrorWritesErrorRecord proves a provider-side purchase failure
@@ -201,6 +207,7 @@ func TestProviderErrorWritesErrorRecord(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
 	assert.Equal(t, "error", record.Status)
 	assert.NotEmpty(t, record.ErrorMessage)
+	assert.Equal(t, "test-scope", record.CredentialScope)
 }
 
 // TestProviderReportedFailureMapsToErrorStatus proves a PurchaseResult with
@@ -225,6 +232,7 @@ func TestProviderReportedFailureMapsToErrorStatus(t *testing.T) {
 	var record common.AuditRecord
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
 	assert.Equal(t, "error", record.Status, "Success=false must never be recorded as success")
+	assert.Equal(t, "test-scope", record.CredentialScope)
 }
 
 // TestContradictoryProviderResultMapsToErrorStatus pins the provider result
@@ -256,6 +264,7 @@ func TestContradictoryProviderResultMapsToErrorStatus(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
 	assert.Equal(t, "error", record.Status, "Success=true with result.Error must never be recorded as success")
 	assert.Equal(t, injectedErr.Error(), record.ErrorMessage)
+	assert.Equal(t, "test-scope", record.CredentialScope)
 }
 
 // TestTwoPurchasesShareOneRunID proves every purchase in one process

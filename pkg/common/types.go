@@ -683,6 +683,7 @@ type AuditRecord struct {
 	Provider          ProviderType    `json:"provider"`
 	AccountID         string          `json:"account_id"`
 	AccountName       string          `json:"account_name"`
+	CredentialScope   string          `json:"credential_scope,omitempty"` // Routing identifier, not a verified account ID.
 	Region            string          `json:"region"`
 	Service           string          `json:"service"`
 	ResourceType      string          `json:"resource_type"`

@@ -20,11 +20,11 @@ import (
 // (see AuditLogPath), not to "no logging". Setting this variable to an empty
 // or whitespace-only string is the explicit operator opt-out that disables
 // the log entirely; any other value overrides the default path after trimming.
-// This mirrors logPurchaseAttempt/logPurchaseOutcome's stderr trail, which
-// records the same events for a human watching the process, but the JSONL
-// file is the durable, machine-readable counterpart: without it, an MCP
-// purchase left no record anywhere once the process exited, unlike the CLI
-// (cmd/multi_service.go) and web (purchase_executions) paths.
+// For real purchases this overlaps with logPurchaseAttempt and
+// logPurchaseOutcome's stderr trail. The JSONL file is the durable,
+// machine-readable counterpart and additionally records previews: without
+// it, an MCP purchase left no record anywhere once the process exited,
+// unlike the CLI (cmd/multi_service.go) and web (purchase_executions) paths.
 const EnvAuditLog = "CUDLY_MCP_AUDIT_LOG"
 
 // auditRunID identifies every purchase made by this server process in one
@@ -34,11 +34,11 @@ const EnvAuditLog = "CUDLY_MCP_AUDIT_LOG"
 var auditRunID = uuid.NewString()
 
 // auditStatusSuccess, auditStatusError, and auditStatusSkipped are the three
-// statuses this server ever writes. They mirror cmd/multi_service.go's
-// purchaseSingleRec (dry run -> skipped, provider success -> success,
-// anything else -> error). The fourth status common.NewAuditRecord documents,
-// "skipped_covered", belongs to the CLI's recent-duplicate guard, which this
-// server does not run yet.
+// statuses this server ever writes. A dry run is skipped; a provider result
+// is successful only when Success is true and Error is nil; every other
+// provider outcome is an error. The fourth status common.NewAuditRecord
+// documents, "skipped_covered", belongs to the CLI's recent-duplicate guard,
+// which this server does not run yet.
 const (
 	auditStatusSuccess = "success"
 	auditStatusError   = "error"
@@ -124,7 +124,13 @@ func EnsureAuditLogWritable() error {
 // is authoritative and must never change because the audit trail hiccuped
 // -- losing one line is a mundane operational problem, silently turning a
 // completed purchase into a reported failure would not be.
-func recordPurchaseAudit(rec common.Recommendation, result common.PurchaseResult, status string, dryRun bool) {
+func recordPurchaseAudit(
+	rec common.Recommendation,
+	credentialScope string,
+	result common.PurchaseResult,
+	status string,
+	dryRun bool,
+) {
 	path, enabled, err := AuditLogPath()
 	if err != nil {
 		log.Printf("mcp audit log: %v", err)
@@ -138,6 +144,7 @@ func recordPurchaseAudit(rec common.Recommendation, result common.PurchaseResult
 		return
 	}
 	record := common.NewAuditRecord(auditRunID, rec, result, status, dryRun, common.PurchaseSourceMCP)
+	record.CredentialScope = credentialScope
 	if err := common.WriteAuditRecord(record, path); err != nil {
 		log.Printf("mcp audit log: %v", err)
 	}

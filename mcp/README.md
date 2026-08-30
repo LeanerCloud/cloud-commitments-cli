@@ -137,7 +137,8 @@ Auditing is **on by default**. When auditing is enabled and a write succeeds, ea
 - **Default path**: `$XDG_STATE_HOME/cudly/mcp-audit.jsonl`, falling back to `~/.local/state/cudly/mcp-audit.jsonl` when `XDG_STATE_HOME` is unset or empty.
 - **`CUDLY_MCP_AUDIT_LOG`** overrides the path. Setting it to an **empty or whitespace-only string disables the log entirely** -- that is the explicit opt-out; leaving the variable unset is not the same thing and still uses the default path.
 - A preview (`dry_run=true`) is recorded with `status: "skipped"`, `dry_run: true` -- it spent nothing, but it was still a decision worth reconstructing later.
-- A real purchase is recorded `"success"` on a completed purchase or `"error"` otherwise (provider call failed, or the provider reported `Success: false`), mirroring the CLI's own status mapping.
+- When a credential scope is supplied, `credential_scope` records that routing identifier: an AWS profile, Azure subscription, or GCP project. It identifies how CUDly selected the target; it is not a verified provider account ID. Previews may omit it because they do not require a target.
+- A real purchase is recorded `"success"` only when the provider reports `Success: true` with no embedded error. A failed provider call, `Success: false`, or a result containing an error is recorded as `"error"`.
 - Every purchase in one server process shares a single `run_id`, so a log spanning many purchases can be grouped by session.
 - **A write failure never changes the purchase result.** It logs a warning to stderr naming the path and error; the tool response returned to the caller is unaffected.
 - The path is probed at server startup: a misconfigured `CUDLY_MCP_AUDIT_LOG` (e.g. a parent directory that cannot be created) fails server construction outright, rather than silently dropping every record for the session.

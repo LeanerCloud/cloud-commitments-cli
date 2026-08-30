@@ -105,6 +105,19 @@ func TestRawRecommendation_Omitempty(t *testing.T) {
 	data, err := json.Marshal(record)
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "raw_recommendation")
+	assert.NotContains(t, string(data), "credential_scope")
+}
+
+func TestAuditRecord_CredentialScopeJSON(t *testing.T) {
+	t.Parallel()
+	record := AuditRecord{RunID: "run-x", CredentialScope: "profile-a"}
+	data, err := json.Marshal(record)
+	require.NoError(t, err)
+
+	var parsed AuditRecord
+	require.NoError(t, json.Unmarshal(data, &parsed))
+	assert.Equal(t, "profile-a", parsed.CredentialScope)
+	assert.Contains(t, string(data), `"credential_scope":"profile-a"`)
 }
 
 func TestNewAuditRecord_Fields(t *testing.T) {
@@ -130,6 +143,7 @@ func TestNewAuditRecord_Fields(t *testing.T) {
 	assert.Equal(t, ProviderAWS, ar.Provider)
 	assert.Equal(t, "111", ar.AccountID)
 	assert.Equal(t, "staging", ar.AccountName)
+	assert.Empty(t, ar.CredentialScope)
 	assert.Equal(t, "eu-west-1", ar.Region)
 	assert.Equal(t, 12, ar.Term)
 	assert.Equal(t, 3, ar.Count)
