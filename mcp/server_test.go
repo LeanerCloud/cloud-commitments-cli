@@ -93,17 +93,6 @@ func TestNewServerSucceedsWhenAuditDisabled(t *testing.T) {
 	assert.NotNil(t, s)
 }
 
-// TestNewServerSucceedsWithWritableAuditPath proves a writable, explicitly
-// configured audit path also builds without error. Not parallel: t.Setenv
-// forbids it.
-func TestNewServerSucceedsWithWritableAuditPath(t *testing.T) {
-	t.Setenv(tools.EnvAuditLog, filepath.Join(t.TempDir(), "mcp-audit.jsonl"))
-
-	s, err := NewServer("test")
-	require.NoError(t, err)
-	assert.NotNil(t, s)
-}
-
 // TestRegistryNonEmpty proves the tool registry is never accidentally empty:
 // cudly_list_commitment_actions is always present, even before any
 // purchase/search tool has been registered.

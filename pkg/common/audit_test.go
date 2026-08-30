@@ -160,13 +160,6 @@ func TestCheckAuditLogWritable_WritablePath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.jsonl")
 
-	assert.NoError(t, CheckAuditLogWritable(path))
-}
-
-func TestCheckAuditLogWritable_AllowsAbsentPath(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-
 	require.NoError(t, CheckAuditLogWritable(path))
 
 	info, err := os.Stat(path)

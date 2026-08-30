@@ -59,15 +59,6 @@ func TestAppendJSONLNormalOperationOrder(t *testing.T) {
 	require.NoError(t, appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`)))
 
 	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "unlock", "close"}, f.operations)
-}
-
-func TestAppendJSONLDoesNotRepairWhenSeparatorIsNotNeeded(t *testing.T) {
-	t.Parallel()
-	f := &fakeAuditLogFile{}
-
-	require.NoError(t, appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`)))
-
-	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "unlock", "close"}, f.operations)
 	assert.Equal(t, [][]byte{[]byte(`{"ok":true}` + "\n")}, f.writes)
 }
 
