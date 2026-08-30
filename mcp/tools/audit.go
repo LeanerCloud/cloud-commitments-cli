@@ -13,13 +13,13 @@ import (
 )
 
 // EnvAuditLog names the operator-controlled path for the MCP server's
-// purchase audit log (one JSON line per purchase attempt, including
+// purchase audit log (one JSON line per successful audit write, including
 // previews). Auditing is ON BY DEFAULT -- unlike EnvEnableRealPurchases,
 // which fails closed, this fails open toward keeping a record: an unset
 // variable resolves to a default path under the user's XDG state directory
-// (see AuditLogPath), not to "no logging". Setting this variable to the
-// empty string is the explicit operator opt-out that disables the log
-// entirely; setting it to a non-empty value overrides the default path.
+// (see AuditLogPath), not to "no logging". Setting this variable to an empty
+// or whitespace-only string is the explicit operator opt-out that disables
+// the log entirely; any other value overrides the default path after trimming.
 // This mirrors logPurchaseAttempt/logPurchaseOutcome's stderr trail, which
 // records the same events for a human watching the process, but the JSONL
 // file is the durable, machine-readable counterpart: without it, an MCP
@@ -56,8 +56,9 @@ func auditStatusFor(result common.PurchaseResult) string {
 }
 
 // AuditLogPath resolves where the MCP purchase audit log is written.
-// enabled is false only when EnvAuditLog is set to the empty string -- the
-// explicit operator opt-out. An unset variable selects the default path,
+// enabled is false only when EnvAuditLog is set to an empty or whitespace-only
+// string -- the explicit operator opt-out. An unset variable selects the
+// default path,
 // $XDG_STATE_HOME/cudly/mcp-audit.jsonl (falling back to
 // ~/.local/state/cudly/mcp-audit.jsonl when XDG_STATE_HOME is unset or
 // empty). This is the single resolver: the planned reader tools
@@ -65,9 +66,9 @@ func auditStatusFor(result common.PurchaseResult) string {
 // readers can never disagree about which file they mean.
 //
 // os.LookupEnv, not os.Getenv, is required here: it is the only way to
-// distinguish "the operator set this to empty on purpose" from "the
-// operator never set this at all", and those two cases must resolve to
-// opposite outcomes (disabled vs. the default path).
+// distinguish "the operator set this to empty or whitespace-only on purpose"
+// from "the operator never set this at all", and those two cases must resolve
+// to opposite outcomes (disabled vs. the default path).
 func AuditLogPath() (path string, enabled bool, err error) {
 	if v, isSet := os.LookupEnv(EnvAuditLog); isSet {
 		// Trimmed, matching how every other operator env var in this package
@@ -114,10 +115,10 @@ func EnsureAuditLogWritable() error {
 	return nil
 }
 
-// recordPurchaseAudit appends one JSONL record for a purchase attempt
-// (preview or real). Resolves the path per call, rather than once at
-// startup, so a test or operator override of EnvAuditLog after process
-// start still takes effect.
+// recordPurchaseAudit attempts to append one JSONL record for a purchase
+// attempt (preview or real) when auditing is enabled. Resolves the path per
+// call, not once at startup, so a test or operator override of EnvAuditLog
+// after process start still takes effect.
 //
 // A write failure warns on stderr and returns: the caller's purchase result
 // is authoritative and must never change because the audit trail hiccuped
