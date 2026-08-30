@@ -113,6 +113,12 @@ linters:
           - revive
         path: internal/api/
         text: "avoid meaningless package names"
+      # revive var-naming: "common" is the established public package name in
+      # the nested pkg module; renaming it would break unaliased consumers.
+      - linters:
+          - revive
+        path: ^pkg/common/
+        text: "avoid meaningless package names"
       # noctx: exec.Command calls in configure CLI helpers intentionally
       # omit context (CommandRunner interface contract; operator-controlled inputs).
       # Suppressed per-file rather than per-line so #nosec G204 can lead the comment.
