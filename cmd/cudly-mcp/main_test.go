@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,10 +29,15 @@ func TestMain(m *testing.M) {
 
 	auditDir, err := os.MkdirTemp("", "cudly-mcp-audit-testmain")
 	if err != nil {
-		panic(err)
+		log.Printf("create MCP audit test directory: %v", err)
+		os.Exit(1)
 	}
 	if err := os.Setenv(tools.EnvAuditLog, filepath.Join(auditDir, "mcp-audit.jsonl")); err != nil {
-		panic(err)
+		log.Printf("set MCP audit log test path: %v", err)
+		if cleanupErr := os.RemoveAll(auditDir); cleanupErr != nil {
+			log.Printf("remove MCP audit test directory after setup failure: %v", cleanupErr)
+		}
+		os.Exit(1)
 	}
 
 	code := m.Run()

@@ -61,9 +61,7 @@ func auditStatusFor(result common.PurchaseResult) string {
 // default path,
 // $XDG_STATE_HOME/cudly/mcp-audit.jsonl (falling back to
 // ~/.local/state/cudly/mcp-audit.jsonl when XDG_STATE_HOME is unset or
-// empty). This is the single resolver: the planned reader tools
-// (cudly_audit_summary, cudly_server_info) call it too, so writer and
-// readers can never disagree about which file they mean.
+// empty).
 //
 // os.LookupEnv, not os.Getenv, is required here: it is the only way to
 // distinguish "the operator set this to empty or whitespace-only on purpose"

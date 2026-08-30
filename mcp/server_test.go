@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,10 +26,15 @@ import (
 func TestMain(m *testing.M) {
 	auditDir, err := os.MkdirTemp("", "cudly-mcp-server-audit-testmain")
 	if err != nil {
-		panic(err)
+		log.Printf("create MCP server audit test directory: %v", err)
+		os.Exit(1)
 	}
 	if err := os.Setenv(tools.EnvAuditLog, filepath.Join(auditDir, "mcp-audit.jsonl")); err != nil {
-		panic(err)
+		log.Printf("set MCP server audit log test path: %v", err)
+		if cleanupErr := os.RemoveAll(auditDir); cleanupErr != nil {
+			log.Printf("remove MCP server audit test directory after setup failure: %v", cleanupErr)
+		}
+		os.Exit(1)
 	}
 
 	// os.Exit skips deferred calls, so the temp dir is removed explicitly

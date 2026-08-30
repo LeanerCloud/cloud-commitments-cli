@@ -37,15 +37,21 @@ import (
 // on audit file contents override this with their own t.Setenv.
 func TestMain(m *testing.M) {
 	if err := os.Setenv(EnvEnableRealPurchases, "1"); err != nil {
-		panic(err)
+		log.Printf("enable real purchases for MCP tests: %v", err)
+		os.Exit(1)
 	}
 
 	auditDir, err := os.MkdirTemp("", "cudly-mcp-audit-testmain")
 	if err != nil {
-		panic(err)
+		log.Printf("create MCP tool audit test directory: %v", err)
+		os.Exit(1)
 	}
 	if err := os.Setenv(EnvAuditLog, filepath.Join(auditDir, "mcp-audit.jsonl")); err != nil {
-		panic(err)
+		log.Printf("set MCP tool audit log test path: %v", err)
+		if cleanupErr := os.RemoveAll(auditDir); cleanupErr != nil {
+			log.Printf("remove MCP tool audit test directory after setup failure: %v", cleanupErr)
+		}
+		os.Exit(1)
 	}
 
 	// os.Exit skips deferred calls, so the temp dir is removed explicitly
