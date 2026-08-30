@@ -1,4 +1,4 @@
-.PHONY: build clean test deploy help all build-server build-lambda test-unit test-integration \
+.PHONY: build clean test deploy help all build-server build-lambda build-mcp test-unit test-integration \
         test-coverage full-test security-scan terraform-validate docker-build \
         fmt vet lint complexity complexity-report security-scan-go security-scan-docker \
         security-scan-terraform terraform-fmt terraform-fmt-check iac-arm docker-test pre-commit \
@@ -30,6 +30,7 @@ help: ## Display available targets
 	@echo "  build              - Build the CLI"
 	@echo "  build-server       - Build the unified server"
 	@echo "  build-lambda       - Build for AWS Lambda"
+	@echo "  build-mcp          - Build the MCP server (cmd/cudly-mcp)"
 	@echo "  test               - Run all unit tests"
 	@echo "  test-unit          - Run unit tests only"
 	@echo "  test-integration   - Run integration tests with testcontainers"
@@ -59,6 +60,13 @@ build-server:
 build-lambda:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bootstrap ./cmd/lambda
 
+# Build the MCP server (see mcp/README.md). Uses the same $(LDFLAGS)/$(VERSION)
+# as build-server so a tagged release reports its version in the MCP
+# initialize response instead of "dev" (see cmd/cudly-mcp/main.go).
+build-mcp:
+	mkdir -p bin
+	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/cudly-mcp ./cmd/cudly-mcp
+
 # Run unit tests
 test: test-unit
 
@@ -84,7 +92,7 @@ full-test: test-unit test-integration test-coverage
 
 # Clean build artifacts
 clean:
-	rm -f cudly bootstrap bin/cudly-server
+	rm -f cudly bootstrap bin/cudly-server bin/cudly-mcp
 	rm -f coverage.out coverage.html
 	rm -f gosec-report.json trivy-report.json tfsec-report.json
 	go clean
