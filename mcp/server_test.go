@@ -48,8 +48,8 @@ func TestNewServerBuildsWithoutError(t *testing.T) {
 // TestNewServerFailsOnBadAuditPath proves NewServer refuses to build when
 // the resolved audit log path is unwritable, rather than silently dropping
 // every audit record for the session. The path's parent is a regular file
-// (not a directory), so os.MkdirAll deterministically fails. Not parallel:
-// t.Setenv forbids it.
+// (not a directory), so descriptor-relative directory preparation fails.
+// Not parallel: t.Setenv forbids it.
 func TestNewServerFailsOnBadAuditPath(t *testing.T) {
 	dir := t.TempDir()
 	blockingFile := filepath.Join(dir, "not-a-directory")

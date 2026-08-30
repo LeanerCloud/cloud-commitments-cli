@@ -131,7 +131,7 @@ func TestAuditLogOverrideWins(t *testing.T) {
 // non-empty run_id, and the term converted to months. Not parallel:
 // t.Setenv forbids it.
 func TestPreviewWritesSkippedRecord(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	path := filepath.Join(t.TempDir(), "nested", "audit.jsonl")
 	t.Setenv(EnvAuditLog, path)
 
 	resp, err := ExecutePurchase(context.Background(), PurchaseRequest{
@@ -267,10 +267,10 @@ func TestTwoPurchasesShareOneRunID(t *testing.T) {
 // log cannot be written, recordPurchaseAudit warns on stderr naming the path
 // and error, and ExecutePurchase still returns its normal, unmodified
 // result. The path's parent is a regular file (not a directory), so
-// os.MkdirAll deterministically fails regardless of process privileges (a
-// chmod-based unwritable directory is ineffective when running as root, and
-// CI may run as root). Not parallel: t.Setenv forbids it, and this test
-// swaps the shared standard-logger output.
+// descriptor-relative directory preparation fails regardless of process
+// privileges (a chmod-based unwritable directory is ineffective when running
+// as root, and CI may run as root). Not parallel: t.Setenv forbids it, and
+// this test swaps the shared standard-logger output.
 func TestUnwritablePathWarnsAndDoesNotChangeResult(t *testing.T) {
 	dir := t.TempDir()
 	blockingFile := filepath.Join(dir, "not-a-directory")
@@ -278,6 +278,15 @@ func TestUnwritablePathWarnsAndDoesNotChangeResult(t *testing.T) {
 	badPath := filepath.Join(blockingFile, "mcp-audit.jsonl")
 	t.Setenv(EnvAuditLog, badPath)
 
+	resp, out := executeSuccessfulPurchaseWithCapturedAuditWarning(t)
+	assert.True(t, resp.Success)
+	assert.Equal(t, "ri-unwritable", resp.CommitmentID)
+	assert.Contains(t, out, "mcp audit log")
+	assert.Contains(t, out, badPath)
+}
+
+func executeSuccessfulPurchaseWithCapturedAuditWarning(t *testing.T) (*PurchaseResponse, string) {
+	t.Helper()
 	var buf bytes.Buffer
 	prevOut, prevFlags := log.Writer(), log.Flags()
 	log.SetOutput(&buf)
@@ -295,10 +304,5 @@ func TestUnwritablePathWarnsAndDoesNotChangeResult(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.True(t, resp.Success)
-	assert.Equal(t, "ri-unwritable", resp.CommitmentID)
-
-	out := buf.String()
-	assert.Contains(t, out, "mcp audit log")
-	assert.Contains(t, out, badPath)
+	return resp, buf.String()
 }

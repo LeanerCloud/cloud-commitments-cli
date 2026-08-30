@@ -91,9 +91,9 @@ func AuditLogPath() (path string, enabled bool, err error) {
 	return filepath.Join(stateDir, "cudly", "mcp-audit.jsonl"), true, nil
 }
 
-// EnsureAuditLogWritable resolves the audit path, creates its parent
-// directory, and probes it for read and append access. Returns nil when
-// auditing is disabled. Called once from mcp.NewServer so a misconfigured
+// EnsureAuditLogWritable resolves the audit path, durably creates its parent
+// directory hierarchy, and probes the file and parent directories. Returns nil
+// when auditing is disabled. Called once from mcp.NewServer so a misconfigured
 // path fails server construction loudly, rather than silently dropping every
 // audit record for the life of the process.
 func EnsureAuditLogWritable() error {
@@ -106,8 +106,8 @@ func EnsureAuditLogWritable() error {
 	}
 	// 0700: the default path lives under the user's own state directory, and
 	// this is a per-user record of money-spending decisions.
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create audit log directory for %s: %w", path, err)
+	if err := ensureAuditLogDirectory(path); err != nil {
+		return fmt.Errorf("prepare audit log directory for %s: %w", path, err)
 	}
 	if err := common.CheckAuditLogWritable(path); err != nil {
 		return fmt.Errorf("audit log: %w", err)
@@ -139,8 +139,8 @@ func recordPurchaseAudit(
 	if !enabled {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		log.Printf("mcp audit log: create directory for %s: %v", path, err)
+	if err := ensureAuditLogDirectory(path); err != nil {
+		log.Printf("mcp audit log: prepare directory for %s: %v", path, err)
 		return
 	}
 	record := common.NewAuditRecord(auditRunID, rec, result, status, dryRun, common.PurchaseSourceMCP)

@@ -141,7 +141,7 @@ Auditing is **on by default**. When auditing is enabled and a write succeeds, ea
 - A real purchase is recorded `"success"` only when the provider reports `Success: true` with no embedded error. A failed provider call, `Success: false`, or a result containing an error is recorded as `"error"`.
 - Every purchase in one server process shares a single `run_id`, so a log spanning many purchases can be grouped by session.
 - **A write failure never changes the purchase result.** It logs a warning to stderr naming the path and error; the tool response returned to the caller is unaffected.
-- The path is probed for read and append access at server startup: a misconfigured `CUDLY_MCP_AUDIT_LOG` (e.g. a parent directory that cannot be created) fails server construction outright, rather than silently dropping every record for the session.
+- The path is probed for read, append, and directory durability at server startup. MCP creates missing parent directories as owner-only `0700` subject to umask, then opens and syncs every directory edge from the filesystem root. Each ancestor therefore needs search and read permission, every creation parent also needs write permission, and the filesystem must support directory `fsync`. A path that fails these checks stops server construction instead of silently dropping every record for the session.
 
 ## Caveats and known gaps
 

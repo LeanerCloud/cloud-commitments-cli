@@ -62,7 +62,7 @@ Every recommendation - whether purchased or dry-run - is written as a JSON line 
 - Whether the run was a dry run
 - Purchase source (`cli`)
 
-cudly verifies that the audit log path is readable and writable before making any cloud API calls. If it cannot be read and appended to (e.g. the directory does not exist), the command exits immediately with an error.
+cudly verifies that the audit log is readable and writable and that the immediate configured and resolved parent directories can be opened and synced before making any cloud API calls. Higher ancestors need search permission; the immediate parent directories also need read permission and a filesystem that supports directory `fsync`. If the parent does not exist or these durability checks fail, the command exits immediately with an error.
 
 ```bash
 # Write audit records to a shared directory

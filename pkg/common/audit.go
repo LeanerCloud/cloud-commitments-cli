@@ -30,20 +30,30 @@ func WriteAuditRecord(record AuditRecord, path string) error {
 	return appendJSONL(path, data, 0644)
 }
 
-// CheckAuditLogWritable opens the audit log file in append mode to verify it is readable and writable.
-// Returns an error if the path cannot be opened for reading and writing.
+// CheckAuditLogWritable verifies the audit file is readable and writable and
+// its immediate namespace parents can be opened and synced for durability.
 func CheckAuditLogWritable(path string) error {
 	f, err := openAuditLogForAppend(path, 0644)
 	if err != nil {
-		return fmt.Errorf("audit log %q not readable and writable: %w", path, err)
+		return fmt.Errorf("audit log %q not readable and writable or parent not durable: %w", path, err)
 	}
 	if err := probeAuditLogWritable(path, f); err != nil {
-		return fmt.Errorf("audit log %q not readable and writable: %w", path, err)
+		return fmt.Errorf("audit log %q not readable and writable or parent not durable: %w", path, err)
 	}
 	return nil
 }
 
 func openAuditLogForAppend(path string, perm fs.FileMode) (auditLogFile, error) {
+	return openAuditLogForAppendWithBinder(path, perm, bindAuditLogParents)
+}
+
+type auditParentBinder func(string, *os.File) ([]auditParentDir, error)
+
+func openAuditLogForAppendWithBinder(
+	path string,
+	perm fs.FileMode,
+	bindParents auditParentBinder,
+) (auditLogFile, error) {
 	if err := validateAuditLogTarget(path); err != nil {
 		return nil, err
 	}
@@ -63,11 +73,17 @@ func openAuditLogForAppend(path string, perm fs.FileMode) (auditLogFile, error) 
 		closeErr := f.Close()
 		return nil, errors.Join(nonRegularAuditLogTargetError(path, info.Mode()), closeErr)
 	}
-	return &auditOSFile{File: f}, nil
+
+	parents, err := bindParents(path, f)
+	if err != nil {
+		return nil, closeAuditLog(path, f, err)
+	}
+	return &auditOSFile{File: f, parents: parents}, nil
 }
 
 type auditLogFile interface {
 	Lock() error
+	syncParents() error
 	needsRecordSeparator() (bool, error)
 	Write([]byte) (int, error)
 	Sync() error
@@ -77,6 +93,40 @@ type auditLogFile interface {
 
 type auditOSFile struct {
 	*os.File
+	parents []auditParentDir
+}
+
+type auditParentHandle interface {
+	Sync() error
+	Close() error
+}
+
+type auditParentDir struct {
+	path   string
+	handle auditParentHandle
+}
+
+func (f *auditOSFile) syncParents() error {
+	var syncErr error
+	for _, parent := range f.parents {
+		if err := parent.handle.Sync(); err != nil {
+			syncErr = errors.Join(syncErr, fmt.Errorf("sync audit log parent directory %s for durability: %w", parent.path, err))
+		}
+	}
+	return syncErr
+}
+
+func (f *auditOSFile) Close() error {
+	var closeErr error
+	for _, parent := range f.parents {
+		if err := parent.handle.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close audit log parent directory %s: %w", parent.path, err))
+		}
+	}
+	if err := f.File.Close(); err != nil {
+		closeErr = errors.Join(closeErr, err)
+	}
+	return closeErr
 }
 
 func (f *auditOSFile) needsRecordSeparator() (bool, error) {
@@ -164,8 +214,8 @@ func withAuditLogTransaction(path string, f auditLogFile, work func() error) err
 		return closeAuditLog(path, f, fmt.Errorf("lock audit log %s: %w", path, err))
 	}
 
-	var opErr error
-	if work != nil {
+	opErr := f.syncParents()
+	if opErr == nil && work != nil {
 		opErr = work()
 	}
 	if err := f.Unlock(); err != nil {
@@ -174,7 +224,7 @@ func withAuditLogTransaction(path string, f auditLogFile, work func() error) err
 	return closeAuditLog(path, f, opErr)
 }
 
-func closeAuditLog(path string, f auditLogFile, opErr error) error {
+func closeAuditLog(path string, f io.Closer, opErr error) error {
 	if err := f.Close(); err != nil {
 		return errors.Join(opErr, fmt.Errorf("close audit log %s: %w", path, err))
 	}

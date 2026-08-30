@@ -104,9 +104,9 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	go func() { <-sigCh; shutdownRequested.Store(true) }()
 	defer signal.Stop(sigCh)
 
-	// Verify audit log is readable and writable before making any cloud API calls.
+	// Verify the audit log and its immediate parents before making cloud API calls.
 	if err := CheckAuditLogWritable(cfg.AuditLog); err != nil {
-		log.Fatalf("Cannot read and write audit log: %v", err) //nolint:gocritic // exitAfterDefer: intentional startup fatal before cleanup matters
+		log.Fatalf("Cannot prepare durable audit log: %v", err) //nolint:gocritic // exitAfterDefer: intentional startup fatal before cleanup matters
 	}
 
 	printRunMode(isDryRun)
