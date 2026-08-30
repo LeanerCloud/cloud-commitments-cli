@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,17 +120,33 @@ func closeAuditDirectory(path string, handle auditDirectoryHandle, opErr error) 
 	return opErr
 }
 
+func auditDirectoryFD(handle auditDirectoryHandle) (int, error) {
+	fd := handle.Fd()
+	if fd > uintptr(math.MaxInt) {
+		return 0, fmt.Errorf("audit directory file descriptor %d exceeds int range", fd)
+	}
+	return int(fd), nil // #nosec G115 -- fd is range-checked above
+}
+
 func productionAuditDirectoryOps() auditDirectoryOps {
 	return auditDirectoryOps{
 		openRoot: func() (auditDirectoryHandle, error) {
 			return os.Open(string(filepath.Separator))
 		},
 		mkdirAt: func(parent auditDirectoryHandle, name string, mode uint32) error {
-			return unix.Mkdirat(int(parent.Fd()), name, mode)
+			fd, err := auditDirectoryFD(parent)
+			if err != nil {
+				return err
+			}
+			return unix.Mkdirat(fd, name, mode)
 		},
 		openAt: func(parent auditDirectoryHandle, name string) (auditDirectoryHandle, error) {
+			parentFD, err := auditDirectoryFD(parent)
+			if err != nil {
+				return nil, err
+			}
 			fd, err := unix.Openat(
-				int(parent.Fd()),
+				parentFD,
 				name,
 				unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC,
 				0,
@@ -137,7 +154,8 @@ func productionAuditDirectoryOps() auditDirectoryOps {
 			if err != nil {
 				return nil, err
 			}
-			return os.NewFile(uintptr(fd), name), nil
+			file := os.NewFile(uintptr(fd), name) // #nosec G115 -- successful unix.Openat fd fits uintptr
+			return file, nil
 		},
 	}
 }

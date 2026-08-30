@@ -5,7 +5,9 @@ package common
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +28,15 @@ var (
 )
 
 const auditParentFIFOPathEnv = "CUDLY_TEST_AUDIT_PARENT_FIFO_PATH"
+
+func TestAuditFileDescriptorRejectsUnrepresentableValue(t *testing.T) {
+	t.Parallel()
+	fd := uintptr(math.MaxInt) + 1
+
+	_, err := auditFileDescriptor(fd)
+
+	require.EqualError(t, err, fmt.Sprintf("audit file descriptor %d exceeds int range", fd))
+}
 
 func TestAuditOSFileSyncAndCloseContinueAfterParentErrors(t *testing.T) {
 	t.Parallel()
@@ -146,8 +157,8 @@ func TestParentSyncFailureSuppressesWorkAndJoinsTransactionLifecycle(t *testing.
 		"unlock",
 		"close-parent-1",
 		"close",
-	}, f.fakeAuditLogFile.operations)
-	assert.Empty(t, f.fakeAuditLogFile.writes)
+	}, f.operations)
+	assert.Empty(t, f.writes)
 }
 
 func TestProbeAuditLogWritableSyncsParentsBeforeUnlock(t *testing.T) {

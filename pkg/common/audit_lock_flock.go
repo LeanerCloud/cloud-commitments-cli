@@ -9,8 +9,12 @@ import (
 )
 
 func (f *auditOSFile) Lock() error {
+	fd, err := auditFileDescriptor(f.Fd())
+	if err != nil {
+		return err
+	}
 	for {
-		if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
+		if err := unix.Flock(fd, unix.LOCK_EX); err != nil {
 			if errors.Is(err, unix.EINTR) {
 				continue
 			}
@@ -21,8 +25,12 @@ func (f *auditOSFile) Lock() error {
 }
 
 func (f *auditOSFile) Unlock() error {
+	fd, err := auditFileDescriptor(f.Fd())
+	if err != nil {
+		return err
+	}
 	for {
-		if err := unix.Flock(int(f.Fd()), unix.LOCK_UN); err != nil {
+		if err := unix.Flock(fd, unix.LOCK_UN); err != nil {
 			if errors.Is(err, unix.EINTR) {
 				continue
 			}

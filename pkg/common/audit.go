@@ -58,7 +58,7 @@ func openAuditLogForAppendWithBinder(
 		return nil, err
 	}
 
-	// #nosec G302,G304 -- audit log path is operator-configured; WriteAuditRecord intentionally uses 0644 for downstream readers.
+	// #nosec G302,G304,G703 -- audit path is operator-configured; WriteAuditRecord intentionally uses 0644 for downstream readers.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, perm)
 	if err != nil {
 		return nil, fmt.Errorf("open audit log %s: %w", path, err)
@@ -249,7 +249,7 @@ func terminatePartialAuditRecord(path string, f auditLogFile) error {
 }
 
 func validateAuditLogTarget(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // #nosec G703 -- audit path is operator configured
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -258,7 +258,7 @@ func validateAuditLogTarget(path string) error {
 	}
 
 	if info.Mode()&os.ModeSymlink != 0 {
-		targetInfo, err := os.Stat(path)
+		targetInfo, err := os.Stat(path) // #nosec G703 -- audit path is operator configured
 		if err != nil {
 			return fmt.Errorf("resolve audit log symlink %q: %w", path, err)
 		}

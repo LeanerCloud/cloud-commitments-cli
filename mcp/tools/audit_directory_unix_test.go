@@ -4,7 +4,9 @@ package tools
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -19,6 +21,42 @@ var (
 	errAuditDirectorySync  = errors.New("directory sync failed")
 	errAuditDirectoryClose = errors.New("directory close failed")
 )
+
+func TestProductionAuditDirectoryOpsRejectsUnrepresentableDescriptor(t *testing.T) {
+	t.Parallel()
+	parent := &tracedAuditDirectory{fd: uintptr(math.MaxInt) + 1}
+	ops := productionAuditDirectoryOps()
+	tests := []struct {
+		name string
+		run  func() (auditDirectoryHandle, error)
+	}{
+		{
+			name: "mkdirat",
+			run: func() (auditDirectoryHandle, error) {
+				return nil, ops.mkdirAt(parent, "", 0o700)
+			},
+		},
+		{
+			name: "openat",
+			run: func() (auditDirectoryHandle, error) {
+				return ops.openAt(parent, "")
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handle, err := test.run()
+			if handle != nil {
+				require.NoError(t, handle.Close())
+				t.Fatal("operation returned an unexpected directory handle")
+			}
+			require.EqualError(t, err, fmt.Sprintf(
+				"audit directory file descriptor %d exceeds int range",
+				parent.fd,
+			))
+		})
+	}
+}
 
 func TestEnsureAuditLogDirectorySyncsEveryPathEdge(t *testing.T) {
 	t.Parallel()
@@ -222,9 +260,10 @@ func (t *auditDirectoryTrace) ops() auditDirectoryOps {
 type tracedAuditDirectory struct {
 	name  string
 	trace *auditDirectoryTrace
+	fd    uintptr
 }
 
-func (d *tracedAuditDirectory) Fd() uintptr { return 0 }
+func (d *tracedAuditDirectory) Fd() uintptr { return d.fd }
 
 func (d *tracedAuditDirectory) Sync() error {
 	d.trace.operations = append(d.trace.operations, "sync:"+d.name)

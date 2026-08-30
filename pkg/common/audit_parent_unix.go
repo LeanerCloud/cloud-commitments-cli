@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -19,7 +20,7 @@ type auditParentDescriptor interface {
 }
 
 type auditFileIdentity struct {
-	device uint64
+	device int64
 	inode  uint64
 }
 
@@ -127,7 +128,8 @@ func openAuditParentDirectory(path string) (auditParentDescriptor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return os.NewFile(uintptr(fd), path), nil
+	file := os.NewFile(uintptr(fd), path) // #nosec G115 -- successful unix.Open fd fits uintptr
+	return file, nil
 }
 
 func productionAuditParentOps() auditParentOps {
@@ -138,20 +140,42 @@ func productionAuditParentOps() auditParentOps {
 		fileIdentity:  auditDescriptorIdentity,
 		entryIdentityAt: func(parent auditParentDescriptor, name string) (auditFileIdentity, error) {
 			var stat unix.Stat_t
-			if err := unix.Fstatat(int(parent.Fd()), name, &stat, 0); err != nil {
+			fd, err := auditFileDescriptor(parent.Fd())
+			if err != nil {
 				return auditFileIdentity{}, err
 			}
-			return auditFileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}, nil
+			if err := unix.Fstatat(fd, name, &stat, 0); err != nil {
+				return auditFileIdentity{}, err
+			}
+			return auditIdentityFromStat(&stat), nil
 		},
 	}
 }
 
 func auditDescriptorIdentity(file *os.File) (auditFileIdentity, error) {
 	var stat unix.Stat_t
-	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
+	fd, err := auditFileDescriptor(file.Fd())
+	if err != nil {
 		return auditFileIdentity{}, err
 	}
-	return auditFileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}, nil
+	if err := unix.Fstat(fd, &stat); err != nil {
+		return auditFileIdentity{}, err
+	}
+	return auditIdentityFromStat(&stat), nil
+}
+
+func auditFileDescriptor(fd uintptr) (int, error) {
+	if fd > uintptr(math.MaxInt) {
+		return 0, fmt.Errorf("audit file descriptor %d exceeds int range", fd)
+	}
+	return int(fd), nil // #nosec G115 -- fd is range-checked above
+}
+
+func auditIdentityFromStat(stat *unix.Stat_t) auditFileIdentity {
+	return auditFileIdentity{
+		device: int64(stat.Dev), // #nosec G115 -- same-platform equality token preserves all device ID bits
+		inode:  stat.Ino,
+	}
 }
 
 func closeBoundAuditParents(parents []auditParentDir, opErr error) error {

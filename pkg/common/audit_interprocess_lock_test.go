@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -94,9 +95,9 @@ func TestWriteAuditRecordWaitsForTransactionLockBeforeRepairingPartialRecord(t *
 	})
 
 	waitForHelperReady(t, ctx, readyPath)
-	if err := helperStillWaiting(done, path); err != nil {
+	if waitErr := helperStillWaiting(done, path); waitErr != nil {
 		childReaped = true
-		require.NoError(t, err)
+		require.NoError(t, waitErr)
 	}
 
 	require.NoError(t, holder.Unlock())
@@ -105,9 +106,9 @@ func TestWriteAuditRecordWaitsForTransactionLockBeforeRepairingPartialRecord(t *
 	holderClosed = true
 
 	select {
-	case err := <-done:
+	case childErr := <-done:
 		childReaped = true
-		require.NoError(t, err, stderr.String())
+		require.NoError(t, childErr, stderr.String())
 	case <-ctx.Done():
 		require.FailNow(t, "helper did not finish after audit lock release", ctx.Err().Error())
 	}
@@ -178,8 +179,47 @@ func helperStillWaiting(done <-chan error, path string) error {
 		if readErr != nil {
 			return readErr
 		}
-		return fmt.Errorf("helper completed while audit lock was held: err=%v audit_log=%q", err, data)
+		if err == nil {
+			return fmt.Errorf("helper completed while audit lock was held without child error: audit_log=%q", data)
+		}
+		return fmt.Errorf("helper completed while audit lock was held: audit_log=%q: %w", data, err)
 	case <-timer.C:
 		return nil
+	}
+}
+
+func TestHelperStillWaitingReportsCompletedChild(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	payload := []byte("partial-record")
+	require.NoError(t, os.WriteFile(path, payload, 0o600))
+	childErr := errors.New("child failed")
+	tests := []struct {
+		name     string
+		childErr error
+		want     string
+	}{
+		{
+			name:     "child error",
+			childErr: childErr,
+			want:     `helper completed while audit lock was held: audit_log="partial-record": child failed`,
+		},
+		{
+			name: "nil child error",
+			want: `helper completed while audit lock was held without child error: audit_log="partial-record"`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			done := make(chan error, 1)
+			done <- test.childErr
+
+			err := helperStillWaiting(done, path)
+
+			require.EqualError(t, err, test.want)
+			if test.childErr != nil {
+				require.ErrorIs(t, err, test.childErr)
+			}
+		})
 	}
 }
