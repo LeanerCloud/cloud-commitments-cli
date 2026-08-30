@@ -43,12 +43,12 @@ func registrations() []tools.Registration {
 //	server, err := mcp.NewServer("1.0.0")
 //	server.Run(ctx, &gosdk.StdioTransport{})
 func NewServer(version string) (*gosdk.Server, error) {
-	// A server that cannot write its purchase audit trail should not accept
+	// A server that cannot read and write its purchase audit trail should not accept
 	// purchase calls at all -- failing here surfaces a misconfigured
 	// CUDLY_MCP_AUDIT_LOG at startup instead of silently dropping every
 	// audit record for the session.
 	if err := tools.EnsureAuditLogWritable(); err != nil {
-		return nil, fmt.Errorf("audit log not writable: %w", err)
+		return nil, fmt.Errorf("audit log not readable and writable: %w", err)
 	}
 
 	s := gosdk.NewServer(&gosdk.Implementation{Name: ServerName, Version: version}, nil)

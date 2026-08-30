@@ -42,3 +42,17 @@ func TestCheckAuditLogWritable_DoesNotChmodExistingAuditLog(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+func TestCheckAuditLogWritable_RejectsWriteOnlyAuditLog(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file read permission checks")
+	}
+
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte("line1\n"), 0o200))
+
+	err := CheckAuditLogWritable(path)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "not readable and writable")
+}

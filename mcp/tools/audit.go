@@ -92,10 +92,10 @@ func AuditLogPath() (path string, enabled bool, err error) {
 }
 
 // EnsureAuditLogWritable resolves the audit path, creates its parent
-// directory, and probes it. Returns nil when auditing is disabled. Called
-// once from mcp.NewServer so a misconfigured path fails server construction
-// loudly, rather than silently dropping every audit record for the life of
-// the process.
+// directory, and probes it for read and append access. Returns nil when
+// auditing is disabled. Called once from mcp.NewServer so a misconfigured
+// path fails server construction loudly, rather than silently dropping every
+// audit record for the life of the process.
 func EnsureAuditLogWritable() error {
 	path, enabled, err := AuditLogPath()
 	if err != nil {

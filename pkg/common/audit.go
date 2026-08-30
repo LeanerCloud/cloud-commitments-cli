@@ -30,15 +30,15 @@ func WriteAuditRecord(record AuditRecord, path string) error {
 	return appendJSONL(path, data, 0644)
 }
 
-// CheckAuditLogWritable opens the audit log file in append mode to verify it is writable.
-// Returns an error if the path cannot be opened for writing.
+// CheckAuditLogWritable opens the audit log file in append mode to verify it is readable and writable.
+// Returns an error if the path cannot be opened for reading and writing.
 func CheckAuditLogWritable(path string) error {
 	f, err := openAuditLogForAppend(path, 0644)
 	if err != nil {
-		return fmt.Errorf("audit log %q not writable: %w", path, err)
+		return fmt.Errorf("audit log %q not readable and writable: %w", path, err)
 	}
 	if err := probeAuditLogWritable(path, f); err != nil {
-		return fmt.Errorf("audit log %q not writable: %w", path, err)
+		return fmt.Errorf("audit log %q not readable and writable: %w", path, err)
 	}
 	return nil
 }
@@ -49,7 +49,7 @@ func openAuditLogForAppend(path string, perm fs.FileMode) (auditLogFile, error) 
 	}
 
 	// #nosec G302,G304 -- audit log path is operator-configured; WriteAuditRecord intentionally uses 0644 for downstream readers.
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, perm)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, perm)
 	if err != nil {
 		return nil, fmt.Errorf("open audit log %s: %w", path, err)
 	}
@@ -68,6 +68,7 @@ func openAuditLogForAppend(path string, perm fs.FileMode) (auditLogFile, error) 
 
 type auditLogFile interface {
 	Lock() error
+	needsRecordSeparator() (bool, error)
 	Write([]byte) (int, error)
 	Sync() error
 	Unlock() error
@@ -76,6 +77,26 @@ type auditLogFile interface {
 
 type auditOSFile struct {
 	*os.File
+}
+
+func (f *auditOSFile) needsRecordSeparator() (bool, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return false, nil
+	}
+
+	var tail [1]byte
+	n, err := f.ReadAt(tail[:], info.Size()-1)
+	if err != nil {
+		return false, err
+	}
+	if n != len(tail) {
+		return false, io.ErrUnexpectedEOF
+	}
+	return tail[0] != '\n', nil
 }
 
 func appendJSONL(path string, payload []byte, perm fs.FileMode) error {
@@ -97,6 +118,10 @@ func probeAuditLogWritable(path string, f auditLogFile) error {
 }
 
 func appendJSONLLocked(path string, f auditLogFile, payload []byte) error {
+	if err := repairAbandonedAuditRecord(path, f); err != nil {
+		return err
+	}
+
 	line := make([]byte, 0, len(payload)+1)
 	line = append(line, payload...)
 	line = append(line, '\n')
@@ -121,6 +146,17 @@ func appendJSONLLocked(path string, f auditLogFile, payload []byte) error {
 	}
 
 	return opErr
+}
+
+func repairAbandonedAuditRecord(path string, f auditLogFile) error {
+	needsSeparator, err := f.needsRecordSeparator()
+	if err != nil {
+		return fmt.Errorf("inspect audit log tail %s: %w", path, err)
+	}
+	if !needsSeparator {
+		return nil
+	}
+	return terminatePartialAuditRecord(path, f)
 }
 
 func withAuditLogTransaction(path string, f auditLogFile, work func() error) error {

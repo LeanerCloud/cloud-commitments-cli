@@ -20,6 +20,7 @@ var (
 	errAuditTestClose          = errors.New("audit test close failed")
 	errAuditTestLock           = errors.New("audit test lock failed")
 	errAuditTestUnlock         = errors.New("audit test unlock failed")
+	errAuditTestTail           = errors.New("audit test tail inspection failed")
 )
 
 func TestAppendJSONLReportsWriteErrorAndCloses(t *testing.T) {
@@ -57,7 +58,108 @@ func TestAppendJSONLNormalOperationOrder(t *testing.T) {
 
 	require.NoError(t, appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`)))
 
-	assert.Equal(t, []string{"lock", "write", "sync", "unlock", "close"}, f.operations)
+	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "unlock", "close"}, f.operations)
+}
+
+func TestAppendJSONLDoesNotRepairWhenSeparatorIsNotNeeded(t *testing.T) {
+	t.Parallel()
+	f := &fakeAuditLogFile{}
+
+	require.NoError(t, appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`)))
+
+	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "unlock", "close"}, f.operations)
+	assert.Equal(t, [][]byte{[]byte(`{"ok":true}` + "\n")}, f.writes)
+}
+
+func TestAppendJSONLRepairsAbandonedTailBeforePayload(t *testing.T) {
+	t.Parallel()
+	f := &fakeAuditLogFile{needsSeparator: true}
+
+	require.NoError(t, appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`)))
+
+	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "write", "sync", "unlock", "close"}, f.operations)
+	assert.Equal(t, [][]byte{{'\n'}, []byte(`{"ok":true}` + "\n")}, f.writes)
+}
+
+func TestAppendJSONLStopsWhenTailInspectionFails(t *testing.T) {
+	t.Parallel()
+	f := &fakeAuditLogFile{tailErr: errAuditTestTail}
+
+	err := appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`))
+
+	require.ErrorIs(t, err, errAuditTestTail)
+	assert.ErrorContains(t, err, "inspect audit log tail audit.jsonl")
+	assert.Equal(t, []string{"lock", "inspect", "unlock", "close"}, f.operations)
+	assert.Empty(t, f.writes)
+}
+
+func TestAppendJSONLStopsWhenAbandonedTailSeparatorWriteFails(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		result  auditWriteResult
+		wantErr error
+	}{
+		{name: "write error", result: auditWriteResult{err: errAuditTestSeparatorWrite}, wantErr: errAuditTestSeparatorWrite},
+		{name: "short write", result: auditWriteResult{}, wantErr: io.ErrShortWrite},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeAuditLogFile{needsSeparator: true, writeResults: []auditWriteResult{tt.result}}
+
+			err := appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`))
+
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.ErrorContains(t, err, "write audit record separator to audit.jsonl")
+			assert.Equal(t, []string{"lock", "inspect", "write", "unlock", "close"}, f.operations)
+			assert.Equal(t, [][]byte{{'\n'}}, f.writes)
+		})
+	}
+}
+
+func TestAppendJSONLStopsWhenAbandonedTailSeparatorSyncFails(t *testing.T) {
+	t.Parallel()
+	f := &fakeAuditLogFile{needsSeparator: true, syncErr: errAuditTestSync}
+
+	err := appendJSONLFile("audit.jsonl", f, []byte(`{"ok":true}`))
+
+	require.ErrorIs(t, err, errAuditTestSync)
+	assert.ErrorContains(t, err, "sync audit record separator to audit.jsonl")
+	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "unlock", "close"}, f.operations)
+	assert.Equal(t, [][]byte{{'\n'}}, f.writes)
+}
+
+func TestAuditOSFileNeedsRecordSeparator(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data []byte
+		want bool
+	}{
+		{name: "empty"},
+		{name: "newline terminated", data: []byte("record\n")},
+		{name: "unterminated", data: []byte("record"), want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "audit.jsonl")
+			require.NoError(t, os.WriteFile(path, tt.data, 0o600))
+			file, err := openAuditLogForAppend(path, 0o600)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, file.Close()) })
+
+			got, err := file.needsRecordSeparator()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestAppendJSONLReportsShortWriteAndCloses(t *testing.T) {
@@ -262,7 +364,7 @@ func TestAppendJSONLJoinsPartialRepairUnlockAndCloseErrors(t *testing.T) {
 	require.ErrorIs(t, err, errAuditTestUnlock)
 	require.ErrorIs(t, err, errAuditTestClose)
 	assert.ErrorContains(t, err, "sync audit record separator to audit.jsonl")
-	assert.Equal(t, []string{"lock", "write", "write", "sync", "unlock", "close"}, f.operations)
+	assert.Equal(t, []string{"lock", "inspect", "write", "write", "sync", "unlock", "close"}, f.operations)
 }
 
 func TestAppendJSONLUnlockFailureClosesLast(t *testing.T) {
@@ -273,7 +375,7 @@ func TestAppendJSONLUnlockFailureClosesLast(t *testing.T) {
 
 	require.ErrorIs(t, err, errAuditTestUnlock)
 	require.ErrorIs(t, err, errAuditTestClose)
-	assert.Equal(t, []string{"lock", "write", "sync", "unlock", "close"}, f.operations)
+	assert.Equal(t, []string{"lock", "inspect", "write", "sync", "unlock", "close"}, f.operations)
 }
 
 func TestAppendJSONLReturnsCloseOnlyError(t *testing.T) {
@@ -322,11 +424,13 @@ func TestProbeAuditLogWritableJoinsUnlockAndCloseErrors(t *testing.T) {
 }
 
 type fakeAuditLogFile struct {
-	writeResults []auditWriteResult
-	lockErr      error
-	syncErr      error
-	unlockErr    error
-	closeErr     error
+	writeResults   []auditWriteResult
+	lockErr        error
+	tailErr        error
+	needsSeparator bool
+	syncErr        error
+	unlockErr      error
+	closeErr       error
 
 	lockCalls   int
 	writeCalls  int
@@ -365,6 +469,11 @@ func (f *fakeAuditLogFile) Lock() error {
 	f.lockCalls++
 	f.operations = append(f.operations, "lock")
 	return f.lockErr
+}
+
+func (f *fakeAuditLogFile) needsRecordSeparator() (bool, error) {
+	f.operations = append(f.operations, "inspect")
+	return f.needsSeparator, f.tailErr
 }
 
 func (f *fakeAuditLogFile) Write(p []byte) (int, error) {

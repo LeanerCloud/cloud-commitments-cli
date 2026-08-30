@@ -99,10 +99,6 @@ func TestWriteAuditRecordWaitsForTransactionLockBeforeRepairingPartialRecord(t *
 		require.NoError(t, err)
 	}
 
-	n, err = holder.Write([]byte{'\n'})
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.NoError(t, holder.Sync())
 	require.NoError(t, holder.Unlock())
 	holderLocked = false
 	require.NoError(t, holder.Close())
