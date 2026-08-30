@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -541,6 +542,8 @@ func logPurchaseAttempt(req PurchaseRequest, rec common.Recommendation, token st
 		rec.Term, rec.PaymentOption, common.MaskToken(token))
 }
 
+const providerFailureWithoutDetail = "provider reported failure with no error detail"
+
 // logPurchaseOutcome logs FAILED whenever success is false, even if err is
 // nil: a provider can report PurchaseResult{Success: false, Error: nil} (no
 // Go error, no result.Error, just a plain "did not buy anything"), and that
@@ -548,7 +551,7 @@ func logPurchaseAttempt(req PurchaseRequest, rec common.Recommendation, token st
 func logPurchaseOutcome(rec common.Recommendation, token, commitmentID string, success bool, err error) {
 	if !success {
 		if err == nil {
-			err = fmt.Errorf("provider reported failure with no error detail")
+			err = errors.New(providerFailureWithoutDetail)
 		}
 		log.Printf("mcp purchase FAILED: provider=%s resource=%s token=%s: %v",
 			rec.Provider, rec.ResourceType, common.MaskToken(token), err)
@@ -645,8 +648,12 @@ func ExecutePurchase(ctx context.Context, req PurchaseRequest) (*PurchaseRespons
 		// providers must never swallow the underlying SDK/HTTP error).
 		return nil, fmt.Errorf("purchase commitment failed: %w", err)
 	}
-	logPurchaseOutcome(rec, token, result.CommitmentID, purchaseSucceeded(result), result.Error)
-	recordPurchaseAudit(rec, req.CredentialScope, result, auditStatusFor(result), false)
+	auditResult := result
+	if !purchaseSucceeded(auditResult) && auditResult.Error == nil {
+		auditResult.Error = errors.New(providerFailureWithoutDetail)
+	}
+	logPurchaseOutcome(rec, token, auditResult.CommitmentID, purchaseSucceeded(auditResult), auditResult.Error)
+	recordPurchaseAudit(rec, req.CredentialScope, auditResult, auditStatusFor(auditResult), false)
 
 	resp := &PurchaseResponse{
 		Success:           purchaseSucceeded(result),

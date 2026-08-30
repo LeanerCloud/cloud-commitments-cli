@@ -226,12 +226,14 @@ func TestProviderReportedFailureMapsToErrorStatus(t *testing.T) {
 	require.NoError(t, err, "a provider-reported failure surfaces via the response, not a Go error")
 	require.NotNil(t, resp)
 	assert.False(t, resp.Success)
+	assert.Empty(t, resp.Error, "audit enrichment must not alter the provider response")
 
 	lines := readAuditLines(t, path)
 	require.Len(t, lines, 1)
 	var record common.AuditRecord
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
 	assert.Equal(t, "error", record.Status, "Success=false must never be recorded as success")
+	assert.Equal(t, "provider reported failure with no error detail", record.ErrorMessage)
 	assert.Equal(t, "test-scope", record.CredentialScope)
 }
 
