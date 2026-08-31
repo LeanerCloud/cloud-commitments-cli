@@ -23,6 +23,13 @@
           "isRequired": false,
           "isSecret": false,
           "format": "string"
+        },
+        {
+          "name": "CUDLY_MCP_AUDIT_LOG",
+          "description": "Overrides the local JSONL purchase audit path after trimming. Unset writes to $XDG_STATE_HOME/cudly/mcp-audit.jsonl, falling back to ~/.local/state/cudly/mcp-audit.jsonl; an empty or whitespace-only value disables auditing.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
         }
       ]
     }
