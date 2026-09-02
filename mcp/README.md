@@ -134,7 +134,7 @@ Understand these before enabling real purchases, especially in a shared or produ
 
 Auditing is **on by default**. When auditing is enabled and a write succeeds, each purchase attempt -- previews included -- appends one `common.AuditRecord` JSON line to a local file, independent of the stderr trail in [Safety model](#safety-model) above.
 
-- **Default path**: `$XDG_STATE_HOME/cudly/mcp-audit.jsonl`, falling back to `~/.local/state/cudly/mcp-audit.jsonl` when `XDG_STATE_HOME` is unset or empty.
+- **Default path**: `$XDG_STATE_HOME/cudly/mcp-audit.jsonl`, falling back to `~/.local/state/cudly/mcp-audit.jsonl` when `XDG_STATE_HOME` is unset, empty, or relative.
 - **`CUDLY_MCP_AUDIT_LOG`** overrides the path. Setting it to an **empty or whitespace-only string disables the log entirely** -- that is the explicit opt-out; leaving the variable unset is not the same thing and still uses the default path.
 - A preview (`dry_run=true`) is recorded with `status: "skipped"`, `dry_run: true` -- it spent nothing, but it was still a decision worth reconstructing later.
 - When a credential scope is supplied, `credential_scope` records that routing identifier: an AWS profile, Azure subscription, or GCP project. It identifies how CUDly selected the target; it is not a verified provider account ID. Previews may omit it because they do not require a target.

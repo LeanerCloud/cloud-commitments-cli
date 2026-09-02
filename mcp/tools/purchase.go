@@ -95,8 +95,9 @@ type PurchaseRequest struct {
 	// Azure subscription, or GCP project the call is billed to. It is folded
 	// into the idempotency key so two purchases that are identical in every
 	// product dimension but target different accounts derive DIFFERENT
-	// tokens. Populated by each tool via CredentialScope(). See
-	// idempotencyKeyFor for why omitting it is a double-spend/skipped-spend
+	// tokens. Real purchases include the same ambient fallback as provider
+	// resolution; previews record only an explicit caller-supplied scope.
+	// See idempotencyKeyFor for why omitting it is a double-spend/skipped-spend
 	// hazard on Azure specifically.
 	CredentialScope string
 }
@@ -130,6 +131,16 @@ func CredentialScope(explicit string, envVars ...string) string {
 		}
 	}
 	return ""
+}
+
+// requestCredentialScope resolves the audit/idempotency scope for the selected
+// mode: previews must not record an ambient account they never resolved, while
+// real purchases must keep the provider-env fallback used by authorization.
+func requestCredentialScope(explicit string, dryRun bool, envVars ...string) string {
+	if dryRun {
+		return CredentialScope(explicit)
+	}
+	return CredentialScope(explicit, envVars...)
 }
 
 // credentialScopeSource describes where a provider's credential scope can come

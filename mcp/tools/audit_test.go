@@ -61,6 +61,25 @@ func TestAuditLogPathDefaultWhenUnset(t *testing.T) {
 	assert.Equal(t, filepath.Join(stateDir, "cudly", "mcp-audit.jsonl"), path)
 }
 
+func TestAuditLogPathIgnoresRelativeXDGStateHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "relative-state")
+	prev, had := os.LookupEnv(EnvAuditLog)
+	require.NoError(t, os.Unsetenv(EnvAuditLog))
+	t.Cleanup(func() {
+		if had {
+			_ = os.Setenv(EnvAuditLog, prev)
+		}
+	})
+
+	path, enabled, err := AuditLogPath()
+	require.NoError(t, err)
+	assert.True(t, enabled)
+	assert.Equal(t, filepath.Join(home, ".local", "state", "cudly", "mcp-audit.jsonl"), path)
+	assert.NotContains(t, path, "relative-state")
+}
+
 // TestAuditLogEmptyValueDisables proves EnvAuditLog="" is the explicit
 // operator opt-out: AuditLogPath reports disabled, and a full real purchase
 // through ExecutePurchase writes no file anywhere under a temp
@@ -155,6 +174,141 @@ func TestPreviewWritesSkippedRecord(t *testing.T) {
 	assert.Equal(t, "audit-scope-preview", record.CredentialScope)
 	assert.NotEmpty(t, record.RunID)
 	assert.Equal(t, 12, record.Term, `a "1yr" term must convert to 12 months`)
+}
+
+func TestPreviewAuditOmitsAmbientCredentialScopeWhenOverrideOmitted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv(EnvAuditLog, path)
+	t.Setenv("AWS_PROFILE", "ambient-aws-profile")
+	t.Setenv("AZURE_SUBSCRIPTION_ID", "ABC12345-1234-1234-1234-1234567890AB")
+
+	simpleTools := simpleToolConstructors()
+	cases := make([]struct {
+		name string
+		call func(*testing.T)
+	}, 0, 5+len(simpleTools))
+	cases = append(cases, []struct {
+		name string
+		call func(*testing.T)
+	}{
+		{
+			name: "aws ec2",
+			call: func(t *testing.T) {
+				args := validEC2Args()
+				args.AWSProfile = ""
+				_, resp, err := (&awsEC2RIPurchaseTool{}).handle(context.Background(), nil, args)
+				require.NoError(t, err)
+				assert.True(t, resp.DryRun)
+			},
+		},
+		{
+			name: "aws elasticache",
+			call: func(t *testing.T) {
+				args := validElastiCacheArgs()
+				args.AWSProfile = ""
+				_, resp, err := (&awsElastiCacheRIPurchaseTool{}).handle(context.Background(), nil, args)
+				require.NoError(t, err)
+				assert.True(t, resp.DryRun)
+			},
+		},
+		{
+			name: "aws rds",
+			call: func(t *testing.T) {
+				args := validRDSArgs()
+				args.AWSProfile = ""
+				_, resp, err := (&awsRDSRIPurchaseTool{}).handle(context.Background(), nil, args)
+				require.NoError(t, err)
+				assert.True(t, resp.DryRun)
+			},
+		},
+		{
+			name: "aws savings plans",
+			call: func(t *testing.T) {
+				args := validSavingsPlansArgs()
+				args.AWSProfile = ""
+				_, resp, err := (&awsSavingsPlansPurchaseTool{}).handle(context.Background(), nil, args)
+				require.NoError(t, err)
+				assert.True(t, resp.DryRun)
+			},
+		},
+		{
+			name: "azure compute",
+			call: func(t *testing.T) {
+				args := validAzureComputeArgs()
+				args.AzureSubscriptionID = ""
+				_, resp, err := (&azureComputeRIPurchaseTool{}).handle(context.Background(), nil, args)
+				require.NoError(t, err)
+				assert.True(t, resp.DryRun)
+			},
+		},
+	}...)
+	for product, ctor := range simpleTools {
+		cases = append(cases, struct {
+			name string
+			call func(*testing.T)
+		}{
+			name: "aws " + product,
+			call: func(t *testing.T) {
+				args := validSimpleArgs()
+				args.AWSProfile = ""
+				tool := ctor().(*simpleAWSRIPurchaseTool)
+				_, resp, err := tool.handle(context.Background(), nil, args)
+				require.NoError(t, err)
+				assert.True(t, resp.DryRun)
+			},
+		})
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			before := 0
+			if _, err := os.Stat(path); err == nil {
+				before = len(readAuditLines(t, path))
+			} else {
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
+
+			tc.call(t)
+
+			lines := readAuditLines(t, path)
+			require.Len(t, lines, before+1)
+
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &raw))
+			assert.NotContains(t, raw, "credential_scope")
+		})
+	}
+}
+
+func TestPreviewAuditLowercasesExplicitAzureCredentialScope(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	t.Setenv(EnvAuditLog, path)
+	t.Setenv("AZURE_SUBSCRIPTION_ID", "99999999-9999-9999-9999-999999999999")
+
+	args := validAzureComputeArgs()
+	args.AzureSubscriptionID = "ABC12345-1234-1234-1234-1234567890AB"
+	_, resp, err := (&azureComputeRIPurchaseTool{}).handle(context.Background(), nil, args)
+	require.NoError(t, err)
+	require.True(t, resp.DryRun)
+
+	lines := readAuditLines(t, path)
+	require.Len(t, lines, 1)
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &raw))
+	assert.Equal(t, "abc12345-1234-1234-1234-1234567890ab", raw["credential_scope"])
+}
+
+func TestRequestCredentialScopeRespectsPurchaseMode(t *testing.T) {
+	const envVar = "CUDLY_TEST_PURCHASE_SCOPE"
+	t.Setenv(envVar, "ambient-scope")
+
+	assert.Empty(t, requestCredentialScope("", true, envVar),
+		"a preview without an explicit scope must not record an ambient provider fallback")
+	assert.Equal(t, "explicit-scope", requestCredentialScope(" explicit-scope ", true, envVar))
+	assert.Equal(t, "ambient-scope", requestCredentialScope("", false, envVar),
+		"a real purchase must keep the same ambient fallback used by provider resolution and idempotency")
+	assert.Equal(t, "explicit-scope", requestCredentialScope(" explicit-scope ", false, envVar))
 }
 
 // TestSuccessfulPurchaseWritesSuccessRecord proves a completed real purchase

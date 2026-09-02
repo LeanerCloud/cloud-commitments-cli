@@ -113,7 +113,7 @@ func (t *awsSavingsPlansPurchaseTool) handle(ctx context.Context, _ *mcp.CallToo
 		Confirm:         confirm,
 		ResolveClient:   t.resolveClient(args, region, rec.Service),
 		Nonce:           args.IdempotencyNonce,
-		CredentialScope: CredentialScope(args.AWSProfile, "AWS_PROFILE"),
+		CredentialScope: requestCredentialScope(args.AWSProfile, dryRun, "AWS_PROFILE"),
 	})
 	if err != nil {
 		return nil, PurchaseResponse{}, err

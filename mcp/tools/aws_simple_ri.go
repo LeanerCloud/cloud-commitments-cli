@@ -157,7 +157,7 @@ func (t *simpleAWSRIPurchaseTool) handle(ctx context.Context, _ *mcp.CallToolReq
 		Confirm:         confirm,
 		ResolveClient:   t.resolveClient(args, region),
 		Nonce:           args.IdempotencyNonce,
-		CredentialScope: CredentialScope(args.AWSProfile, "AWS_PROFILE"),
+		CredentialScope: requestCredentialScope(args.AWSProfile, dryRun, "AWS_PROFILE"),
 	})
 	if err != nil {
 		return nil, PurchaseResponse{}, err
