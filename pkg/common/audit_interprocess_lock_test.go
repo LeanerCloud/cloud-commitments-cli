@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -24,7 +25,44 @@ const (
 	auditLockHelperValue    = "1"
 	auditLockHelperPathEnv  = "CUDLY_AUDIT_LOCK_HELPER_PATH"
 	auditLockHelperReadyEnv = "CUDLY_AUDIT_LOCK_HELPER_READY"
+	auditLockHelperTimeout  = "CUDLY_AUDIT_LOCK_HELPER_TIMEOUT"
 )
+
+func TestWriteAuditRecordTimesOutWhileTransactionLockIsHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	original := []byte("existing-record\n")
+	require.NoError(t, os.WriteFile(path, original, 0o600))
+
+	holder, err := openAuditLogForAppend(path, 0o644)
+	require.NoError(t, err)
+	require.NoError(t, holder.Lock())
+	locked := true
+	t.Cleanup(func() {
+		if locked {
+			require.NoError(t, holder.Unlock())
+		}
+		require.NoError(t, holder.Close())
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), auditLockTimeout+5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestAuditLockHelperProcess$")
+	cmd.Env = append(os.Environ(),
+		auditLockHelperEnv+"="+auditLockHelperValue,
+		auditLockHelperPathEnv+"="+path,
+		auditLockHelperTimeout+"=1",
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), stderr.String())
+	require.NoError(t, ctx.Err())
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, original, data)
+	require.NoError(t, holder.Unlock())
+	locked = false
+}
 
 func TestWriteAuditRecordWaitsForTransactionLockBeforeRepairingPartialRecord(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
@@ -134,8 +172,20 @@ func TestAuditLockHelperProcess(t *testing.T) {
 	}
 
 	path := os.Getenv(auditLockHelperPathEnv)
-	readyPath := os.Getenv(auditLockHelperReadyEnv)
 	require.NotEmpty(t, path)
+	if os.Getenv(auditLockHelperTimeout) == "1" {
+		started := time.Now()
+		err := WriteAuditRecord(auditLockHelperRecord(), path)
+		elapsed := time.Since(started)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "timed out acquiring audit lock")
+		require.ErrorIs(t, err, unix.EWOULDBLOCK)
+		require.GreaterOrEqual(t, elapsed, auditLockTimeout)
+		require.LessOrEqual(t, elapsed, auditLockTimeout+2*time.Second)
+		return
+	}
+
+	readyPath := os.Getenv(auditLockHelperReadyEnv)
 	require.NotEmpty(t, readyPath)
 
 	require.NoError(t, os.WriteFile(readyPath, []byte("ready"), 0o600))
