@@ -1,0 +1,5 @@
+# Generated audit reports are verbatim records: reviewer text, quoted code
+# excerpts and verifier verdicts. Autoformatting them rewrites evidence
+# (for example stripping a meaningful trailing space inside a code span),
+# so they are linted by the process that writes them, not by markdownlint.
+docs/audits/
