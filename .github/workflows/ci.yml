@@ -1000,6 +1000,46 @@ jobs:
       - name: Run RDS scope self-tests
         run: bash scripts/test-rds-deletion-protection-scope.sh
 
+  # Assert that the Cloud SQL instance selector used by cleanup-staging.yml's
+  # destroy-gcp job deletes the instance the staging state owns and nothing
+  # else. deletion_protection = true on that instance means a selector that
+  # matches nothing leaves it behind and the destroy fails on it; a selector
+  # that over-matches deletes a database this state never owned. Both
+  # directions are asserted: every near-miss name is refused, and the owned
+  # instance is still selected out of a hostile listing first, since a
+  # selector matching nothing passes every refusal assertion while leaving
+  # the destroy broken. The suite also asserts the wiring, which is what
+  # #1592, #1820 and #1821 each escaped on other resources: the destroy step
+  # calls scripts/delete-owned-cloud-sql-instance.sh, that script lists
+  # instances with no `--filter` and deletes only what the selector yields,
+  # the three `terraform state rm` calls are module-qualified and run only
+  # after a successful delete, and nothing else under .github/workflows or
+  # scripts/ runs `gcloud sql instances delete` unguarded. That last claim is
+  # checked over a GLOB of both directories, not a list of known files, so a
+  # script added later is covered without anyone remembering to name it; the
+  # sweep is asserted to have opened a non-zero number of files first, since
+  # an empty swept set has no violations either.
+  # It additionally runs the script end to end against stubbed terraform and
+  # gcloud, so "a failed delete is not swallowed" and "state is removed only
+  # after a successful delete" are asserted as behaviour, not as text.
+  # Fast (shell only), so it always runs.
+  cloud-sql-delete-scope:
+    name: Cloud SQL delete selection scope
+    runs-on: ubuntu-latest
+    # Same shape as ecr-delete-selection above: this job checks out the tree and
+    # runs a shell script against it, so `contents: read` is all it needs.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Cloud SQL scope self-tests
+        run: bash scripts/test-cloud-sql-delete-scope.sh
+
   # Assert that every job applying a `compute_platform` writes the Terraform
   # state namespace that platform owns: `compute_platform=lambda` into
   # github-<env>/, `compute_platform=fargate` into github-fargate-<env>/. The
@@ -1076,6 +1116,7 @@ jobs:
       - gcp-secret-scope
       - ecr-delete-selection
       - rds-deletion-protection-scope
+      - cloud-sql-delete-scope
       - aws-tfstate-platform-key
       - azure-kv-access-policy
     if: always()
