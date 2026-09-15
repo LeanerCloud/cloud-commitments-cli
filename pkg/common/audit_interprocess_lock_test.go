@@ -21,47 +21,90 @@ import (
 )
 
 const (
-	auditLockHelperEnv      = "CUDLY_AUDIT_LOCK_HELPER"
-	auditLockHelperValue    = "1"
-	auditLockHelperPathEnv  = "CUDLY_AUDIT_LOCK_HELPER_PATH"
-	auditLockHelperReadyEnv = "CUDLY_AUDIT_LOCK_HELPER_READY"
-	auditLockHelperTimeout  = "CUDLY_AUDIT_LOCK_HELPER_TIMEOUT"
+	auditLockHelperEnv       = "CUDLY_AUDIT_LOCK_HELPER"
+	auditLockHelperValue     = "1"
+	auditLockHelperPathEnv   = "CUDLY_AUDIT_LOCK_HELPER_PATH"
+	auditLockHelperReadyEnv  = "CUDLY_AUDIT_LOCK_HELPER_READY"
+	auditLockHelperTimeout   = "CUDLY_AUDIT_LOCK_HELPER_TIMEOUT"
+	auditLockHelperOperation = "CUDLY_AUDIT_LOCK_HELPER_OPERATION"
 )
 
-func TestWriteAuditRecordTimesOutWhileTransactionLockIsHeld(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "audit.jsonl")
-	original := []byte("existing-record\n")
-	require.NoError(t, os.WriteFile(path, original, 0o600))
+func TestAuditOperationsTimeOutWhileTransactionLockIsHeld(t *testing.T) {
+	operations := []string{"write", "check"}
+	for _, operation := range operations {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+			auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+			original := []byte("existing-record\n")
+			require.NoError(t, os.WriteFile(auditPath, original, 0o600))
+			recordJSON, err := json.Marshal(auditLockHelperRecord())
+			require.NoError(t, err)
 
-	holder, err := openAuditLogForAppend(path, 0o644)
-	require.NoError(t, err)
-	require.NoError(t, holder.Lock())
-	locked := true
-	t.Cleanup(func() {
-		if locked {
+			holder, err := openAuditLogForAppend(auditPath, 0o644)
+			require.NoError(t, err)
+			locked := true
+			t.Cleanup(func() {
+				if locked {
+					require.NoError(t, holder.Unlock())
+				}
+				require.NoError(t, holder.Close())
+			})
+
+			require.NoError(t, holder.Lock())
+
+			ctx, cancel := context.WithTimeout(context.Background(), auditLockTimeout+5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestAuditLockHelperProcess$")
+			cmd.Env = append(os.Environ(),
+				auditLockHelperEnv+"="+auditLockHelperValue,
+				auditLockHelperPathEnv+"="+auditPath,
+				auditLockHelperTimeout+"=1",
+				auditLockHelperOperation+"="+operation,
+			)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, string(output))
+			require.NoError(t, ctx.Err())
+
+			data, err := os.ReadFile(auditPath)
+			require.NoError(t, err)
+			require.Equal(t, original, data)
 			require.NoError(t, holder.Unlock())
-		}
-		require.NoError(t, holder.Close())
-	})
+			locked = false
 
-	ctx, cancel := context.WithTimeout(context.Background(), auditLockTimeout+5*time.Second)
+			switch operation {
+			case "write":
+				require.NoError(t, WriteAuditRecord(auditLockHelperRecord(), auditPath))
+				expected := append(append([]byte(nil), original...), recordJSON...)
+				expected = append(expected, '\n')
+				data, err = os.ReadFile(auditPath)
+				require.NoError(t, err)
+				require.Equal(t, expected, data)
+			case "check":
+				require.NoError(t, CheckAuditLogWritable(auditPath))
+				data, err = os.ReadFile(auditPath)
+				require.NoError(t, err)
+				require.Equal(t, original, data)
+			}
+		})
+	}
+}
+
+func TestAuditLockHelperRejectsUnknownOperation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	require.NoError(t, os.WriteFile(path, []byte("existing-record\n"), 0o600))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run", "^TestAuditLockHelperProcess$")
 	cmd.Env = append(os.Environ(),
 		auditLockHelperEnv+"="+auditLockHelperValue,
 		auditLockHelperPathEnv+"="+path,
-		auditLockHelperTimeout+"=1",
+		auditLockHelperReadyEnv+"="+filepath.Join(t.TempDir(), "helper-ready"),
+		auditLockHelperOperation+"=unknown",
 	)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	require.NoError(t, cmd.Run(), stderr.String())
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err, string(output))
 	require.NoError(t, ctx.Err())
-
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
-	require.Equal(t, original, data)
-	require.NoError(t, holder.Unlock())
-	locked = false
+	require.Contains(t, string(output), "unknown audit lock helper operation")
 }
 
 func TestWriteAuditRecordWaitsForTransactionLockBeforeRepairingPartialRecord(t *testing.T) {
@@ -173,9 +216,21 @@ func TestAuditLockHelperProcess(t *testing.T) {
 
 	path := os.Getenv(auditLockHelperPathEnv)
 	require.NotEmpty(t, path)
+	operation := os.Getenv(auditLockHelperOperation)
+	if operation == "" {
+		operation = "write"
+	}
 	if os.Getenv(auditLockHelperTimeout) == "1" {
 		started := time.Now()
-		err := WriteAuditRecord(auditLockHelperRecord(), path)
+		var err error
+		switch operation {
+		case "write":
+			err = WriteAuditRecord(auditLockHelperRecord(), path)
+		case "check":
+			err = CheckAuditLogWritable(path)
+		default:
+			require.FailNow(t, "unknown audit lock helper operation", operation)
+		}
 		elapsed := time.Since(started)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "timed out acquiring audit lock")
@@ -189,7 +244,14 @@ func TestAuditLockHelperProcess(t *testing.T) {
 	require.NotEmpty(t, readyPath)
 
 	require.NoError(t, os.WriteFile(readyPath, []byte("ready"), 0o600))
-	require.NoError(t, WriteAuditRecord(auditLockHelperRecord(), path))
+	switch operation {
+	case "write":
+		require.NoError(t, WriteAuditRecord(auditLockHelperRecord(), path))
+	case "check":
+		require.NoError(t, CheckAuditLogWritable(path))
+	default:
+		require.FailNow(t, "unknown audit lock helper operation", operation)
+	}
 }
 
 func auditLockHelperRecord() AuditRecord {
