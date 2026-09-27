@@ -12,7 +12,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 1. **Search existing issues** - Check if the bug has already been reported
 2. **Create a detailed report** including:
-   - CUDly version (`./cudly --version`)
+   - CUDly version (`./cudly --help`)
    - Go version (`go version`)
    - Operating system and architecture
    - Cloud provider and service affected
@@ -115,7 +115,11 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | tail -n +2 |
 ```
 
 The committed `go.work` (listing only this repository's own modules) keeps
-`go build ./...` and CI clean for everyone without requiring any local setup.
+`go vet ./...`, `go test ./...`, and CI clean for everyone without requiring
+any local setup. Note that `go build ./...` is not a valid way to build this
+repo: `cmd/` is the only main package, and Go's default output name for a
+lone main package collides with the `cmd` directory itself. Use `make build`
+or `go build -o cudly ./cmd` instead (see "Getting Started" above).
 
 ### Running Tests
 

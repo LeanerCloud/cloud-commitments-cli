@@ -19,15 +19,11 @@
 ## File Organization
 
 - NEVER save working files to the root folder; use the directories below
-- `cmd/`: CLI and server entry points (main packages)
-- `internal/`: backend application code (API, auth, purchase, scheduler, ...)
-- `pkg/`: shared library code (separate Go module, see Go Module Notes)
-- `providers/`: cloud provider integrations (AWS, Azure, GCP)
-- `frontend/`: TypeScript web frontend (webpack + jest)
-- `terraform/`, `cloudformation/`, `arm/`, `iac/`: infrastructure as code
-- `docs/`: documentation and markdown files
-- `scripts/`: utility scripts
-- `tests/`: end-to-end tests (Go unit tests live next to the code they test)
+- `cmd/`: the single CLI main package (builds the `cudly` binary); Go unit
+  tests live next to the code they test
+- `docs/`: CLI reference and topic documentation
+- `scripts/`: repository hook and helper scripts
+- `.github/`: CI workflows (`ci.yml`, `pre-commit.yml`)
 
 ## Project Architecture
 
@@ -54,23 +50,20 @@
 
 ## Build & Test
 
-The root of the repo is a Go project; the npm scripts live in `frontend/`.
+The whole repo is a single Go module rooted at `cmd/`.
 
 ```bash
-# Build (backend, from the repo root)
-go build ./...        # or: make build
+# Build
+make build             # or: go build -o cudly ./cmd
+                        # (go build ./... fails: cmd/ is the only main
+                        # package and its default output name collides
+                        # with the cmd directory itself)
 
-# Test (backend)
-go test ./...         # or: make test-unit
+# Test
+go test ./...          # or: make test-unit
 
-# Lint (backend)
-make lint             # golangci-lint; also: make vet, make fmt
-
-# Frontend (run from frontend/)
-cd frontend && npm ci
-npm run build         # webpack production build
-npm test              # jest --coverage
-npm run lint          # eslint src/**/*.ts
+# Lint
+make lint               # golangci-lint; also: make vet, make fmt
 ```
 
 - ALWAYS run tests after making code changes
@@ -78,12 +71,10 @@ npm run lint          # eslint src/**/*.ts
 
 ## Known Issues
 
-The `known_issues/` directory tracks deferred tech debt and surfaced bugs.
-When a referenced GitHub issue is closed, move the corresponding doc to
-`known_issues/resolved/` (do not delete it) so the rationale is preserved.
-Do this in the same PR that closes the issue. A full sweep of the directory
-should happen at the start of each sprint. Full convention and entry format
-are in `CONTRIBUTING.md` under "Known Issues Sweep".
+This repository has no `known_issues/` directory. Deferred tech debt or
+surfaced bugs found while working here go into this repository's GitHub
+issues instead. See `CONTRIBUTING.md` under "Known Issues Sweep" for the
+full convention (including the cross-component sweep in the platform repo).
 
 ## Post-push CI watcher (MANDATORY — even for one-line fix commits)
 
@@ -229,36 +220,6 @@ set for multi-close PRs).
 - Always validate user input at system boundaries
 - Always sanitize file paths to prevent directory traversal
 - Run `npx @claude-flow/cli@latest security scan` after security-related changes
-
-## CI/CD IAM — bootstrap vs runtime split
-
-The per-cloud `terraform/environments/*/ci-cd-permissions/` modules provision
-the CI/CD deploy identities and are **applied once, manually, by a privileged
-human** — not by the CI workflow itself. The main deploy workflow assumes a
-deploy SA already exists and only has permission to manage workloads. Keep
-this split when adding new IAM:
-
-- **Bootstrap-only permissions** (AWS `iam:*`, Azure RBAC role assignments,
-  GCP `roles/iam.roleAdmin`, `roles/resourcemanager.projectIamAdmin`,
-  `roles/cloudkms.admin`) live in `ci-cd-permissions/`. They let the deploy
-  SA manage its own downstream grants but are not granted to anything
-  ephemeral.
-- **Runtime permissions** for the Lambda / Cloud Run / Container App service
-  accounts are defined in the per-cloud compute module (`modules/compute/
-  {aws,gcp,azure}/...`) with the **narrowest possible scope**. Prefer custom
-  roles (GCP `google_project_iam_custom_role`) or prefixed resource ARNs
-  (AWS `arn:aws:iam::*:role/{prefix}*`) over broad predefined roles like
-  `roles/compute.admin` or `Resource = "*"`.
-- **No silent fallbacks to over-privileged roles.** If a runtime grant
-  requires a bootstrap permission the deploy SA doesn't have, the apply
-  SHOULD 403 — that's the signal to re-run the bootstrap, not to paper over
-  with a wider grant. Fallback flags are allowed only as short-term
-  workarounds and must be removed once the bootstrap has been re-applied.
-- **GCP WIF attribute_condition** in `ci-cd-permissions/github_oidc.tf`
-  restricts which branch can impersonate the deploy SA. Re-applying the
-  module with a different `deploy_ref` (or the default) resets the
-  condition. Pin `deploy_ref` in `terraform.tfvars` (gitignored, per-env)
-  to avoid silently locking out the current feature branch.
 
 ## Concurrency: 1 MESSAGE = ALL RELATED OPERATIONS
 

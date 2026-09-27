@@ -5,9 +5,6 @@
 #
 # Required GitHub Secrets: None (all checks run without cloud credentials)
 #
-# Required GitHub Variables:
-#   - GO_VERSION: Go version to use (default: 1.26.6)
-#
 # Triggered by:
 #   - Pull requests to main/develop
 #   - Pushes to main/develop
@@ -24,9 +21,6 @@ on:
   push:
     branches: [main, develop]
   workflow_dispatch:
-
-env:
-  GO_VERSION: '1.26.6'
 
 jobs:
   lint:
