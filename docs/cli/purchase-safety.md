@@ -1,6 +1,10 @@
 # Purchase Safety
 
-CUDly is designed to be safe by default. Real purchases require multiple explicit opt-ins, and several mechanisms prevent duplicate or unintended buys.
+CUDly is designed to be safe by default. Real purchases require an explicit `--purchase` opt-in, and several mechanisms - coverage limits, a duplicate-purchase check, RDS extended-support filtering, and a full audit trail - guard against unintended or repeated buys. See [Duplicate purchase prevention](#duplicate-purchase-prevention---idempotency-window) below for what that check does and does not cover.
+
+## Automation and AI agents
+
+An AI agent (or any other non-interactive caller) can safely drive discovery, sizing, and filtering: that reads recommendations and existing commitments (for example, `--target-coverage`'s coverage lookup and the duplicate check that runs before every purchase), but never purchases anything on its own. Purchasing is different. `--purchase --yes` executes a real purchase from any invocation - a script, a CI job, or an agent running `cudly` as a subprocess included - because `--yes` skips the confirmation prompt before the interactive-terminal check ever runs. There is currently no automation boundary on the purchase path; [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) tracks closing that gap. Until it lands, treat `--purchase --yes` as unattended purchase automation, and keep it out of anything an agent can trigger on its own.
 
 ## The purchase decision: --purchase
 
@@ -42,8 +46,10 @@ cudly --input-csv recs.csv --purchase
 
 When running in purchase mode (`isDryRun=false`), cudly prints a summary of the total instance count and estimated savings and prompts for confirmation before executing any purchase. Pass `--yes` to skip this prompt in automation.
 
+`--yes` skips the prompt unconditionally - it is not gated on whether the process has a real, interactive terminal. A script, a CI job, or an agent driving `cudly` as a subprocess can pass `--yes` and execute a purchase exactly as a human at a terminal would. Treat `--purchase --yes` as fully unattended purchase automation, not as a convenience for a human who already confirmed elsewhere. See [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) for the tracked work to close this gap.
+
 ```bash
-# Unattended purchase (use with care):
+# Unattended purchase (use with care - see the note above):
 cudly --services rds --purchase --yes
 ```
 
@@ -53,7 +59,7 @@ cudly --services rds --purchase --yes
 --audit-log   string   default: ./cudly-audit.jsonl
 ```
 
-Every recommendation - whether purchased or dry-run - is written as a JSON line to the audit log file before any purchase API call is made. The audit record includes:
+Every recommendation - whether purchased or dry-run - gets a JSON line in the audit log file: the audit log *path* is checked for writability before any cloud API call is made (see below), but each record itself is written right after that recommendation's purchase call returns (immediately, for a dry run). The audit record includes:
 
 - Run ID (UUID that groups all purchases in a single invocation)
 - Recommendation details (service, region, instance type, count, term, payment)
@@ -78,12 +84,16 @@ The default path (`./cudly-audit.jsonl`) writes to the current working directory
 --idempotency-window   string   default: 24h
 ```
 
-This flag is accepted as a Go duration string (e.g. `24h`, `48h`, `1h30m`). The CLI does not validate the string at startup; it stores the raw value but does not yet subtract previously-purchased commitments from new recommendations based on this window. The deduction logic runs in the server-side scheduler path (where the duration IS parsed), not the CLI purchase loop. Passing this flag in CLI invocations has no effect on which recommendations are purchased.
+A duplicate check runs before every purchase, on both the `--services` and `--input-csv` paths: it fetches existing commitments and subtracts anything purchased in the last 24 hours from each recommendation's count, so a retried run doesn't buy the same capacity twice.
 
-The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server path and is not emitted by the CLI.
+That 24-hour lookback is fixed. This flag is accepted as a Go duration string (e.g. `24h`, `48h`, `1h30m`) and stored, but its value is never read by the check - passing `--idempotency-window 72h` (or any other value) has no effect on which recommendations are purchased ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262) tracks wiring it in).
+
+If the existing-commitments lookup itself fails (a transient API error), the check is skipped for that batch and the run continues un-deduplicated, with a warning printed to the log rather than the run stopping ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)). Treat that warning as a signal to check the audit log for the run before trusting its purchase counts.
+
+The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server-side scheduler path and is not emitted by this CLI's dedup check.
 
 ```bash
-# Accepted but currently has no effect on CLI recommendation deduction:
+# The dedup check always runs with a fixed 24h lookback; this flag's value is not applied:
 cudly --services rds --idempotency-window 72h
 ```
 
@@ -127,4 +137,5 @@ Before any real purchase run:
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
-6. Note that `--idempotency-window` does not prevent double-buying in the CLI path; use a dry-run review (run without `--purchase`) and audit-log inspection to guard against retried runs.
+6. Note that `--idempotency-window`'s value is not applied - dedup always uses a fixed 24h lookback ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262)) - and that a failed existing-commitments lookup lets the run proceed un-deduplicated with a warning ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for that warning and check the audit log afterward.
+7. If an AI agent or other automation drives `cudly`, never pass `--yes` to it directly - have the agent hand off the dry-run recommendation to a human, who runs `--purchase` themselves. See [Automation and AI agents](#automation-and-ai-agents).

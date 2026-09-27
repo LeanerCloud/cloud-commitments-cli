@@ -1,8 +1,39 @@
 # CUDly CLI
 
-The CLI discovers cloud commitment recommendations and can purchase AWS Reserved Instances, Savings Plans, and selected Azure and GCP commitments. Amazon RDS and ElastiCache are the tested AWS service paths. Other AWS services, Azure, and GCP support remain experimental.
+CUDly is an open source CLI for discovering and purchasing AWS Reserved Instances and Savings Plans in a single command. It is dry-run by default: nothing is purchased until you pass `--purchase`. `configure-azure` and `configure-gcp` bootstrap credentials for the separate [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform); this CLI's own recommend-and-purchase workflow is AWS-only today. See [cloud setup](docs/cli/cloud-setup.md).
+
+It is also built to be driven by an AI agent for the discovery and analysis side: searching recommendations, sizing a plan, filtering by account or region. The purchase step still needs a human to review the numbers before committing money. **`--yes` currently skips the confirmation prompt outright, including for a non-interactive caller** (a script, a CI job, an agent driving the CLI as a subprocess): see [Safety Features](#safety-features) and [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) before wiring `--purchase --yes` into anything unattended.
 
 The CLI depends on the published shared Go modules in [cloud-commitments-go](https://github.com/LeanerCloud/cloud-commitments-go), pinned to fixed versions in `go.mod`. No sibling checkout or parent workspace is needed for local development.
+
+## Key Features
+
+- **Dry-run by default** - `--purchase` is the only opt-in that moves money; a bare invocation only prints results and writes a CSV.
+- **Grounded recommendations** - sized from AWS Cost Explorer's own recommendation and coverage data, not a locally-guessed baseline.
+- **Multiple AWS services, one interface** - RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB, and Savings Plans through the same command and flags. See [Implementation Status](#implementation-status) for per-service maturity.
+- **Coverage control** - purchase a percentage of what's recommended, or of actual historical usage via `--target-coverage`, instead of buying everything a provider suggests in one run.
+- **CSV + audit log** - every dry run and every purchase is written to CSV and to a permanent JSONL audit log.
+
+## Safety Features
+
+1. **Dry-run by default** - no purchase without the explicit `--purchase` flag.
+2. **Confirmation prompt** - `--purchase` prints a summary of instance count and estimated savings, then prompts for confirmation. `--yes` skips this prompt, including for a non-interactive caller - it is not currently an automation boundary. [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) tracks closing that gap.
+3. **Coverage and instance limits** - `--coverage`, `--target-coverage`, and `--max-instances` shape what a dry run recommends before there is anything to confirm.
+4. **RDS extended-support filtering** - by default, recommendations for instances running an engine version in AWS Extended Support are excluded, since the surcharge can erase RI savings; pass `--include-extended-support` to include them.
+5. **Audit log written per recommendation** - the audit log path is checked for writability before any cloud API call. Each recommendation then gets its own audit record: for a dry run, written as soon as its (local, no-API-call) result is generated; for a real purchase, written after that purchase call returns.
+6. **Permanent CSV exports** of every dry run and every purchase.
+7. **Duplicate-purchase dedup, with a caveat** - every path (`--services` and `--input-csv`) subtracts commitments purchased in the last 24 hours before sizing a recommendation. `--idempotency-window` doesn't change that fixed 24h lookback yet ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262)), and if the existing-commitments API call itself fails, the run continues un-deduplicated with a warning ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)).
+
+Full internals: [Purchase Safety](docs/cli/purchase-safety.md).
+
+## Implementation Status
+
+| AWS service | Status |
+|---|---|
+| RDS, ElastiCache | Production - the tested paths. |
+| EC2, OpenSearch, Redshift, MemoryDB, Savings Plans | Experimental - implemented and functional, still accumulating real-world purchase validation. |
+
+Azure and GCP are not part of this CLI's recommend-and-purchase workflow; `configure-azure` and `configure-gcp` only bootstrap credentials for the [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform).
 
 ## Build
 
@@ -25,24 +56,21 @@ Preview RDS recommendations before enabling a purchase:
 ./cudly --services rds --profile default
 ```
 
-Use `--purchase` to enable a purchase operation. Use `--yes` to skip its confirmation prompt. A terminal prompt is not an automation boundary. Read the purchase-safety guide before using this mode. The CLI's `--idempotency-window` flag does not prevent duplicate purchases in the CLI path; review the dry-run output and audit log before retrying.
-
 Export a reviewable report when you need to share results:
 
 ```bash
 ./cudly --services rds --profile default --output recommendations.csv
 ```
 
-All purchase operations can spend money. Check the account, region, quantity, and selected commitment before confirming.
+All purchase operations can spend money. Check the account, region, quantity, and selected commitment before confirming - see [Safety Features](#safety-features) for what is and is not enforced today.
 
 ## Credentials and provider status
 
-Use the provider's supported credential chain. For AWS, select a profile with `--profile` and validate access before a purchase. Follow the cloud setup guide for Azure and GCP.
+Use the AWS SDK's supported credential chain. Select a profile with `--profile` and validate access before a purchase.
 
-- Amazon RDS and ElastiCache are the tested AWS service paths.
-- Other AWS service paths can change and are not covered by the same maturity claim.
-- Azure and GCP support is experimental and can vary by service and account.
 - Recommendation data and purchase APIs can change outside this repository.
+- See [Implementation Status](#implementation-status) for per-service maturity.
+- `configure-azure` and `configure-gcp` bootstrap credentials for the self-hosted platform, not for this CLI - see [cloud setup](docs/cli/cloud-setup.md).
 
 ## Related components
 
