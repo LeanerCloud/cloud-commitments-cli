@@ -1,6 +1,6 @@
 # Purchase Safety
 
-CUDly is designed to be safe by default. Real purchases require multiple explicit opt-ins, and several mechanisms prevent duplicate or unintended buys.
+CUDly is designed to be safe by default. Real purchases require an explicit `--purchase` opt-in, and several mechanisms - coverage limits, instance-type validation, and a full audit trail - guard against unintended buys. Duplicate-purchase prevention is not one of them today: the CLI path has no idempotency check against previously-purchased commitments (see [Duplicate purchase prevention](#duplicate-purchase-prevention---idempotency-window) below).
 
 ## Automation and AI agents
 
