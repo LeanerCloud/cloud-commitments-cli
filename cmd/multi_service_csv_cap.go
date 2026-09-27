@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/LeanerCloud/CUDly/pkg/common"
-	"github.com/LeanerCloud/CUDly/pkg/scorer"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/scorer"
 )
 
 // scoreAndLimitCSVRecs enforces --min-count and the run-wide --max-instances

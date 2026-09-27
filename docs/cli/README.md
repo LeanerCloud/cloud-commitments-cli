@@ -6,8 +6,6 @@ This section documents the full CLI surface of the `cudly` binary. The Makefile 
 - **configure-azure** - bootstrap Azure Service Principal credentials
 - **configure-gcp** - bootstrap GCP Service Account credentials
 
-`rekey` and `server` are separate binaries with their own entry points and are not covered here.
-
 ## Topic pages
 
 | Page | Covers |

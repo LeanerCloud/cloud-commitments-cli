@@ -1,6 +1,6 @@
-# Contributing to CUDly
+# Contributing to the CUDly CLI
 
-Thank you for your interest in contributing to CUDly! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to CUDly! This document provides guidelines and instructions for contributing to the CLI component.
 
 ## Code of Conduct
 
@@ -12,7 +12,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 1. **Search existing issues** - Check if the bug has already been reported
 2. **Create a detailed report** including:
-   - CUDly version (`./cudly --version`)
+   - CUDly version (`./cudly --help`)
    - Go version (`go version`)
    - Operating system and architecture
    - Cloud provider and service affected
@@ -49,36 +49,31 @@ By participating in this project, you agree to maintain a respectful and inclusi
 ### Prerequisites
 
 - Go 1.26.6 or later (the floor set by the `go` directive in `go.mod`)
-- AWS/Azure/GCP credentials for integration testing
 - Git
 
 ### Getting Started
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR_USERNAME/CUDly.git
-cd CUDly
+git clone https://github.com/YOUR_USERNAME/cloud-commitments-cli.git
+cd cloud-commitments-cli
 
 # Add upstream remote
-git remote add upstream https://github.com/LeanerCloud/CUDly.git
+git remote add upstream https://github.com/LeanerCloud/cloud-commitments-cli.git
 
 # Install dependencies
 go mod download
 
-# Build the project
-go build -o cudly cmd/*.go
+# Build
+make build
 
-# Run tests
-go test ./...
+# Run the unit tests
+make test-unit
 ```
 
 ### Go workspace and worktrees (gopls setup)
 
-The repo ships a `go.work` that lists every module in this repository (the
-root module, `pkg`, the three provider modules, and `tests/e2e`). This is
-enough for standard clones. When you are working across multiple git worktrees
-simultaneously, gopls needs each worktree's module added to the workspace or it
-flags every file in the sibling trees with `BrokenImport` / `undefined: <Type>`.
+The repo ships a `go.work` that lists only this repository's own module. The shared libraries and providers are consumed at the versions pinned in `go.mod`, so there is nothing else to set up for a standard clone. When you are working across multiple git worktrees simultaneously, gopls needs each worktree's module added to the workspace or it flags every file in the sibling trees with `BrokenImport` / `undefined: <Type>`.
 
 **Do not edit the committed `go.work`** for local paths -- they vary per
 developer and per session.
@@ -94,13 +89,8 @@ go 1.26.6
 
 use (
     .
-    ./pkg
-    ./providers/aws
-    ./providers/azure
-    ./providers/gcp
-    ./tests/e2e
-    ../.worktrees/CUDly/fix-516
-    ../.worktrees/CUDly/feat-something
+    ../.worktrees/cloud-commitments-cli/fix-516
+    ../.worktrees/cloud-commitments-cli/feat-something
 )
 ```
 
@@ -125,19 +115,26 @@ git worktree list --porcelain | sed -n 's/^worktree //p' | tail -n +2 |
 ```
 
 The committed `go.work` (listing only this repository's own modules) keeps
-`go build ./...` and CI clean for everyone without requiring any local setup.
+`go vet ./...`, `go test ./...`, and CI clean for everyone without requiring
+any local setup. Note that `go build ./...` is not a valid way to build this
+repo: `cmd/` is the only main package, and Go's default output name for a
+lone main package collides with the `cmd` directory itself. Use `make build`
+or `go build -o cudly ./cmd` instead (see "Getting Started" above).
 
 ### Running Tests
 
 ```bash
-# Run all tests
-go test ./...
+# Run the unit tests
+make test-unit
+
+# The same suite, invoked directly
+go test -short -race ./...
 
 # Run tests with coverage
 go test -cover ./...
 
 # Run tests for a specific package
-go test ./providers/aws/...
+go test ./cmd/...
 
 # Run tests with verbose output
 go test -v ./...
@@ -152,10 +149,7 @@ We aim to maintain the following minimum test coverage:
 
 | Package | Minimum Coverage |
 |---------|-----------------|
-| Service clients | 80% |
-| Provider implementations | 70% |
-| Common/shared packages | 80% |
-| CLI/cmd | 60% |
+| CLI commands | 60% |
 
 ## Coding Standards
 
@@ -200,38 +194,31 @@ We aim to maintain the following minimum test coverage:
 ## Project Structure
 
 ```text
-CUDly/
-├── cmd/                      # CLI entry point
-├── pkg/                      # Shared packages
-│   ├── common/              # Cloud-agnostic types
-│   └── provider/            # Provider abstraction
-├── providers/               # Cloud implementations
-│   ├── aws/                 # AWS provider
-│   │   ├── services/        # Service clients
-│   │   └── internal/        # Internal packages
-│   ├── azure/               # Azure provider
-│   └── gcp/                 # GCP provider
-└── internal/                # Private packages
+cloud-commitments-cli/
+├── cmd/                      # CLI entry point, commands, and helpers
+├── docs/                     # CLI documentation
+├── scripts/                  # Repository hook and helper scripts
+├── go.mod                    # Pins the shared modules from cloud-commitments-go
+└── Makefile                  # build, test, vet, and lint targets
 ```
 
 ### Adding a New Service
 
-1. Create the service client in `providers/<cloud>/services/`
-2. Implement the `ServiceClient` interface from `pkg/provider`
-3. Register the service in the provider's `GetServiceClient` method
-4. Add recommendations support if applicable
-5. Write comprehensive tests
-6. Update documentation
+Service clients live in `github.com/LeanerCloud/cloud-commitments-go`. In this
+repository:
+
+1. Add the service's command and flags in `cmd/`
+2. Reuse the service client from the pinned provider module
+3. Register the service in the CLI's service selection
+4. Write comprehensive tests
+5. Update `docs/`
 
 ### Adding a New Cloud Provider
 
-1. Create a new directory under `providers/`
-2. Implement the `Provider` interface from `pkg/provider`
-3. Implement required service clients
-4. Register the provider using `provider.RegisterProvider()` in `init()`
-5. Add authentication documentation
-6. Write comprehensive tests
-7. Update README with new provider information
+Provider implementations live in `github.com/LeanerCloud/cloud-commitments-go`
+(`providers/aws`, `providers/azure`, `providers/gcp`). Open the change there.
+This repository consumes providers at the versions pinned in `go.mod`, so
+bumping that pin is the only change needed here.
 
 ## Commit Guidelines
 
@@ -295,9 +282,10 @@ the first page. Now properly iterates all pages.
 
 ## Known Issues Sweep
 
-The `known_issues/` directory tracks open tech debt, deferred fixes, and
-surfaced bugs that are out of scope for the current PR. To stay useful, it
-needs periodic housekeeping.
+This repository has no `known_issues/` directory. Deferred work found while
+reviewing a change here belongs in this repository's GitHub issues. The
+cross-component sweep, which covers `known_issues/` in the platform repository,
+is documented there.
 
 ### Entry format
 

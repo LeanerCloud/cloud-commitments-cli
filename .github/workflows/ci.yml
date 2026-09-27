@@ -5,9 +5,6 @@
 #
 # Required GitHub Secrets: None (all checks run without cloud credentials)
 #
-# Required GitHub Variables:
-#   - GO_VERSION: Go version to use (default: 1.26.6)
-#
 # Triggered by:
 #   - Pull requests to main/develop
 #   - Pushes to main/develop
@@ -25,13 +22,7 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
-env:
-  GO_VERSION: '1.26.6'
-  DOCKER_BUILDKIT: 1
-  COMPOSE_DOCKER_CLI_BUILD: 1
-
 jobs:
-  # Go code linting
   lint:
     name: Lint Code
     runs-on: ubuntu-latest
@@ -46,7 +37,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
       - name: Run golangci-lint
@@ -78,22 +69,6 @@ jobs:
           fi
           echo "✅ All functions have acceptable cyclomatic complexity (≤10)"
 
-  # GitHub Actions workflow linting
-  #
-  # Nothing else in this repo reads .github/workflows/ for defects. govulncheck
-  # and gosec are Go source scanners, trivy-config targets Terraform/Dockerfile/
-  # Kubernetes, and check-yaml only proves the YAML parses. That gap is why the
-  # rollback.yml and deploy-aws-lambda.yml expression injections (#1542, #1649),
-  # both reaching production cloud credentials, passed every CI run.
-  #
-  # Both linters are needed and neither substitutes for the other:
-  #   - actionlint catches workflow-level defects and, via shellcheck, shell
-  #     bugs inside run: blocks.
-  #   - zizmor has a template-injection audit that names the injection itself.
-  #     Measured against the pre-fix rollback.yml, actionlint exited 1 only on
-  #     unrelated SC2086 noise and never flagged the injected heredoc at all;
-  #     zizmor flagged that exact line high severity, high confidence. actionlint
-  #     alone would not have caught the bug this job exists to prevent.
   workflow-lint:
     name: Lint Workflows
     runs-on: ubuntu-latest
@@ -201,52 +176,24 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
         run: |
-          # Multi-module repo: `go mod download` resolves the current module
-          # only, so running it at the root left pkg/ and providers/* unverified
-          # (issue #1751). Mirror the govulncheck per-module loop below.
           set -e
-          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+          for mod in .; do
             echo "==> go mod download/verify in $mod"
             (cd "$mod" && go mod download && go mod verify)
           done
 
       - name: Run unit tests (all modules)
         run: |
-          # Multi-module repo: each ./... only walks the current module, so
-          # running from the root alone never compiled or asserted pkg/,
-          # providers/* or tests/e2e -- roughly 1600 test functions that had
-          # never gated a merge (issue #1751). Mirror the govulncheck and gosec
-          # per-module loops, collect one coverage profile per module, then
-          # merge for the upload steps below.
-          #
-          # A failing module must not abort the loop. Aborting would hide every
-          # later module's result behind the first failure, which is the same
-          # shape as the gosec bug in issue #1717. Guard each run, record the
-          # status, and fail at the end so every module is reported.
           set -uo pipefail
           status=0
-          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+          for mod in .; do
             tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
             log="$RUNNER_TEMP/unit-${tag}.log"
-            # tests/e2e holds only //go:build e2e files, so `go test ./...`
-            # there matches no packages and exits 1 -- it cannot be run like the
-            # others. Its tests need the running stack and are executed by the
-            # e2e-tests job over docker compose; what this job can add is a
-            # type-check under that tag, which nothing else here does. Handled
-            # by name, not by a pattern, so the difference is visible in review.
-            if [ "$mod" = "tests/e2e" ]; then
-              echo "==> type-check $mod under -tags=e2e (tests run in the e2e-tests job)"
-              if ! (cd "$mod" && go vet -tags=e2e ./...) 2>&1 | tee "$log"; then
-                echo "::error::$mod failed to type-check under -tags=e2e"
-                status=1
-              fi
-              continue
-            fi
             echo "==> unit tests in $mod"
             # Profiles go to $RUNNER_TEMP, not the checkout: never leave working
             # files in the repository root (repo coding guideline).
@@ -267,19 +214,12 @@ jobs:
             fi
           done
 
-          # Merge the per-module profiles into the single file the steps below
-          # expect. A Go profile is one "mode:" header followed by block lines,
-          # so keep one header and concatenate the bodies.
           shopt -s nullglob
           profiles=("$RUNNER_TEMP"/coverage-*.out)
           if [ "${#profiles[@]}" -eq 0 ]; then
             echo "::error::no module produced a coverage profile" >&2
             exit 1
           fi
-          # Take the mode header from the first profile rather than hardcoding
-          # it: go test picks the default covermode itself (atomic whenever
-          # -race is on), so a literal here would silently mislabel the merge if
-          # the flags change.
           merged="$RUNNER_TEMP/coverage.out"
           head -n 1 "${profiles[0]}" > "$merged"
           for p in "${profiles[@]}"; do
@@ -317,73 +257,12 @@ jobs:
             echo "::warning::Coverage is below 80% (current: ${coverage}%)"
           fi
 
-  mcp-build:
-    name: Build MCP (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            binary_format: ELF
-          - os: macos-latest
-            binary_format: Mach-O
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Assert MCP artifact is absent
-        run: test ! -e bin/cudly-mcp
-
-      - name: Build MCP
-        run: make build-mcp VERSION=v0.0.0-version-test
-
-      - name: Assert host-native binary format
-        run: file bin/cudly-mcp | grep -F '${{ matrix.binary_format }}'
-
-      - name: Verify Make-built MCP version
-        env:
-          CUDLY_MCP_TEST_BINARY: ${{ github.workspace }}/bin/cudly-mcp
-        run: go test ./cmd/cudly-mcp -run '^TestBuiltBinaryReportsInjectedVersion$' -count=1
-
-      - name: Assert clean target includes MCP artifact
-        run: make -n clean | grep -Fx 'rm -f cudly bootstrap bin/cudly-server bin/cudly-mcp'
-
-  # Integration tests with real PostgreSQL
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
-    services:
-      postgres:
-        # Pinned by digest for the same reason as the linter images below: a
-        # floating tag lets the service container change under an unchanged
-        # repo, which is how #1695 turned main red.
-        image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
-        env:
-          POSTGRES_DB: cudly_test
-          POSTGRES_USER: cudly_test
-          POSTGRES_PASSWORD: test_password  # CI-only throwaway password — not used in any real environment
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
@@ -393,65 +272,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: true
 
-      - name: Install golang-migrate
-        run: |
-          # -tags 'pgx5', matching the Dockerfile and the library import in
-          # internal/database/postgres/migrations: the postgres tag links
-          # lib/pq, which carries unfixable advisories (issue #1849). No
-          # @version suffix: installed as a package of this module, so the
-          # version and dependency set come from go.mod.
-          go install -tags 'pgx5' github.com/golang-migrate/migrate/v4/cmd/migrate
-
-      - name: Run database migrations
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_NAME: cudly_test
-          DB_USER: cudly_test
-          DB_PASSWORD: test_password  # CI-only throwaway password — not used in any real environment
-        run: |
-          if [ -d "internal/database/postgres/migrations" ]; then
-            migrate -path internal/database/postgres/migrations \
-              -database "pgx5://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
-              up
-          fi
-
       - name: Run integration tests
-        env:
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_NAME: cudly_test
-          DB_USER: cudly_test
-          DB_PASSWORD: test_password  # CI-only throwaway password — not used in any real environment
-          DB_SSL_MODE: disable
         run: |
-          # Same multi-module gap as the unit job (issue #1751): a bare ./...
-          # here only ever walked the root module. Mirror the same loop.
-          #
-          # Note that -tags=integration ADDS a build tag rather than selecting
-          # only tagged files, so each module runs its untagged tests too. Today
-          # every //go:build integration file lives in the root module, so for
-          # pkg/ and providers/* this run is a compile-under-tag check plus a
-          # re-run of their unit tests. That is the point: it is what makes an
-          # integration test added to those modules later actually gate.
           set -uo pipefail
           status=0
-          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+          for mod in .; do
             tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
             log="$RUNNER_TEMP/integration-${tag}.log"
-            # See the unit job: tests/e2e has no package to test without its own
-            # tag, so it gets a type-check here too rather than a run.
-            if [ "$mod" = "tests/e2e" ]; then
-              echo "==> type-check $mod under -tags=e2e (tests run in the e2e-tests job)"
-              if ! (cd "$mod" && go vet -tags=e2e ./...) 2>&1 | tee "$log"; then
-                echo "::error::$mod failed to type-check under -tags=e2e"
-                status=1
-              fi
-              continue
-            fi
             echo "==> integration tests in $mod"
             if ! (cd "$mod" && go test -v -race -tags=integration \
                     -coverprofile="$RUNNER_TEMP/coverage-integration-${tag}.out" \
@@ -467,7 +297,6 @@ jobs:
             fi
           done
 
-          # Merge per-module profiles for the upload step (see the unit job).
           shopt -s nullglob
           profiles=("$RUNNER_TEMP"/coverage-integration-*.out)
           if [ "${#profiles[@]}" -eq 0 ]; then
@@ -489,126 +318,6 @@ jobs:
           path: ${{ runner.temp }}/coverage-integration.out
           retention-days: 30
 
-  # Docker image build test
-  docker-build:
-    name: Build Docker Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Build Docker image
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: .
-          push: false
-          # Export the built image into the local docker image store so the
-          # scan step below inspects the artifact this job just produced,
-          # rather than rebuilding one and hoping it is the same.
-          load: true
-          tags: cudly:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            VERSION=${{ github.sha }}
-
-      - name: Test Docker image
-        run: |
-          docker build -t cudly:test .
-          docker run --rm cudly:test /app/cudly --version || true
-          docker run --rm cudly:test /app/cudly --help || true
-
-      # Nothing else in the pipeline looks at the artifact: govulncheck runs in
-      # source mode, and Trivy runs with scan-type fs and config, all against
-      # the repository. A vulnerable binary baked into the image was invisible
-      # by construction, which is how #1833 shipped twice (issue #1836). These
-      # steps live in this job rather than a new one so the image is scanned
-      # without being built a third time; docker-build is already in
-      # ci-success's needs, so the gate is wired.
-      - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Install govulncheck
-        run: |
-          # Same pin as the security-scan job: a govulncheck release with new
-          # detection logic must not silently change this gate's verdict
-          # between PRs.
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-
-      - name: Run image scan self-tests
-        # Asserts both directions of the verdict against recorded govulncheck
-        # output, so a scanner that can no longer fail cannot ship as coverage.
-        run: bash scripts/test-scan-shipped-image.sh
-
-      - name: Scan the shipped image for Go advisories
-        run: bash scripts/scan-shipped-image.sh cudly:${{ github.sha }}
-
-  # Terraform validation for all environments
-  terraform-validate:
-    name: Validate Terraform (${{ matrix.cloud }})
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        cloud: [aws, gcp, azure]
-      fail-fast: false
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          # Must satisfy `required_version = ">= 1.10.0"` declared by every
-          # terraform/environments/*/main.tf -- pinning below 1.10 makes
-          # `terraform init`/`validate` abort with "Unsupported Terraform
-          # Core version". Matches the pin in pre-commit.yml so both
-          # workflows resolve to the same binary.
-          terraform_version: 1.10.5
-
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive terraform/
-
-      - name: Terraform Init
-        run: |
-          cd terraform/environments/${{ matrix.cloud }}
-          terraform init -backend=false
-
-      - name: Terraform Validate
-        run: |
-          cd terraform/environments/${{ matrix.cloud }}
-          terraform validate
-
-      - name: Validate environment tfvars files
-        run: |
-          cd terraform/environments/${{ matrix.cloud }}
-          for env in dev staging prod; do
-            # Check local tfvars if present
-            if [ -f "${env}.tfvars" ]; then
-              echo "Checking ${env}.tfvars syntax..."
-              terraform fmt -check "${env}.tfvars" || echo "Note: ${env}.tfvars may need formatting"
-            fi
-            # Check GitHub CI/CD tfvars
-            if [ -f "github-${env}.tfvars" ]; then
-              echo "Checking github-${env}.tfvars syntax..."
-              terraform fmt -check "github-${env}.tfvars" || echo "Note: github-${env}.tfvars may need formatting"
-            fi
-          done
-
-  # Security scanning
   security-scan:
     name: Security Scanning
     runs-on: ubuntu-latest
@@ -627,16 +336,10 @@ jobs:
         id: setup_go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Run govulncheck CVE scanner (all modules)
-        # always(): each scanner step below is independent evidence for the
-        # Security tab. Without this, one scanner failing (e.g. a live npm
-        # advisory) skips every scanner after it in the same job, silently
-        # disabling Go SAST and Terraform IaC coverage repo-wide. The job
-        # still fails overall if any scanner step here fails. Still requires
-        # checkout and Go setup to have actually succeeded -- an infra
-        # failure there must not be papered over as "scanner found nothing".
+        # Independent scanners still run after another scanner fails.
         if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success'
         run: |
           # Pinned (not @latest): a govulncheck release with new
@@ -644,28 +347,16 @@ jobs:
           # between PRs without an intentional bump in this repo.
           # Bumping is a deliberate review item, not a drift.
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          # Multi-module repo: each ./... only walks the current module,
-          # so scanning the root would silently miss pkg/ and providers/*.
-          # Walk every module independently and fail on any HIGH/CRITICAL.
+          # Scan each owned module independently.
           set -e
-          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+          for mod in .; do
             echo "==> govulncheck in $mod"
             (cd "$mod" && govulncheck ./...)
           done
 
-      - name: Run npm audit (frontend)
-        # always(): must not skip the scanners below it just because
-        # govulncheck failed, and its own failure must not skip gosec/Trivy.
-        # Still requires checkout to have succeeded (see govulncheck above).
-        if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success'
-        run: |
-          if [ -f frontend/package.json ]; then
-            cd frontend && npm audit --audit-level=high
-          fi
-
       - name: Run gosec Security Scanner
         id: gosec
-        # always(): don't let an earlier scanner's failure (e.g. npm audit)
+        # always(): don't let an earlier scanner's failure (e.g. govulncheck)
         # skip Go SAST coverage. The job still fails if gosec itself fails.
         # Still requires checkout and Go setup to have succeeded.
         if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success'
@@ -674,20 +365,10 @@ jobs:
           # The securego/gosec Docker action bundles its own Go toolchain which
           # cannot satisfy the module's go directive, causing a toolchain mismatch.
           go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
-          # Multi-module repo: each ./... only walks the current module so scanning root
-          # alone silently misses pkg/ and providers/*. Mirror the govulncheck per-module
-          # loop, collect per-module SARIF, then merge for the upload step.
-          #
-          # gosec exits non-zero both for real findings and for a processing
-          # error. A bare `set -e` loop aborts at the first non-zero module,
-          # skipping the merge below entirely -- the upload step then fails
-          # on a missing file instead of surfacing the actual finding
-          # (issue #1717). Guarding the gosec call in `if ! ( ... )` exempts
-          # it from errexit so every module still gets scanned and merged;
-          # `status` records whether the job should still fail at the end.
+          # Scan each owned module independently.
           set -e
           status=0
-          for mod in . pkg providers/aws providers/azure providers/gcp tests/e2e; do
+          for mod in .; do
             tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
             out="$RUNNER_TEMP/gosec-${tag}.sarif"
             echo "==> gosec in $mod"
@@ -738,10 +419,7 @@ jobs:
 
       - name: Run Trivy vulnerability scanner (filesystem)
         id: trivy_fs
-        # always(): don't let an earlier scanner's failure skip Trivy fs
-        # coverage. This scan uses the default exit-code 0 (see the IaC
-        # scan comment below), so it does not gate the job on its own.
-        # Still requires checkout and Go setup to have succeeded.
+        # Filesystem findings remain advisory; scanner execution is required.
         if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -752,12 +430,7 @@ jobs:
           # save working files in the repository root).
           output: '${{ runner.temp }}/trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
-          # Pin the Trivy binary independently of the action SHA. v0.36.0 is
-          # the latest trivy-action release but bundles Trivy v0.70.0, which
-          # panics in adaptDefaultTags on terraform/environments/aws/main.tf
-          # (null default_tags vars). Fixed in Trivy >= v0.72.0. The action
-          # forwards this input to aquasecurity/setup-trivy, so both scan
-          # steps run the same pinned binary. Keep both steps on this version.
+          # Keep the existing scanner binary pinned.
           version: 'v0.72.0'
 
       - name: Upload Trivy results to GitHub Security
@@ -767,45 +440,6 @@ jobs:
         with:
           sarif_file: '${{ runner.temp }}/trivy-results.sarif'
 
-      # Terraform IaC misconfiguration scanning. Replaces the deprecated
-      # aquasecurity/tfsec-action, whose bundled HCL parser rejects Terraform
-      # 1.5+ `check {}` blocks (e.g. terraform/modules/deployment-checks/main.tf)
-      # with a hard "scan failed" parse error that soft_fail does not suppress
-      # (soft_fail only downgrades findings, not scan errors). Trivy is tfsec's
-      # official successor, parses `check {}` blocks, and (like the fs scan
-      # above) uses the default exit-code 0 so misconfig findings are reported
-      # to the Security tab without gating the job -- matching tfsec's prior
-      # soft_fail: true behaviour while preserving Terraform IaC coverage.
-      - name: Run Trivy IaC misconfiguration scanner (Terraform)
-        id: trivy_iac
-        # always(): don't let an earlier scanner's failure skip Terraform
-        # IaC coverage. Still requires checkout and Go setup to have
-        # succeeded.
-        if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: 'config'
-          scan-ref: 'terraform/'
-          format: 'sarif'
-          # $RUNNER_TEMP, not the checkout root (repo coding guideline: never
-          # save working files in the repository root).
-          output: '${{ runner.temp }}/trivy-config-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          # Same pinned Trivy binary as the filesystem scan above (>= v0.72.0
-          # avoids the adaptDefaultTags panic on null default_tags vars).
-          version: 'v0.72.0'
-
-      - name: Upload Trivy IaC results to GitHub Security
-        # Tolerate a missing SARIF only when the Trivy IaC step never ran.
-        if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success' && steps.trivy_iac.outcome != 'skipped'
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
-        with:
-          sarif_file: '${{ runner.temp }}/trivy-config-results.sarif'
-          # Distinct category so this IaC analysis does not overwrite the
-          # filesystem Trivy analysis uploaded above (both report as "Trivy").
-          category: 'trivy-iac'
-
-  # Snyk security scanning
   snyk-scan:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
@@ -822,7 +456,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/golang@b98d498629f1c368650224d6d212bf7dfa89e4bf # 0.4.0
@@ -832,272 +466,25 @@ jobs:
         with:
           args: --severity-threshold=high
 
-  # Docker Compose E2E tests: build the app + test-runner images, bring up
-  # postgres + cudly-app, then run the black-box suite in tests/e2e against
-  # the app over HTTP. The test-runner service is profile-gated, so every
-  # compose invocation needs --profile test (issue #1180).
-  e2e-tests:
-    name: E2E Tests
+  cli-build:
+    name: Build CLI
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Build images
-        run: |
-          docker compose -f docker-compose.test.yml --profile test build
-
-      - name: Run E2E tests with docker compose
-        run: |
-          docker compose -f docker-compose.test.yml --profile test up --abort-on-container-exit --exit-code-from test-runner
-        env:
-          COMPOSE_INTERACTIVE_NO_CLI: 1
-
-      - name: Cleanup
-        if: always()
-        run: |
-          docker compose -f docker-compose.test.yml --profile test down -v
-
-  # Assert that the Azure custom-role actions list is identical in the TF module
-  # and the ARM onboarding template.  Fast (shell + jq only), so it always runs.
-  # Path changes that trigger drift will be caught regardless of PR context.
-  azure-role-parity:
-    name: Azure role actions parity (ARM vs TF)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          persist-credentials: false
+          go-version-file: go.mod
+      - name: Build CLI
+        run: make build
+      - name: Check CLI help
+        run: ./cudly --help
 
-      - name: Assert ARM/TF actions parity
-        run: bash scripts/check-azure-role-parity.sh
-
-      - name: Run parity script self-tests
-        run: bash scripts/test-azure-role-parity.sh
-
-  # Assert that the AWS IAM action lists are identical across the CFN stack,
-  # the TF lambda/fargate modules, and the federation CFN/TF/CLI templates.
-  # Fast (shell only), so it always runs.
-  aws-iam-parity:
-    name: AWS IAM actions parity (CFN vs TF)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Assert CFN/TF actions parity
-        run: bash scripts/check-aws-iam-parity.sh
-
-      - name: Run parity script self-tests
-        run: bash scripts/test-aws-iam-parity.sh
-
-  # Assert that no Terraform file grants a Secret Manager role at project,
-  # folder or organization scope; those scopes hand the member every secret in
-  # the scope. Fast (shell only), so it always runs.
-  gcp-secret-scope:
-    name: GCP Secret Manager grant scope
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Assert no scope-wide Secret Manager grants
-        run: bash scripts/check-gcp-secret-scope.sh
-
-      - name: Run guard script self-tests
-        run: bash scripts/test-gcp-secret-scope.sh
-
-  # Assert that the ECR repository selector used by destroy-fargate-dev.yml and
-  # cleanup-staging.yml picks the repository each state owns and nothing else.
-  # The consumers force-delete what the selector prints, so both directions are
-  # asserted: over-matching deletes images the workflow does not own, and
-  # matching nothing leaves that state's repository behind. The suite also
-  # asserts the wiring, which is what #1592 and #1820 each escaped: all three
-  # destroy steps still call scripts/force-delete-owned-ecr-repo.sh, that script
-  # still deletes only what the selector yields, and nothing else under
-  # .github/workflows or scripts/ runs `aws ecr delete-repository` unguarded.
-  # That last claim is checked over a GLOB of both directories, not a list of
-  # known files, so a script added later is covered without anyone remembering
-  # to name it; the sweep is asserted to have opened a non-zero number of files
-  # first, since an empty swept set has no violations either.
-  # Fast (shell only), so it always runs.
-  ecr-delete-selection:
-    name: ECR delete selection scope
-    runs-on: ubuntu-latest
-    # This job checks out the tree and runs a shell script against it, so
-    # `contents: read` is all it needs. Same shape as security-scan above,
-    # which adds `security-events: write` only because it uploads SARIF.
-    # ci.yml now also declares `contents: read` at workflow level, so this
-    # block narrows nothing on its own; it is kept explicit so the job states
-    # its own requirement rather than inheriting silently.
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run selector self-tests
-        run: bash scripts/test-ecr-delete-selection.sh
-
-  # Assert that the RDS instance selector used by destroy-fargate-dev.yml and
-  # cleanup-staging.yml unprotects the instance each state owns and nothing
-  # else. Deletion protection is the last line of defence on a database, so
-  # stripping it from an instance a state does not own leaves that database
-  # exposed to the next destroy that does match it. Both directions are
-  # asserted: a prefix near-miss is refused, and the owned instance is still
-  # selected, since a selector matching nothing passes every refusal assertion
-  # while leaving the destroy broken. The suite also asserts the wiring, which
-  # is what #1592, #1820 and #1821 each escaped: all three destroy steps call
-  # scripts/disable-owned-rds-deletion-protection.sh, that script unprotects
-  # only what the selector yields and swallows nothing, and nothing else under
-  # .github/workflows or scripts/ runs `aws rds modify-db-instance` unguarded.
-  # That last claim is checked over a GLOB of both directories, not a list of
-  # known files, so a script added later is covered without anyone remembering
-  # to name it; the sweep is asserted to have opened a non-zero number of files
-  # first, since an empty swept set has no violations either.
-  # It additionally runs the script end to end against stubbed terraform and aws,
-  # so "a failed strip is not swallowed" is asserted as behaviour, not as text.
-  # Fast (shell only), so it always runs.
-  rds-deletion-protection-scope:
-    name: RDS deletion protection scope
-    runs-on: ubuntu-latest
-    # Same shape as ecr-delete-selection above: this job checks out the tree and
-    # runs a shell script against it, so `contents: read` is all it needs.
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run RDS scope self-tests
-        run: bash scripts/test-rds-deletion-protection-scope.sh
-
-  # Assert that the Cloud SQL instance selector used by cleanup-staging.yml's
-  # destroy-gcp job deletes the instance the staging state owns and nothing
-  # else. deletion_protection = true on that instance means a selector that
-  # matches nothing leaves it behind and the destroy fails on it; a selector
-  # that over-matches deletes a database this state never owned. Both
-  # directions are asserted: every near-miss name is refused, and the owned
-  # instance is still selected out of a hostile listing first, since a
-  # selector matching nothing passes every refusal assertion while leaving
-  # the destroy broken. The suite also asserts the wiring, which is what
-  # #1592, #1820 and #1821 each escaped on other resources: the destroy step
-  # calls scripts/delete-owned-cloud-sql-instance.sh, that script lists
-  # instances with no `--filter` and deletes only what the selector yields,
-  # the three `terraform state rm` calls are module-qualified and run only
-  # after a successful delete, and nothing else under .github/workflows or
-  # scripts/ runs `gcloud sql instances delete` unguarded. That last claim is
-  # checked over a GLOB of both directories, not a list of known files, so a
-  # script added later is covered without anyone remembering to name it; the
-  # sweep is asserted to have opened a non-zero number of files first, since
-  # an empty swept set has no violations either.
-  # It additionally runs the script end to end against stubbed terraform and
-  # gcloud, so "a failed delete is not swallowed" and "state is removed only
-  # after a successful delete" are asserted as behaviour, not as text.
-  # Fast (shell only), so it always runs.
-  cloud-sql-delete-scope:
-    name: Cloud SQL delete selection scope
-    runs-on: ubuntu-latest
-    # Same shape as ecr-delete-selection above: this job checks out the tree and
-    # runs a shell script against it, so `contents: read` is all it needs.
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run Cloud SQL scope self-tests
-        run: bash scripts/test-cloud-sql-delete-scope.sh
-
-  # Assert that every job applying a `compute_platform` writes the Terraform
-  # state namespace that platform owns: `compute_platform=lambda` into
-  # github-<env>/, `compute_platform=fargate` into github-fargate-<env>/. The
-  # AWS environment is one Terraform root applied twice into two state objects,
-  # nothing in Terraform ties the backend key to the platform, and a job that
-  # pairs them wrongly initialises, plans and applies cleanly while rewriting
-  # the other platform's stack and recording it in the wrong state file. That
-  # was #1811, where rollback.yml's Fargate rollback keyed on the Lambda
-  # namespace, so both rollback jobs wrote the same object. A workflow run
-  # proves nothing about this, so the pairing is asserted as text.
-  # Both directions are asserted, and the positive one first: the seven real
-  # pairings are named and checked before any absence, since a scan that
-  # recognizes no state-writing job has no violations either. The negative half
-  # is checked over a GLOB of .github/workflows and scripts/, not a list of
-  # known files, so a job added later is covered without anyone naming it.
-  # Fast (shell only), so it always runs.
-  aws-tfstate-platform-key:
-    name: AWS Terraform state namespace per platform
-    runs-on: ubuntu-latest
-    # Same shape as ecr-delete-selection above: this job checks out the tree and
-    # runs a shell script against it, so `contents: read` is all it needs.
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run state namespace self-tests
-        run: bash scripts/test-aws-tfstate-platform-key.sh
-
-  # Assert that no Terraform file declares an azurerm_key_vault_access_policy
-  # resource. This project's only Key Vault sets enable_rbac_authorization =
-  # true, and an RBAC-enabled vault ignores access policies entirely, so such a
-  # grant applies cleanly and then does nothing at runtime (#1621). The nested
-  # `access_policy` block form is deliberately not covered; #1839 tracks it.
-  # Fast (shell only), so it always runs.
-  azure-kv-access-policy:
-    name: Azure Key Vault grant model
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-        with:
-          persist-credentials: false
-
-      - name: Assert no Key Vault access policies
-        run: bash scripts/check-azure-kv-access-policy.sh
-
-      - name: Run guard script self-tests
-        run: bash scripts/test-azure-kv-access-policy.sh
-
-  # Summary job - all checks must pass
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
@@ -1105,20 +492,9 @@ jobs:
       - lint
       - workflow-lint
       - unit-tests
-      - mcp-build
       - integration-tests
-      - docker-build
-      - terraform-validate
       - security-scan
-      - e2e-tests
-      - azure-role-parity
-      - aws-iam-parity
-      - gcp-secret-scope
-      - ecr-delete-selection
-      - rds-deletion-protection-scope
-      - cloud-sql-delete-scope
-      - aws-tfstate-platform-key
-      - azure-kv-access-policy
+      - cli-build
     if: always()
     permissions:
       contents: read

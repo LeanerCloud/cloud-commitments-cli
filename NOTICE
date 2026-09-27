@@ -66,28 +66,3 @@ Go standard library extensions      BSD-3-Clause
 YAML v3                             MIT / Apache-2.0
   gopkg.in/yaml.v3
   https://github.com/go-yaml/yaml/blob/v3/LICENSE
-
-========================================================================
-Frontend Dependencies (from frontend/package.json)
-========================================================================
-
-Chart.js                            MIT
-  https://github.com/chartjs/Chart.js/blob/master/LICENSE.md
-
-webpack                             MIT
-  https://github.com/webpack/webpack/blob/main/LICENSE
-
-TypeScript                          Apache-2.0
-  https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt
-
-Jest                                MIT
-  https://github.com/jestjs/jest/blob/main/LICENSE
-
-Testing Library                     MIT
-  https://github.com/testing-library/dom-testing-library/blob/main/LICENSE
-
-ESLint                              MIT
-  https://github.com/eslint/eslint/blob/main/LICENSE
-
-Babel                               MIT
-  https://github.com/babel/babel/blob/main/LICENSE

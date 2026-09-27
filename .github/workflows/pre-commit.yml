@@ -43,81 +43,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
-          # Cache the npm download cache keyed on the frontend lockfile.
-          # Saves ~30-40s per run vs an uncached `npm ci`. Same pattern
-          # already used in frontend-build-sentinel.yml.
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Set up Terraform
-        # Required by the terraform_fmt + terraform_validate pre-commit hooks.
-        # terraform_validate calls `terraform init` per module, which the
-        # action wraps with HTTP-cached provider downloads.
-        #
-        # Pin must satisfy `required_version = ">= 1.10.0"` declared by every
-        # `terraform/environments/*/main.tf` — pinning to a sub-1.10 version
-        # makes init abort before validate even runs. Action major matches
-        # `.github/workflows/ci.yml` so both workflows resolve to the same
-        # Terraform binary; otherwise a behavioural drift between the two
-        # could pass one and fail the other.
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: "1.10.5"
-          terraform_wrapper: false
-
-      - name: Install tflint
-        # Pinned to a release tag (not master) so a malicious or accidental
-        # change to install_linux.sh on master can't silently land on this
-        # CI runner. `curl -fsSL` makes transport errors fail loudly
-        # instead of writing an HTML error page to stdin and feeding it
-        # to bash.
-        env:
-          TFLINT_VERSION: v0.55.0
-        run: |
-          set -euo pipefail
-          curl -fsSL -o /tmp/tflint-install.sh \
-            "https://raw.githubusercontent.com/terraform-linters/tflint/${TFLINT_VERSION}/install_linux.sh"
-          bash /tmp/tflint-install.sh
-
-      # Cache the tflint ruleset plugins (aws/azurerm/google) that
-      # `tflint --init` downloads from the GitHub Releases API. Without
-      # this cache EVERY run re-downloads all three plugins and is exposed
-      # to transient GitHub release-API 503s — a sustained 503 outrode the
-      # GITHUB_TOKEN auth + 3-attempt pre-commit retry below and reddened
-      # this job repo-wide (blocking every PR). Keyed on .tflint.hcl so a
-      # plugin-version bump re-downloads; restore-keys seeds a warm start.
-      - name: Cache tflint plugins
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.tflint.d/plugins
-          key: tflint-plugins-${{ runner.os }}-${{ hashFiles('.tflint.hcl') }}
-          restore-keys: |
-            tflint-plugins-${{ runner.os }}-
-
-      # Pre-populate the plugin cache with a dedicated, authenticated,
-      # retried `tflint --init` BEFORE pre-commit runs. On a cache hit this
-      # is a fast no-op (tflint skips download when the pinned plugin
-      # versions are already present — no API call, so immune to the 503).
-      # On a cache miss (version bump / cold cache) the retry loop rides
-      # out transient release-API 503s at the init level instead of
-      # re-running every hook via the coarse outer retry. GITHUB_TOKEN
-      # raises the release-API limit above the 60/hr anonymous ceiling.
-      - name: Initialize tflint plugins
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          for attempt in 1 2 3 4 5 6; do
-            if tflint --init --config="${GITHUB_WORKSPACE}/.tflint.hcl"; then
-              echo "tflint --init succeeded (attempt ${attempt})"
-              exit 0
-            fi
-            wait=$((attempt * 20))
-            echo "tflint --init failed (attempt ${attempt}/6); retrying in ${wait}s..." >&2
-            sleep "${wait}"
-          done
-          echo "tflint --init failed after 6 attempts — GitHub release API likely unavailable" >&2
-          exit 1
 
       # Cache the installed tool binaries (gosec, gocyclo). Keyed on the
       # pinned version strings so a tool-version bump still triggers a
@@ -159,7 +84,7 @@ jobs:
         #
         # The installer itself is fetched from the same pinned release tag
         # (not the mutable `main` branch) and downloaded to a file before
-        # execution, matching the tflint step above: a malicious or
+        # execution: a malicious or
         # accidental change to install.sh on main can't silently execute
         # on this CI runner, and `curl -fsSL` makes transport errors fail
         # loudly instead of piping an HTML error page into sh.
@@ -232,50 +157,15 @@ jobs:
           restore-keys: |
             go-build-${{ runner.os }}-
 
-      - name: Install frontend deps
-        run: |
-          if [ -f frontend/package-lock.json ]; then
-            cd frontend && npm ci
-          fi
-
       - name: Run pre-commit
-        # SKIP=terraform_validate: that hook calls `terraform init` per
-        # module, which creates `.terraform.lock.hcl` files. Those are
-        # gitignored, so on a fresh CI checkout they don't exist and the
-        # init step "modifies files", which pre-commit reports as a
-        # failure. Local pre-commit runs work because lock files persist
-        # between invocations. terraform_fmt and terraform_tflint still
-        # run and catch the syntax/style issues that terraform_validate
-        # would catch; the deeper schema validation runs in
-        # `terraform plan` during deploy workflows.
-        #
-        # GITHUB_TOKEN is passed so terraform_tflint's `tflint --init`
-        # step authenticates against the GitHub API (5000/hr per-token)
-        # when it downloads ruleset plugin releases. Without the token,
-        # tflint goes anonymous and hits the 60/hr per-IP limit shared
-        # across every workflow on the runner's NAT IP, which trips
-        # intermittently when PRs land in the same hour (issue #564).
-        #
+        # SKIP the local per-changed-package gosec hook in CI: --all-files
+        # feeds every Go file at once, while the dedicated Security Scanning
+        # job remains the authoritative per-module gosec v2.28.0 gate.
         # nick-fields/retry wraps the run with up to 3 attempts and a
-        # 90-second wait so transient flakes (GitHub Releases blips,
-        # tflint plugin download timeouts, etc.) do not require a
-        # manual rerun. The GITHUB_TOKEN fix above is the primary fix;
-        # the retry wrapper is the cheap defense-in-depth for the
-        # residual flakes that token alone cannot eliminate.
+        # 90-second wait so transient flakes do not require a manual rerun.
         uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
         env:
-          # SKIP the `gosec` pre-commit hook in CI: it is designed to scan
-          # only the changed packages of a local commit, but `pre-commit run
-          # --all-files` (this CI job) feeds it EVERY .go file across all six
-          # modules at once, and gosec's whole-repo analysis exhausts the
-          # runner's memory — the job dies with "The runner has received a
-          # shutdown signal" at this step on every run. gosec is NOT dropped:
-          # the dedicated `Security Scanning` job in ci.yml runs gosec v2.28.0
-          # per-module (SARIF) as the authoritative gate, so this only removes
-          # the duplicate that OOMs CI — the same dedup rationale as the
-          # already-skipped `terraform_validate` (covered by Validate Terraform).
-          # Local developers still get the fast per-changed-package gosec hook.
-          SKIP: terraform_validate,gosec
+          SKIP: gosec
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           timeout_minutes: 10
