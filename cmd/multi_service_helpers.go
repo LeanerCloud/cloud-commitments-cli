@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/LeanerCloud/CUDly/pkg/common"
-	"github.com/LeanerCloud/CUDly/pkg/provider"
-	"github.com/LeanerCloud/CUDly/providers/aws/recommendations"
-	azureprovider "github.com/LeanerCloud/CUDly/providers/azure"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/provider"
+	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/recommendations"
+	azureprovider "github.com/LeanerCloud/cloud-commitments-go/providers/azure"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )

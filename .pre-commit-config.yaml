@@ -3,14 +3,21 @@
 # Setup: pre-commit install
 
 repos:
-  # Go formatting and linting
-  - repo: https://github.com/dnephin/pre-commit-golang
-    rev: v0.5.1
+  # Go formatting and module checks
+  - repo: local
     hooks:
       - id: go-fmt
         name: Run gofmt
+        entry: bash scripts/gofmt-hook.sh
+        language: system
+        files: \.go$
       - id: go-mod-tidy
         name: Run go mod tidy
+        entry: make tidy-check
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: '(\.go$|(^|/)go\.(mod|sum)$)'
 
   - repo: local
     hooks:

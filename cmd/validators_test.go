@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/LeanerCloud/CUDly/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/spf13/cobra"
 )
 

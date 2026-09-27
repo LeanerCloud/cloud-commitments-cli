@@ -4,9 +4,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/LeanerCloud/CUDly/pkg/common"
-	"github.com/LeanerCloud/CUDly/pkg/recfilter"
-	awsprovider "github.com/LeanerCloud/CUDly/providers/aws"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/recfilter"
+	awsprovider "github.com/LeanerCloud/cloud-commitments-go/providers/aws"
 )
 
 // filtersFromConfig maps the CLI Config's dimension-filter and min-pool-size

@@ -1,253 +1,108 @@
-.PHONY: build clean test deploy help all build-server build-lambda build-mcp test-unit test-integration \
-        test-coverage full-test security-scan terraform-validate docker-build \
-        fmt vet lint complexity complexity-report security-scan-go security-scan-docker \
-        security-scan-terraform terraform-fmt terraform-fmt-check iac-arm docker-test pre-commit \
-        setup-git-secrets security-scan-snyk security-scan-all ci docker-compose-test \
-        install-dev-tools
+.PHONY: all build clean test test-unit test-integration test-coverage full-test fmt vet lint \
+	complexity complexity-report security-scan security-scan-go security-scan-snyk \
+	security-scan-all pre-commit setup-git-secrets install-dev-tools help ci tidy-check
 
-# Variables
 VERSION?=dev
-BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
-GIT_SHA?=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-
-# Dev tool versions - keep in sync with the CI pins in
-# .github/workflows/ci.yml, pre-commit.yml and database-migration.yml
 GOLANGCI_LINT_VERSION?=v2.10.1
 GOSEC_VERSION?=v2.28.0
 GOCYCLO_VERSION?=v0.6.0
-# golang-migrate deliberately has no version variable: it is installed as a
-# package of this module (see install-tools), so its version and its whole
-# dependency set come from go.mod. See issue #1849.
-# staticcheck has no CI pin; it is used by scripts/security-scan.sh
 STATICCHECK_VERSION?=v0.7.0
-LDFLAGS=-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitSHA=$(GIT_SHA)"
 
-# Default target
 all: build
 
-help: ## Display available targets
+help:
 	@echo "Available targets:"
 	@echo "  build              - Build the CLI"
-	@echo "  build-server       - Build the unified server"
-	@echo "  build-lambda       - Build for AWS Lambda"
-	@echo "  build-mcp          - Build the MCP server (cmd/cudly-mcp)"
-	@echo "  test               - Run all unit tests"
-	@echo "  test-unit          - Run unit tests only"
+	@echo "  test-unit          - Run unit tests"
 	@echo "  test-integration   - Run integration tests with testcontainers"
 	@echo "  test-coverage      - Run tests with coverage report"
-	@echo "  clean              - Remove build artifacts"
+	@echo "  clean              - Remove CLI build artifacts"
 	@echo "  fmt                - Format Go code"
 	@echo "  lint               - Run golangci-lint"
 	@echo "  complexity         - Check cyclomatic complexity"
-	@echo "  complexity-report  - Generate detailed complexity report"
-	@echo "  security-scan      - Run security scanners (gosec, trivy, tfsec)"
-	@echo "  security-scan-all  - Run all security scanners including Snyk"
-	@echo "  setup-git-secrets  - Set up git-secrets for preventing credential leaks"
-	@echo "  terraform-validate - Validate Terraform configurations"
-	@echo "  docker-build       - Build Docker image"
-	@echo "  docker-compose-test - Run E2E tests with docker-compose"
+	@echo "  security-scan      - Run Go security scanners"
+	@echo "  security-scan-snyk - Run Snyk"
 	@echo "  ci                 - Run CI pipeline locally"
 
-# Build the CLI
 build:
 	go build -o cudly ./cmd
 
-# Build the unified server
-build-server:
-	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/cudly-server ./cmd/server
-
-# Build for Lambda (backward compatible)
-build-lambda:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o bootstrap ./cmd/lambda
-
-# Build the MCP server (see mcp/README.md). Uses the same $(LDFLAGS)/$(VERSION)
-# as build-server so a tagged release reports its version in the MCP
-# initialize response instead of "dev" (see cmd/cudly-mcp/main.go).
-build-mcp:
-	mkdir -p bin
-	CGO_ENABLED=0 go build $(LDFLAGS) -o bin/cudly-mcp ./cmd/cudly-mcp
-
-# Run unit tests
 test: test-unit
 
 test-unit:
 	@echo "Running unit tests..."
 	go test -v -race -short ./...
 
-# Run integration tests (requires testcontainers)
 test-integration:
 	@echo "Running integration tests..."
 	go test -v -race -tags=integration ./...
 
-# Run tests with coverage
 test-coverage:
 	@echo "Generating coverage report..."
 	go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
-	@go tool cover -func=coverage.out | grep total
+	go tool cover -func=coverage.out | grep total
 
-# Run full test suite
 full-test: test-unit test-integration test-coverage
 
-# Clean build artifacts
 clean:
-	rm -f cudly bootstrap bin/cudly-server bin/cudly-mcp
-	rm -f coverage.out coverage.html
-	rm -f gosec-report.json trivy-report.json tfsec-report.json
+	rm -f cudly coverage.out coverage.html gosec-report.json complexity-report.txt
 	go clean
 
-# Deploy (requires AWS credentials and terraform profiles)
-deploy:
-	./scripts/tf-deploy.sh aws dev
-
-# Format code
 fmt:
 	go fmt ./...
-	terraform fmt -recursive terraform/
 
-# Lint code
-lint:
-	@echo "Running golangci-lint..."
-	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run --timeout=5m; \
-	else \
-		echo "golangci-lint not installed. Install: make install-dev-tools"; \
+tidy-check:
+	@version=$$(awk '/^[[:space:]]*go([[:space:]]|$$)/ { if (NF != 2) { print "__malformed__"; next } print $$2 }' go.mod); \
+	count=$$(printf '%s\n' "$$version" | awk 'NF { n++ } END { print n + 0 }'); \
+	if [ "$$count" -ne 1 ] || ! printf '%s\n' "$$version" | awk '$$0 !~ /^[0-9]+\.[0-9]+\.[0-9]+$$/ { exit 1 }'; then \
+		echo "expected exactly one patch-level Go version in go.mod" >&2; exit 1; \
+	fi; \
+	if ! GOTOOLCHAIN="go$$version" GOWORK=off go mod tidy -diff; then \
+		echo "go mod tidy check failed for module ." >&2; exit 1; \
 	fi
 
-# Go vet
 vet:
 	go vet ./...
 
-# Check cyclomatic complexity
+lint:
+	@command -v golangci-lint >/dev/null || { echo "golangci-lint not installed. Install: make install-dev-tools" >&2; exit 1; }
+	golangci-lint run --timeout=5m
+
 complexity:
-	@echo "Checking cyclomatic complexity (threshold: 10)..."
-	@if command -v gocyclo > /dev/null; then \
-		COMPLEXITY_ISSUES=$$(gocyclo -over 10 . 2>&1 || true); \
-		if [ -n "$$COMPLEXITY_ISSUES" ]; then \
-			echo "❌ Found functions with cyclomatic complexity over 10:"; \
-			echo "$$COMPLEXITY_ISSUES"; \
-			echo ""; \
-			echo "⚠️  Please refactor these functions to reduce complexity."; \
-			echo "📖 Tip: Extract helper functions, use early returns, or simplify logic."; \
-			exit 1; \
-		else \
-			echo "✅ All functions have acceptable cyclomatic complexity (≤10)"; \
-		fi \
-	else \
-		echo "gocyclo not installed. Install: make install-dev-tools"; \
+	@command -v gocyclo >/dev/null || { echo "gocyclo not installed. Install: make install-dev-tools" >&2; exit 1; }
+	@if ! issues="$$(gocyclo -over 10 -ignore '.*_test\.go' .)"; then echo "gocyclo failed" >&2; exit 1; fi; \
+	if [ -n "$$issues" ]; then \
+		echo "Found functions with cyclomatic complexity over 10:" >&2; \
+		echo "$$issues" >&2; \
 		exit 1; \
 	fi
 
-# Generate detailed complexity report
 complexity-report:
-	@echo "Generating cyclomatic complexity report..."
-	@if command -v gocyclo > /dev/null; then \
-		gocyclo -top 20 . | tee complexity-report.txt; \
-		echo ""; \
-		echo "📊 Top 20 most complex functions saved to: complexity-report.txt"; \
-	else \
-		echo "gocyclo not installed. Install: make install-dev-tools"; \
-	fi
+	@command -v gocyclo >/dev/null || { echo "gocyclo not installed. Install: make install-dev-tools" >&2; exit 1; }
+	gocyclo -top 20 -ignore '.*_test\.go' . > complexity-report.txt && cat complexity-report.txt
 
-# Security scanning
-security-scan: security-scan-go security-scan-docker security-scan-terraform
+security-scan: security-scan-go
 
 security-scan-go:
-	@echo "Running gosec..."
-	@if command -v gosec > /dev/null; then \
-		gosec -fmt=json -out=gosec-report.json -exclude=G101,G104,G115,G204,G301,G304,G402,G505 ./...; \
-		echo "✓ Go security scan complete: gosec-report.json"; \
-	else \
-		echo "gosec not installed. Install: make install-dev-tools"; \
-	fi
+	@command -v gosec >/dev/null || { echo "gosec not installed. Install: make install-dev-tools" >&2; exit 1; }
+	gosec -fmt=json -out=gosec-report.json -exclude=G101,G104,G115,G204,G301,G304,G402,G505 ./...
 
-security-scan-docker:
-	@echo "Running trivy..."
-	@if command -v trivy > /dev/null; then \
-		trivy fs --security-checks vuln,config . --format json --output trivy-report.json; \
-		echo "✓ Container security scan complete: trivy-report.json"; \
-	else \
-		echo "trivy not installed. Install: https://aquasecurity.github.io/trivy/"; \
-	fi
+security-scan-snyk:
+	@command -v snyk >/dev/null || { echo "snyk not installed. Install: npm install -g snyk" >&2; exit 1; }
+	snyk test --severity-threshold=high
 
-security-scan-terraform:
-	@echo "Running tfsec..."
-	@if command -v tfsec > /dev/null; then \
-		tfsec terraform/ --format json --out tfsec-report.json; \
-		echo "✓ Terraform security scan complete: tfsec-report.json"; \
-	else \
-		echo "tfsec not installed. Install: https://aquasecurity.github.io/tfsec/"; \
-	fi
+security-scan-all: security-scan security-scan-snyk
 
-# Terraform validation
-terraform-validate:
-	@echo "Validating Terraform configurations..."
-	@for dir in terraform/environments/*/dev; do \
-		echo "Validating $$dir..."; \
-		(cd $$dir && terraform init -backend=false && terraform validate) || exit 1; \
-	done
-	@echo "✓ Terraform validation complete"
+ci: fmt vet complexity test-unit security-scan
 
-terraform-fmt:
-	terraform fmt -recursive terraform/
-
-terraform-fmt-check:
-	terraform fmt -check -recursive terraform/
-
-# Regenerate the committed ARM JSON from the Bicep source. CI verifies sync via
-# `make iac-arm && git diff --exit-code`.
-iac-arm:
-	az bicep build \
-		--file iac/federation/azure-target/bicep/azure-wif.bicep \
-		--outfile iac/federation/azure-target/bicep/azure-wif.arm.json
-
-# Docker
-docker-build:
-	@echo "Building Docker image..."
-	docker build -t cudly:$(VERSION) -t cudly:latest --build-arg VERSION=$(VERSION) .
-	@echo "✓ Docker image built: cudly:$(VERSION)"
-
-docker-test: docker-build
-	@echo "Testing Docker image..."
-	docker run --rm cudly:$(VERSION) /app/cudly --help || true
-
-# CI pipeline
-ci: fmt vet complexity test-unit security-scan terraform-validate
-	@echo "✓ CI pipeline complete"
-
-# Pre-commit checks
 pre-commit: fmt vet complexity test-unit
-	@echo "✓ Pre-commit checks complete"
 
-# Git secrets setup
 setup-git-secrets:
 	@echo "Setting up git-secrets..."
 	@bash scripts/setup-git-secrets.sh
 
-# Snyk security scanning
-security-scan-snyk:
-	@echo "Running Snyk security scan..."
-	@if command -v snyk > /dev/null; then \
-		snyk test --severity-threshold=high; \
-		echo "✓ Snyk scan complete"; \
-	else \
-		echo "snyk not installed. Install: npm install -g snyk"; \
-	fi
-
-# Run all security scanners including Snyk
-security-scan-all: security-scan security-scan-snyk
-	@echo "✓ All security scans complete"
-
-# Docker Compose E2E tests
-docker-compose-test:
-	@echo "Running E2E tests with docker-compose..."
-	docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-runner
-	docker compose -f docker-compose.test.yml down -v
-
-# Install development dependencies
 install-dev-tools:
-	@echo "Installing development tools..."
 	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	@echo "Installing gosec $(GOSEC_VERSION)..."
@@ -256,13 +111,3 @@ install-dev-tools:
 	@go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 	@echo "Installing gocyclo $(GOCYCLO_VERSION)..."
 	@go install github.com/fzipp/gocyclo/cmd/gocyclo@$(GOCYCLO_VERSION)
-	@echo "Installing golang-migrate $$(go list -m -f '{{.Version}}' github.com/golang-migrate/migrate/v4)..."
-	@go install -tags 'pgx5' github.com/golang-migrate/migrate/v4/cmd/migrate
-	@echo "✓ Development tools installed"
-	@echo ""
-	@echo "Additional tools to install manually:"
-	@echo "  - trivy: https://aquasecurity.github.io/trivy/"
-	@echo "  - tfsec: https://aquasecurity.github.io/tfsec/"
-	@echo "  - git-secrets: https://github.com/awslabs/git-secrets"
-	@echo "  - snyk: npm install -g snyk"
-	@echo "  - pre-commit: pip install pre-commit"

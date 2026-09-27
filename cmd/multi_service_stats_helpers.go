@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/LeanerCloud/CUDly/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 )
 
 // SPTypeBreakdown holds savings information broken down by Savings Plan type.
