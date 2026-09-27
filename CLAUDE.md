@@ -49,9 +49,8 @@
 ## Go Module Notes
 
 - This project does NOT use a vendor directory. Do not use `go mod vendor`.
-- The `pkg/` directory is a separate Go module (`github.com/LeanerCloud/CUDly/pkg`) with a `replace` directive in the root `go.mod`.
-- Build and test normally with `go build ./...` and `go test ./...` from the root.
-- Run `go test ./pkg/...` from the `pkg/` directory when working on the submodule.
+- The shared libraries and cloud providers come from `github.com/LeanerCloud/cloud-commitments-go`, pinned to fixed versions in `go.mod`. There are no `replace` directives and no sibling checkout is needed.
+- Build and test with `make build` and `make test-unit` from the repository root.
 
 ## Build & Test
 
@@ -103,7 +102,7 @@ Mechanics:
 1. After `git push`, list the runs the push triggered:
 
    ```bash
-   gh run list --repo LeanerCloud/CUDly --commit "$(git rev-parse HEAD)" \
+   gh run list --repo LeanerCloud/cloud-commitments-cli --commit "$(git rev-parse HEAD)" \
      --limit 10 --json databaseId,workflowName,status
    ```
 
@@ -179,10 +178,10 @@ CodeRabbit:
 ```bash
 # Right after `gh pr create ...` returns the PR URL:
 # Derive PR_NUM from the current branch context (avoids brittle hand-copying).
-PR_NUM=$(gh pr view "$(git rev-parse --abbrev-ref HEAD)" --repo LeanerCloud/CUDly --json number --jq '.number')
+PR_NUM=$(gh pr view "$(git rev-parse --abbrev-ref HEAD)" --repo LeanerCloud/cloud-commitments-cli --json number --jq '.number')
 ISSUE_NUM=<the issue this PR closes>
 
-LABELS=$(gh issue view "$ISSUE_NUM" --repo LeanerCloud/CUDly --json labels \
+LABELS=$(gh issue view "$ISSUE_NUM" --repo LeanerCloud/cloud-commitments-cli --json labels \
   --jq '[.labels[].name | select(test("^(priority|severity|urgency|impact|effort|type)/")) ]
         + (if [.labels[].name] | any(. == "triaged") then ["triaged"] else [] end)
         | join(",")')
@@ -191,7 +190,7 @@ LABELS=$(gh issue view "$ISSUE_NUM" --repo LeanerCloud/CUDly --json labels \
 # silently break this MANDATORY flow. If the closing issue has no triage
 # labels in the selected classes, surface the gap deterministically instead.
 if [ -n "$LABELS" ]; then
-  gh pr edit "$PR_NUM" --repo LeanerCloud/CUDly --add-label "$LABELS"
+  gh pr edit "$PR_NUM" --repo LeanerCloud/cloud-commitments-cli --add-label "$LABELS"
 else
   echo "WARN: issue #$ISSUE_NUM has no priority/severity/urgency/impact/effort/type labels"
   echo "      Triage the issue first, then re-run the label-mirror step."
@@ -199,7 +198,7 @@ else
 fi
 
 # Verify
-gh pr view "$PR_NUM" --repo LeanerCloud/CUDly --json labels \
+gh pr view "$PR_NUM" --repo LeanerCloud/cloud-commitments-cli --json labels \
   --jq '[.labels[].name] | sort | join(",")'
 ```
 
