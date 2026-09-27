@@ -1,6 +1,6 @@
 # CUDly CLI
 
-CUDly is an open source CLI for discovering and purchasing cloud commitments — AWS Reserved Instances and Savings Plans, plus selected Azure and GCP commitments — in a single command. It is dry-run by default: nothing is purchased until you pass `--purchase`.
+CUDly is an open source CLI for discovering and purchasing AWS Reserved Instances and Savings Plans in a single command. It is dry-run by default: nothing is purchased until you pass `--purchase`. `configure-azure` and `configure-gcp` bootstrap credentials for the separate [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform); this CLI's own recommend-and-purchase workflow is AWS-only today. See [cloud setup](docs/cli/cloud-setup.md).
 
 It is also built to be driven by an AI agent for the discovery and analysis side: searching recommendations, sizing a plan, filtering by account or region. The purchase step still needs a human to review the numbers before committing money. **`--yes` currently skips the confirmation prompt outright, including for a non-interactive caller** (a script, a CI job, an agent driving the CLI as a subprocess) — see [Safety Features](#safety-features) and [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) before wiring `--purchase --yes` into anything unattended.
 
@@ -9,8 +9,8 @@ The CLI depends on the published shared Go modules in [cloud-commitments-go](htt
 ## Key Features
 
 - **Dry-run by default** - `--purchase` is the only opt-in that moves money; a bare invocation only prints results and writes a CSV.
-- **Grounded recommendations** - built from the cloud provider's own recommendation APIs (AWS Cost Explorer, Azure Advisor, GCP recommender), not estimated locally.
-- **Multi-cloud, one interface** - AWS, Azure, and GCP through the same command and flags. See [Implementation Status](#implementation-status) for per-provider maturity.
+- **Grounded recommendations** - built from AWS Cost Explorer's own recommendation data, not estimated locally.
+- **Multiple AWS services, one interface** - RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB, and Savings Plans through the same command and flags. See [Implementation Status](#implementation-status) for per-service maturity.
 - **Coverage control** - purchase a percentage of what's recommended, or of actual historical usage via `--target-coverage`, instead of buying everything a provider suggests in one run.
 - **CSV + audit log** - every dry run and every purchase is written to CSV and to a permanent JSONL audit log.
 
@@ -28,11 +28,12 @@ Full internals: [Purchase Safety](docs/cli/purchase-safety.md).
 
 ## Implementation Status
 
-| Cloud | Status |
+| AWS service | Status |
 |---|---|
-| AWS | Production - Amazon RDS and ElastiCache are the tested paths; other AWS services remain experimental. |
-| Azure | Experimental - selected commitment types; maturity can vary by service and account. |
-| GCP | Experimental - selected commitment types; maturity can vary by service and account. |
+| RDS, ElastiCache | Production - the tested paths. |
+| EC2, OpenSearch, Redshift, MemoryDB, Savings Plans | Experimental - implemented and functional, still accumulating real-world purchase validation. |
+
+Azure and GCP are not part of this CLI's recommend-and-purchase workflow; `configure-azure` and `configure-gcp` only bootstrap credentials for the [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform).
 
 ## Build
 
@@ -65,10 +66,11 @@ All purchase operations can spend money. Check the account, region, quantity, an
 
 ## Credentials and provider status
 
-Use the provider's supported credential chain. For AWS, select a profile with `--profile` and validate access before a purchase. Follow the cloud setup guide for Azure and GCP.
+Use the AWS SDK's supported credential chain. Select a profile with `--profile` and validate access before a purchase.
 
 - Recommendation data and purchase APIs can change outside this repository.
-- See [Implementation Status](#implementation-status) for per-cloud maturity.
+- See [Implementation Status](#implementation-status) for per-service maturity.
+- `configure-azure` and `configure-gcp` bootstrap credentials for the self-hosted platform, not for this CLI - see [cloud setup](docs/cli/cloud-setup.md).
 
 ## Related components
 
