@@ -2,6 +2,10 @@
 
 CUDly is designed to be safe by default. Real purchases require multiple explicit opt-ins, and several mechanisms prevent duplicate or unintended buys.
 
+## Automation and AI agents
+
+An AI agent (or any other non-interactive caller) can drive discovery, sizing, and filtering safely: none of that reads or writes cloud commitments. Purchasing is different. `--purchase --yes` executes a real purchase from any invocation - a script, a CI job, or an agent running `cudly` as a subprocess included - because `--yes` skips the confirmation prompt before the interactive-terminal check ever runs. There is currently no automation boundary on the purchase path; [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) tracks closing that gap. Until it lands, treat `--purchase --yes` as unattended purchase automation, and keep it out of anything an agent can trigger on its own.
+
 ## The purchase decision: --purchase
 
 ```text
@@ -42,8 +46,10 @@ cudly --input-csv recs.csv --purchase
 
 When running in purchase mode (`isDryRun=false`), cudly prints a summary of the total instance count and estimated savings and prompts for confirmation before executing any purchase. Pass `--yes` to skip this prompt in automation.
 
+`--yes` skips the prompt unconditionally - it is not gated on whether the process has a real, interactive terminal. A script, a CI job, or an agent driving `cudly` as a subprocess can pass `--yes` and execute a purchase exactly as a human at a terminal would. Treat `--purchase --yes` as fully unattended purchase automation, not as a convenience for a human who already confirmed elsewhere. See [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) for the tracked work to close this gap.
+
 ```bash
-# Unattended purchase (use with care):
+# Unattended purchase (use with care - see the note above):
 cudly --services rds --purchase --yes
 ```
 
@@ -128,3 +134,4 @@ Before any real purchase run:
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
 6. Note that `--idempotency-window` does not prevent double-buying in the CLI path; use a dry-run review (run without `--purchase`) and audit-log inspection to guard against retried runs.
+7. If an AI agent or other automation drives `cudly`, never pass `--yes` to it directly - have the agent hand off the dry-run recommendation to a human, who runs `--purchase` themselves. See [Automation and AI agents](#automation-and-ai-agents).
