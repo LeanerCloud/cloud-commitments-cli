@@ -2,14 +2,14 @@
 
 CUDly is an open source CLI for discovering and purchasing AWS Reserved Instances and Savings Plans in a single command. It is dry-run by default: nothing is purchased until you pass `--purchase`. `configure-azure` and `configure-gcp` bootstrap credentials for the separate [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform); this CLI's own recommend-and-purchase workflow is AWS-only today. See [cloud setup](docs/cli/cloud-setup.md).
 
-It is also built to be driven by an AI agent for the discovery and analysis side: searching recommendations, sizing a plan, filtering by account or region. The purchase step still needs a human to review the numbers before committing money. **`--yes` currently skips the confirmation prompt outright, including for a non-interactive caller** (a script, a CI job, an agent driving the CLI as a subprocess) — see [Safety Features](#safety-features) and [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) before wiring `--purchase --yes` into anything unattended.
+It is also built to be driven by an AI agent for the discovery and analysis side: searching recommendations, sizing a plan, filtering by account or region. The purchase step still needs a human to review the numbers before committing money. **`--yes` currently skips the confirmation prompt outright, including for a non-interactive caller** (a script, a CI job, an agent driving the CLI as a subprocess): see [Safety Features](#safety-features) and [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) before wiring `--purchase --yes` into anything unattended.
 
 The CLI depends on the published shared Go modules in [cloud-commitments-go](https://github.com/LeanerCloud/cloud-commitments-go), pinned to fixed versions in `go.mod`. No sibling checkout or parent workspace is needed for local development.
 
 ## Key Features
 
 - **Dry-run by default** - `--purchase` is the only opt-in that moves money; a bare invocation only prints results and writes a CSV.
-- **Grounded recommendations** - built from AWS Cost Explorer's own recommendation data, not estimated locally.
+- **Grounded recommendations** - sized from AWS Cost Explorer's own recommendation and coverage data, not a locally-guessed baseline.
 - **Multiple AWS services, one interface** - RDS, ElastiCache, EC2, OpenSearch, Redshift, MemoryDB, and Savings Plans through the same command and flags. See [Implementation Status](#implementation-status) for per-service maturity.
 - **Coverage control** - purchase a percentage of what's recommended, or of actual historical usage via `--target-coverage`, instead of buying everything a provider suggests in one run.
 - **CSV + audit log** - every dry run and every purchase is written to CSV and to a permanent JSONL audit log.
@@ -19,10 +19,10 @@ The CLI depends on the published shared Go modules in [cloud-commitments-go](htt
 1. **Dry-run by default** - no purchase without the explicit `--purchase` flag.
 2. **Confirmation prompt** - `--purchase` prints a summary of instance count and estimated savings, then prompts for confirmation. `--yes` skips this prompt, including for a non-interactive caller - it is not currently an automation boundary. [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) tracks closing that gap.
 3. **Coverage and instance limits** - `--coverage`, `--target-coverage`, and `--max-instances` shape what a dry run recommends before there is anything to confirm.
-4. **Instance type validation** - every recommendation is checked against known, valid instance types before it is shown.
-5. **Full audit trail** - every recommendation, purchased or not, is written to the audit log before any purchase API call runs.
+4. **RDS extended-support filtering** - by default, recommendations for instances running an engine version in AWS Extended Support are excluded, since the surcharge can erase RI savings; pass `--include-extended-support` to include them.
+5. **Audit log written per purchase** - the audit log path is checked for writability before any cloud API call; each recommendation's audit record (purchased or dry-run, with its result) is then written as soon as that purchase call returns.
 6. **Permanent CSV exports** of every dry run and every purchase.
-7. **No CLI-side duplicate-purchase prevention yet** - `--idempotency-window` is accepted but has no effect on the CLI path; deduplication only runs in the self-hosted platform's server-side scheduler. Review the dry-run CSV and audit log before retrying a run.
+7. **Duplicate-purchase dedup, with a caveat** - every path (`--services` and `--input-csv`) subtracts commitments purchased in the last 24 hours before sizing a recommendation. `--idempotency-window` doesn't change that fixed 24h lookback yet ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262)), and if the existing-commitments API call itself fails, the run continues un-deduplicated with a warning ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)).
 
 Full internals: [Purchase Safety](docs/cli/purchase-safety.md).
 
