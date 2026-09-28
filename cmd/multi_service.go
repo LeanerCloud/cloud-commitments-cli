@@ -473,12 +473,11 @@ func purchaseSingleRec(ctx context.Context, awsCfg aws.Config, rec common.Recomm
 	}
 
 	result := executePurchase(ctx, rec, rec.Region, index, serviceClient, cfg)
-	status := "success"
-	if !result.Success {
-		status = "error"
-		AppLogger.Printf("    ❌ %v\n", result.Error)
-	} else {
+	status := purchaseAuditStatus(result)
+	if result.Success {
 		AppLogger.Printf("    ✅ %s\n", result.CommitmentID)
+	} else {
+		AppLogger.Printf("    ❌ %v\n", result.Error)
 	}
 	return result, status
 }

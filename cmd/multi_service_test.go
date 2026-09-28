@@ -1935,13 +1935,22 @@ rds,us-east-1,db.t3.medium,mysql,5,1yr,All Upfront,123456789012
 	}
 }
 
-// TestRunToolFromCSV_WritesAuditRecordsOnPurchaseRun reproduces #1609: a real
-// purchase run through --input-csv wrote zero audit records, unlike the
-// non-CSV path. isolateAWSEnv points the SDK at invalid credentials so the
-// real purchase call fails the same way a real AWS error would; the property
-// under test is that a durable, per-recommendation audit record is written
-// regardless of whether the purchase attempt itself succeeds.
-func TestRunToolFromCSV_WritesAuditRecordsOnPurchaseRun(t *testing.T) {
+// TestRunToolFromCSV_WritesAuditRecordsOnDryRun reproduces #1609 through the
+// public --input-csv entry point: before the fix, processPurchaseLoop never
+// wrote an audit record at all, on a dry run or a real purchase. A dry run is
+// used here (rather than ActualPurchase=true with invalid credentials)
+// because #1941 made the duplicate check fail closed on a real purchase run:
+// with no valid AWS credentials the check now refuses the region before ever
+// reaching a purchase attempt, and writes no audit record at all by design
+// (see TestCheckDuplicates_ErrorOnPurchaseRun_DropsRecsRatherThanFallingBack)
+// -- so there is no way to drive an un-mocked real-purchase attempt through
+// this entry point in a test. A dry run still exercises the exact wiring
+// #1609 fixes (prepareCSVPurchaseRun's runID -> processPurchaseLoop ->
+// writePurchaseAuditRecord), since the duplicate check only warns and
+// continues on a dry run rather than refusing.
+// TestProcessPurchaseLoop_WritesAuditRecordForRealPurchase below covers the
+// "success"/"error" statuses a real purchase attempt gets audited with.
+func TestRunToolFromCSV_WritesAuditRecordsOnDryRun(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
 	isolateAWSEnv(t)
@@ -1954,8 +1963,7 @@ rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
 	toolCfg.CSVInput = csvPath
 	toolCfg.CSVOutput = filepath.Join(t.TempDir(), "report.csv")
 	toolCfg.AuditLog = auditPath
-	toolCfg.ActualPurchase = true
-	toolCfg.SkipConfirmation = true
+	toolCfg.ActualPurchase = false
 	toolCfg.Coverage = 100.0
 	toolCfg.TargetCoverage = 0
 	toolCfg.MaxInstances = 0
@@ -1965,7 +1973,8 @@ rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
 	require.NoError(t, err)
 
 	data, readErr := os.ReadFile(auditPath) // #nosec G304 -- test-owned tempdir path
-	require.NoError(t, readErr, "a real purchase run through --input-csv must write an audit log")
+	require.NoError(t, readErr, "a purchase run through --input-csv must write an audit log")
+	require.NotEmpty(t, data, "the audit log must not be empty -- an empty file would make the next length check pass vacuously")
 
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	require.Len(t, lines, 1, "one audit record per recommendation")
@@ -1975,9 +1984,74 @@ rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
 	assert.NotEmpty(t, rec["run_id"], "the audit record must carry a run ID grouping the CSV run")
 	assert.Equal(t, common.PurchaseSourceCLI, rec["source"])
 	assert.Equal(t, "db.t3.small", rec["resource_type"])
-	assert.Equal(t, false, rec["dry_run"])
-	assert.Contains(t, []any{"success", "error"}, rec["status"],
-		"a real purchase attempt is audited as success or error, never silently dropped")
+	assert.Equal(t, true, rec["dry_run"])
+	assert.Equal(t, "skipped", rec["status"])
+}
+
+// TestProcessPurchaseLoop_WritesAuditRecordForRealPurchase reproduces the
+// other half of #1609 at the processPurchaseLoop level: a real (non-dry-run)
+// purchase attempt must be audited as "success" or "error", never silently
+// dropped. createServiceClient is not injectable (see the comment on
+// TestApplyMinCountFloorAfterDuplicateAdjustment), so this exercises
+// processPurchaseLoop directly with a mocked provider.ServiceClient rather
+// than through runToolFromCSV -- the same technique
+// TestProcessPurchaseLoopActualPurchase already uses to test this loop's
+// purchase behavior without live AWS credentials.
+func TestProcessPurchaseLoop_WritesAuditRecordForRealPurchase(t *testing.T) {
+	tests := []struct {
+		result     common.PurchaseResult
+		name       string
+		wantStatus string
+	}{
+		{
+			name:       "success",
+			result:     common.PurchaseResult{Success: true, CommitmentID: "test-purchase-id", Timestamp: time.Now()},
+			wantStatus: "success",
+		},
+		{
+			name:       "error",
+			result:     common.PurchaseResult{Success: false, Error: fmt.Errorf("API error: quota exceeded"), Timestamp: time.Now()},
+			wantStatus: "error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			origCfg := toolCfg
+			defer func() { toolCfg = origCfg }()
+			toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
+			toolCfg.SkipConfirmation = true
+			t.Setenv("DISABLE_PURCHASE_DELAY", "true")
+
+			recs := []common.Recommendation{
+				{Service: common.ServiceRDS, ResourceType: "db.t3.small", Count: 2, EstimatedSavings: 100},
+			}
+			result := tt.result
+			result.Recommendation = recs[0]
+
+			mockClient := &MockServiceClient{}
+			mockClient.On("PurchaseCommitment", ctx, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
+
+			processPurchaseLoop(ctx, recs, "us-east-1", false /* isDryRun */, mockClient, toolCfg, "test-run-id")
+
+			data, readErr := os.ReadFile(toolCfg.AuditLog) // #nosec G304 -- test-owned tempdir path
+			require.NoError(t, readErr, "a real purchase attempt must write an audit log")
+			require.NotEmpty(t, data, "the audit log must not be empty -- an empty file would make the next length check pass vacuously")
+
+			lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+			require.Len(t, lines, 1, "one audit record per recommendation")
+
+			var rec map[string]any
+			require.NoError(t, json.Unmarshal([]byte(lines[0]), &rec))
+			assert.Equal(t, "test-run-id", rec["run_id"])
+			assert.Equal(t, common.PurchaseSourceCLI, rec["source"])
+			assert.Equal(t, false, rec["dry_run"])
+			assert.Equal(t, tt.wantStatus, rec["status"])
+
+			mockClient.AssertExpectations(t)
+		})
+	}
 }
 
 // TestRunToolFromCSV_ChecksAuditLogWritability reproduces the second half of
