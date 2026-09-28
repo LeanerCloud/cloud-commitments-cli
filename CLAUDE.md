@@ -145,6 +145,23 @@ justification reply on the thread", not "PR opened and CR pinged". When
 in doubt, copy the iteration loop above (steps 2–6) into the fork
 prompt verbatim.
 
+## Review gate
+
+Merge only at the reviewed SHA, and only when all of these cover it:
+
+- An independent adversarial review of the full PR diff on Opus 5.5
+  (exact model `claude-opus-5-5`; never Fable, a floating alias, or a
+  cross-provider substitute) names the SHA and has no open actionable
+  findings.
+- CodeRabbit is optional when exact-revision local verification plus a
+  thorough independent review cover the SHA; otherwise run the loop above.
+- CI is green on the SHA.
+- Local verification exercises the real affected scenario on macOS;
+  Linux is covered by CI. Windows is out of scope.
+
+Any new commit or rebase restarts the gate. A missing reviewer or
+verification blocks the PR; it is never clean by assumption.
+
 ## PR labeling — mirror closing-issue labels (MANDATORY)
 
 Every PR opened in this repo must carry the **same** triage labels as
