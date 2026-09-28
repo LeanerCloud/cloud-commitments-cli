@@ -80,7 +80,7 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 // instead of sizing every recommendation as if nothing is owned.
 func coverageFetchFailure(cfg Config, err error) error {
 	if effectiveDryRun(cfg) {
-		AppLogger.Printf("  ⚠️  %v; sizing will assume zero existing coverage (dry run only — a real --purchase run aborts instead, since --target-coverage would overbuy on top of what is already owned)\n", err)
+		AppLogger.Printf("  ⚠️  %v; sizing will assume zero existing coverage (dry run only; a real --purchase run aborts instead, since --target-coverage would overbuy on top of what is already owned)\n", err)
 		return nil
 	}
 	return err
@@ -614,7 +614,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 // (service, region) pair in CSV mode and reports whether the caller should
 // still process that region (ok). The duplicate check is the only guard
 // between a re-run and a double purchase, so a failed check must not fall
-// back to the un-deduplicated counts on a purchase run — that would buy
+// back to the un-deduplicated counts on a purchase run: that would buy
 // reserved capacity the account already owns. A dry run logs a loud warning
 // and continues with the un-deduplicated counts (nothing is bought, so
 // reporting fidelity wins); a purchase run refuses to spend and returns

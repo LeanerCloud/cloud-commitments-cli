@@ -21,6 +21,13 @@ type EC2ClientInterface interface {
 	DescribeRegions(ctx context.Context, params *awsec2.DescribeRegionsInput, optFns ...func(*awsec2.Options)) (*awsec2.DescribeRegionsOutput, error)
 }
 
+// dropDuplicateCheckFailed is a cmd-local drop reason for recommendations
+// dropped because the duplicate-purchase check itself failed (not because it
+// found and subtracted an actual duplicate, which is common.DropDuplicateDedup).
+// It is not a common.Drop* constant because adding one is a
+// cloud-commitments-go change; this string is exclusive to this package.
+const dropDuplicateCheckFailed = "duplicate-check-failed"
+
 // formatServices formats a list of services for display.
 func formatServices(services []common.ServiceType) string {
 	names := make([]string, len(services))
@@ -587,6 +594,11 @@ func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverag
 // for --max-instances in processRegionRecommendations.
 //
 // drops accumulates per-reason drop counts for the end-of-run summary; pass nil to skip.
+//
+// A recommendation dropped because the check itself failed is counted under
+// dropDuplicateCheckFailed, not common.DropDuplicateDedup: the latter means
+// "an actual duplicate was found and subtracted", and reusing it for a failed
+// check would report the failure as a successful dedup in the summary.
 func checkDuplicates(
 	ctx context.Context,
 	filteredRecs []common.Recommendation,
@@ -600,7 +612,7 @@ func checkDuplicates(
 	if err != nil {
 		if !isDryRun {
 			AppLogger.Printf("  ❌ Refusing to purchase %d instance(s): could not check for existing RIs (%v). Dropping these recommendations rather than risking a duplicate purchase.\n", CalculateTotalInstances(filteredRecs), err)
-			drops.Add(common.DropDuplicateDedup, len(filteredRecs))
+			drops.Add(dropDuplicateCheckFailed, len(filteredRecs))
 			return nil
 		}
 		AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v (dry run; continuing with un-deduplicated counts)\n", err)
