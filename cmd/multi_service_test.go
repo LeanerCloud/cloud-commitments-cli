@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -1261,6 +1262,7 @@ func TestProcessPurchaseLoopPurchaseFailure(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 80.0
 	toolCfg.SkipConfirmation = true
 
@@ -1281,7 +1283,7 @@ func TestProcessPurchaseLoopPurchaseFailure(t *testing.T) {
 
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
-	results := processPurchaseLoop(ctx, recs, "ap-south-1", false, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "ap-south-1", false, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 1)
 	assert.False(t, results[0].Success)
@@ -1296,6 +1298,7 @@ func TestProcessPurchaseLoopUserCancellation(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 90.0
 	toolCfg.SkipConfirmation = false // User will be prompted
 
@@ -1324,7 +1327,7 @@ func TestProcessPurchaseLoopUserCancellation(t *testing.T) {
 
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
-	results := processPurchaseLoop(ctx, recs, "eu-central-1", false, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "eu-central-1", false, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 2)
 	for _, result := range results {
@@ -1343,7 +1346,7 @@ func TestProcessPurchaseLoopEmptyRecommendations(t *testing.T) {
 
 	mockClient := &MockServiceClient{}
 
-	results := processPurchaseLoop(ctx, []common.Recommendation{}, "us-east-1", false, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, []common.Recommendation{}, "us-east-1", false, mockClient, toolCfg, "test-run")
 
 	assert.Empty(t, results)
 	mockClient.AssertNotCalled(t, "PurchaseCommitment", mock.Anything, mock.Anything, mock.Anything)
@@ -1354,6 +1357,7 @@ func TestProcessServicePurchasesUserCancellation(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 85.0
 	toolCfg.SkipConfirmation = true // Skip for testing
 
@@ -1372,7 +1376,7 @@ func TestProcessServicePurchasesUserCancellation(t *testing.T) {
 
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
-	results := processPurchaseLoop(ctx, recs, "us-west-1", false, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "us-west-1", false, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 1)
 	assert.True(t, results[0].Success)
@@ -1386,6 +1390,7 @@ func TestProcessServicePurchasesDryRunMultiple(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 100.0
 
 	recs := []common.Recommendation{
@@ -1397,7 +1402,7 @@ func TestProcessServicePurchasesDryRunMultiple(t *testing.T) {
 	mockClient := &MockServiceClient{}
 	// Dry run should not call PurchaseCommitment
 
-	results := processPurchaseLoop(ctx, recs, "ap-northeast-1", true, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "ap-northeast-1", true, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 3)
 	for i, result := range results {
@@ -1461,6 +1466,7 @@ func TestProcessPurchaseLoopDryRun(t *testing.T) {
 		toolCfg = origCfg
 	}()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 75.0
 
 	recs := []common.Recommendation{
@@ -1472,7 +1478,7 @@ func TestProcessPurchaseLoopDryRun(t *testing.T) {
 
 	// Logger output disabled for testing
 
-	results := processPurchaseLoop(ctx, recs, "us-east-1", true, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "us-east-1", true, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 2)
 	for _, result := range results {
@@ -1495,6 +1501,7 @@ func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
 		toolCfg = origCfg
 	}()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 80.0
 	toolCfg.SkipConfirmation = true // Skip confirmation for testing
 
@@ -1520,7 +1527,7 @@ func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
 	// Disable purchase delay for testing
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
-	results := processPurchaseLoop(ctx, recs, "eu-west-1", false, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "eu-west-1", false, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 2)
 	for i, result := range results {
@@ -1540,6 +1547,7 @@ func TestProcessPurchaseLoopWithConfirmation(t *testing.T) {
 		toolCfg = origCfg
 	}()
 
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 80.0
 	toolCfg.SkipConfirmation = true // Skip confirmation to proceed with purchase
 
@@ -1563,7 +1571,7 @@ func TestProcessPurchaseLoopWithConfirmation(t *testing.T) {
 	// Disable purchase delay for testing
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
-	results := processPurchaseLoop(ctx, recs, "us-west-2", false, mockClient, toolCfg)
+	results := processPurchaseLoop(ctx, recs, "us-west-2", false, mockClient, toolCfg, "test-run")
 
 	assert.Len(t, results, 1)
 	assert.True(t, results[0].Success)
@@ -1763,6 +1771,7 @@ elasticache,us-west-2,cache.t3.micro,redis,1,1yr,All Upfront,123456789012
 			reportPath := filepath.Join(t.TempDir(), "report.csv")
 			toolCfg.CSVInput = csvPath
 			toolCfg.CSVOutput = reportPath
+			toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 			toolCfg.ActualPurchase = false
 			toolCfg.Coverage = tt.coverage
 			toolCfg.TargetCoverage = 0
@@ -1831,6 +1840,7 @@ func TestRunToolFromCSV_NonExistentFile(t *testing.T) {
 	defer func() { toolCfg = origCfg }()
 
 	toolCfg.CSVInput = filepath.Join(t.TempDir(), "does-not-exist.csv")
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.ActualPurchase = false
 
 	err := runToolFromCSV(context.Background(), toolCfg)
@@ -1846,6 +1856,7 @@ func TestRunToolFromCSV_EmptyFile(t *testing.T) {
 	defer func() { toolCfg = origCfg }()
 
 	toolCfg.CSVInput = writeTestRecommendationsCSV(t, "")
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.ActualPurchase = false
 
 	err := runToolFromCSV(context.Background(), toolCfg)
@@ -1872,6 +1883,7 @@ rds,us-east-1,db.t3.large,postgres,10,300.00,1yr,All Upfront,123456789012
 	reportPath := filepath.Join(t.TempDir(), "report.csv")
 	toolCfg.CSVInput = csvPath
 	toolCfg.CSVOutput = reportPath
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.ActualPurchase = false
 	toolCfg.Coverage = 100.0
 	toolCfg.TargetCoverage = 0
@@ -1905,6 +1917,7 @@ rds,us-east-1,db.t3.medium,mysql,5,1yr,All Upfront,123456789012
 	reportPath := filepath.Join(t.TempDir(), "report.csv")
 	toolCfg.CSVInput = csvPath
 	toolCfg.CSVOutput = reportPath
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.ActualPurchase = false
 	toolCfg.Coverage = 100.0
 	toolCfg.TargetCoverage = 0
@@ -1920,6 +1933,73 @@ rds,us-east-1,db.t3.medium,mysql,5,1yr,All Upfront,123456789012
 	for _, raw := range counts {
 		assert.Equal(t, "3", raw, "--override-count must replace every recommendation count")
 	}
+}
+
+// TestRunToolFromCSV_WritesAuditRecordsOnPurchaseRun reproduces #1609: a real
+// purchase run through --input-csv wrote zero audit records, unlike the
+// non-CSV path. isolateAWSEnv points the SDK at invalid credentials so the
+// real purchase call fails the same way a real AWS error would; the property
+// under test is that a durable, per-recommendation audit record is written
+// regardless of whether the purchase attempt itself succeeds.
+func TestRunToolFromCSV_WritesAuditRecordsOnPurchaseRun(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
+
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
+`)
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = filepath.Join(t.TempDir(), "report.csv")
+	toolCfg.AuditLog = auditPath
+	toolCfg.ActualPurchase = true
+	toolCfg.SkipConfirmation = true
+	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.MaxInstances = 0
+	toolCfg.OverrideCount = 0
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
+
+	data, readErr := os.ReadFile(auditPath) // #nosec G304 -- test-owned tempdir path
+	require.NoError(t, readErr, "a real purchase run through --input-csv must write an audit log")
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.Len(t, lines, 1, "one audit record per recommendation")
+
+	var rec map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &rec))
+	assert.NotEmpty(t, rec["run_id"], "the audit record must carry a run ID grouping the CSV run")
+	assert.Equal(t, common.PurchaseSourceCLI, rec["source"])
+	assert.Equal(t, "db.t3.small", rec["resource_type"])
+	assert.Equal(t, false, rec["dry_run"])
+	assert.Contains(t, []any{"success", "error"}, rec["status"],
+		"a real purchase attempt is audited as success or error, never silently dropped")
+}
+
+// TestRunToolFromCSV_ChecksAuditLogWritability reproduces the second half of
+// #1609: the --input-csv path never verified the audit log was writable
+// before touching AWS, unlike the non-CSV path (CheckAuditLogWritable in
+// runToolMultiService). An unwritable audit-log directory must be rejected
+// before the CSV is even read, on both dry-run and purchase invocations.
+func TestRunToolFromCSV_ChecksAuditLogWritability(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
+`)
+
+	toolCfg.CSVInput = csvPath
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "does-not-exist-dir", "audit.jsonl")
+	toolCfg.ActualPurchase = false
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "audit log")
 }
 
 // ==================== Tests for adjustRecommendationForExcludedVersions ====================

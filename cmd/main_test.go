@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +11,23 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 )
+
+// TestMain overrides toolCfg.AuditLog's cobra-registered default
+// ("./cudly-audit.jsonl", relative to the process working directory) before
+// any test in this package runs. Since #1609, processPurchaseLoop (shared by
+// the --input-csv path and the legacy per-region purchase path) writes a real
+// audit record via cfg.AuditLog on every dry-run and real purchase attempt.
+// Without this override, any test that reaches that loop without setting its
+// own AuditLog would silently create/append to a stray cmd/cudly-audit.jsonl
+// file in the repo working directory on every `go test` run. Tests that need
+// to assert on audit-log contents still set their own t.TempDir()-scoped
+// AuditLog, which takes precedence within that test.
+func TestMain(m *testing.M) {
+	toolCfg.AuditLog = filepath.Join(os.TempDir(), fmt.Sprintf("cudly-test-audit-%d.jsonl", os.Getpid()))
+	code := m.Run()
+	_ = os.Remove(toolCfg.AuditLog)
+	os.Exit(code)
+}
 
 func TestParseServices(t *testing.T) {
 	tests := []struct {
