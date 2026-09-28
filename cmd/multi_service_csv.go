@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
@@ -89,7 +92,8 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 
 		rec, err := parseCSVRecord(record, colIdx)
 		if err != nil {
-			return nil, err
+			line, _ := reader.FieldPos(0)
+			return nil, fmt.Errorf("CSV line %d: %w", line, err)
 		}
 
 		recs = append(recs, rec)
@@ -111,12 +115,10 @@ func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendati
 	rec.Term = getCSVField(record, colIdx, "Term")
 	rec.PaymentOption = getCSVField(record, colIdx, "PaymentOption")
 
-	// Parse integer fields
-	if err := parseCSVInt(record, colIdx, "Count", &rec.Count); err != nil {
+	if err := parseCSVCount(record, colIdx, &rec.Count); err != nil {
 		return rec, err
 	}
 
-	// Parse float fields
 	if err := parseCSVFloat(record, colIdx, "EstimatedSavings", &rec.EstimatedSavings); err != nil {
 		return rec, err
 	}
@@ -163,29 +165,46 @@ func getCSVField(record []string, colIdx map[string]int, fieldName string) strin
 	return ""
 }
 
-// parseCSVInt parses an integer field from a CSV record.
-func parseCSVInt(record []string, colIdx map[string]int, fieldName string, target *int) error {
-	value := getCSVField(record, colIdx, fieldName)
+// parseCSVCount parses the required Count field as a whole non-negative
+// integer. It drives purchase quantities, so a blank, missing, fractional or
+// otherwise malformed cell is an error rather than a truncated or zero value.
+func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
+	const fieldName = "Count"
+	idx, ok := colIdx[fieldName]
+	if !ok {
+		return fmt.Errorf("missing required %s column", fieldName)
+	}
+	value := strings.TrimSpace(getCSVField(record, colIdx, fieldName))
 	if value == "" {
-		return nil
+		return fmt.Errorf("column %d %q: value is required", idx+1, fieldName)
 	}
-
-	if _, err := fmt.Sscanf(value, "%d", target); err != nil {
-		return fmt.Errorf("invalid %s value '%s': %w", fieldName, value, err)
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("column %d %q: invalid integer %q: %w", idx+1, fieldName, value, err)
 	}
+	if n < 0 {
+		return fmt.Errorf("column %d %q: must not be negative, got %d", idx+1, fieldName, n)
+	}
+	*target = n
 	return nil
 }
 
-// parseCSVFloat parses a float field from a CSV record.
+// parseCSVFloat parses a finite float field from a CSV record. A blank or
+// absent cell leaves target untouched (see requireRankingSignal).
 func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, target *float64) error {
-	value := getCSVField(record, colIdx, fieldName)
+	value := strings.TrimSpace(getCSVField(record, colIdx, fieldName))
 	if value == "" {
 		return nil
 	}
-
-	if _, err := fmt.Sscanf(value, "%f", target); err != nil {
-		return fmt.Errorf("invalid %s value '%s': %w", fieldName, value, err)
+	col := colIdx[fieldName] + 1
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fmt.Errorf("column %d %q: invalid number %q: %w", col, fieldName, value, err)
 	}
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return fmt.Errorf("column %d %q: invalid number %q: must be finite", col, fieldName, value)
+	}
+	*target = f
 	return nil
 }
 
