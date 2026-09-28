@@ -229,21 +229,6 @@ func createDryRunResult(rec common.Recommendation, region string, index int, cfg
 	}
 }
 
-// createCancelledResults creates purchase results for canceled purchases.
-func createCancelledResults(recs []common.Recommendation, region string, cfg Config) []common.PurchaseResult {
-	results := make([]common.PurchaseResult, len(recs))
-	for k := range recs {
-		results[k] = common.PurchaseResult{
-			Recommendation: recs[k],
-			Success:        false,
-			CommitmentID:   generatePurchaseID(recs[k], region, k+1, false, effectiveSizingPct(cfg)),
-			Error:          fmt.Errorf("purchase canceled by user"),
-			Timestamp:      time.Now(),
-		}
-	}
-	return results
-}
-
 // executePurchase executes an actual RI purchase.
 func executePurchase(ctx context.Context, rec common.Recommendation, region string, index int, serviceClient provider.ServiceClient, cfg Config) common.PurchaseResult {
 	AppLogger.Printf("    ⚠️  ACTUAL PURCHASE: About to buy %d instances of %s\n", rec.Count, rec.ResourceType)

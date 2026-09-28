@@ -314,34 +314,6 @@ func TestCreateDryRunResult(t *testing.T) {
 	assert.NotEmpty(t, result.Timestamp)
 }
 
-func TestCreateCancelledResults(t *testing.T) {
-	// Save original values
-	origCfg := toolCfg
-
-	defer func() {
-		toolCfg = origCfg
-	}()
-
-	toolCfg.Coverage = 80.0
-
-	recs := []common.Recommendation{
-		{Service: common.ServiceRDS, ResourceType: "db.t3.small", Count: 2},
-		{Service: common.ServiceRDS, ResourceType: "db.t3.medium", Count: 3},
-		{Service: common.ServiceRDS, ResourceType: "db.t3.large", Count: 1},
-	}
-
-	results := createCancelledResults(recs, "us-west-2", toolCfg)
-
-	assert.Len(t, results, 3)
-	for i, result := range results {
-		assert.False(t, result.Success)
-		assert.Equal(t, recs[i], result.Recommendation)
-		assert.NotNil(t, result.Error)
-		assert.Contains(t, result.Error.Error(), "canceled")
-		assert.Contains(t, result.CommitmentID, "us-west-2")
-	}
-}
-
 func TestExecutePurchase(t *testing.T) {
 	ctx := context.Background()
 	// Save original values
