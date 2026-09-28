@@ -22,11 +22,8 @@ import (
 
 // fetchExistingCoverage retrieves the existing-RI coverage map from Cost
 // Explorer so --target-coverage sizing can subtract what's already owned in
-// each pool. Best-effort: a transient CE failure logs a warning and returns
-// an empty map, which the sizing path treats as "no signal" — recs sized
-// without subtracting existing commitments. Skipping the fetch entirely
-// when --target-coverage is not in play avoids the per-region CE charges
-// for users on the --coverage path.
+// each pool. Skipping the fetch entirely when --target-coverage is not in
+// play avoids the per-region CE charges for users on the --coverage path.
 //
 // Coverage is fetched per-region per-account so CE's org-wide aggregate
 // doesn't bleed one account's coverage into another in multi-account orgs.
@@ -35,15 +32,26 @@ import (
 // The lookback window is cfg.CoverageLookbackDays (default 30, matching the
 // CE UI default). Operators reconciling against the AWS console coverage
 // report should match this value to the report's own time window.
-func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, cfg Config) recommendations.PoolCoverageMap {
+//
+// A failed fetch is not survivable on a real purchase run: the sizing
+// formula computes gapPct := target - ExistingCoveragePct, and a nil map
+// leaves every recommendation at ExistingCoveragePct == 0, so a fetch failure
+// silently sizes as if the account owns nothing. Against an account already
+// at 75% coverage, --target-coverage 80 would then buy another 80% on top and
+// land near 155%. So a real purchase run returns the error and the caller
+// must abort rather than proceed with a nil map. A dry run logs a loud
+// warning and returns a nil map with no error, matching the previous
+// best-effort behavior, since nothing is bought and reporting fidelity wins.
+func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, cfg Config) (recommendations.PoolCoverageMap, error) {
 	if cfg.TargetCoverage <= 0 {
-		return nil
+		return nil, nil
 	}
 	adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter)
 	if !ok {
 		// Non-AWS provider: feature not wired up. Sizing degenerates to
-		// the no-existing-commitments path.
-		return nil
+		// the no-existing-commitments path. Not a fetch failure, so this is
+		// not subject to the fail-closed behavior below.
+		return nil, nil
 	}
 	lookbackDays := cfg.CoverageLookbackDays
 	if lookbackDays <= 0 {
@@ -53,19 +61,29 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 	if len(regions) == 0 {
 		allRegions, err := getAllAWSRegions(ctx, awsCfg)
 		if err != nil {
-			AppLogger.Printf("  ⚠️  Could not list AWS regions for coverage fetch (%v); skipping existing-coverage subtraction\n", err)
-			return nil
+			return nil, coverageFetchFailure(cfg, fmt.Errorf("could not list AWS regions for coverage fetch: %w", err))
 		}
 		regions = allRegions
 	}
 	AppLogger.Printf("\n🔎 Fetching existing-RI coverage from Cost Explorer per-account across %d regions (lookback %d days)...\n", len(regions), lookbackDays)
 	cov, err := adapter.GetRICoverageMap(ctx, lookbackDays, regions)
 	if err != nil {
-		AppLogger.Printf("  ⚠️  Could not fetch existing-RI coverage (%v); sizing will assume zero existing coverage\n", err)
-		return nil
+		return nil, coverageFetchFailure(cfg, fmt.Errorf("could not fetch existing-RI coverage: %w", err))
 	}
 	AppLogger.Printf("  ✅ Fetched coverage for %d (region, instance-type, engine, account) entries\n", len(cov))
-	return cov
+	return cov, nil
+}
+
+// coverageFetchFailure decides how fetchExistingCoverage reports a failed
+// coverage fetch: nil (best-effort, matching the pre-#1942 behavior) on a dry
+// run, or the error itself on a real purchase run so the caller aborts
+// instead of sizing every recommendation as if nothing is owned.
+func coverageFetchFailure(cfg Config, err error) error {
+	if effectiveDryRun(cfg) {
+		AppLogger.Printf("  ⚠️  %v; sizing will assume zero existing coverage (dry run only — a real --purchase run aborts instead, since --target-coverage would overbuy on top of what is already owned)\n", err)
+		return nil
+	}
+	return err
 }
 
 // shutdownRequested is set to true when SIGINT is received during a purchase run.
@@ -126,11 +144,16 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	engineData := fetchEngineVersionData(ctx, cfg)
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
-	// the user already owns. Best-effort: a failure here logs a warning
-	// and continues with an empty map, which makes sizing degenerate to
-	// the no-existing-commitments path (matches behavior when no recs
-	// are matched in the map).
-	coverageMap := fetchExistingCoverage(ctx, awsCfg, recClient, cfg)
+	// the user already owns. On a dry run, a failure logs a warning and
+	// continues with an empty map (sizing degenerates to the
+	// no-existing-commitments path). On a real purchase run, a failure
+	// aborts instead: sizing against a nil map would treat every
+	// recommendation as if nothing is owned and overbuy on top of the
+	// account's existing coverage.
+	coverageMap, err := fetchExistingCoverage(ctx, awsCfg, recClient, cfg)
+	if err != nil {
+		log.Fatalf("Cannot size --target-coverage: %v", err)
+	}
 
 	// Phase 1: collect all recommendations without purchasing.
 	AppLogger.Printf("\n📥 Fetching recommendations from all services...\n")
