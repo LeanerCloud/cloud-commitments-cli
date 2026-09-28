@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
+	awsprovider "github.com/LeanerCloud/cloud-commitments-go/providers/aws"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsrds "github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
@@ -822,13 +823,15 @@ func TestFetchExistingCoverage_LookbackDays(t *testing.T) {
 
 	t.Run("zero TargetCoverage returns nil regardless of lookback", func(t *testing.T) {
 		cfg := Config{TargetCoverage: 0, CoverageLookbackDays: 14, Regions: []string{"us-east-1"}}
-		got := fetchExistingCoverage(ctx, awsCfg, mockClient, cfg)
+		got, err := fetchExistingCoverage(ctx, awsCfg, mockClient, cfg)
+		require.NoError(t, err)
 		assert.Nil(t, got, "TargetCoverage=0 must short-circuit before any CE call")
 	})
 
 	t.Run("non-AWS adapter returns nil, lookback not needed", func(t *testing.T) {
 		cfg := Config{TargetCoverage: 80, CoverageLookbackDays: 14, Regions: []string{"us-east-1"}}
-		got := fetchExistingCoverage(ctx, awsCfg, mockClient, cfg)
+		got, err := fetchExistingCoverage(ctx, awsCfg, mockClient, cfg)
+		require.NoError(t, err)
 		assert.Nil(t, got, "non-AWS provider must return nil (no CE integration)")
 	})
 
@@ -839,4 +842,32 @@ func TestFetchExistingCoverage_LookbackDays(t *testing.T) {
 	// by TestGetRICoverageMap_LookbackWindowWidth in
 	// providers/aws/recommendations/coverage_test.go, which directly verifies
 	// end-start == lookbackDays on the actual CE input.  No redundant subcase here.
+}
+
+// TestFetchExistingCoverage_FetchFailure reproduces #1942: a failed
+// existing-coverage fetch must not silently size every recommendation as if
+// nothing is owned (ExistingCoveragePct == 0) on a real purchase run --
+// against an account already at 75% coverage, --target-coverage 80 would
+// then buy another 80% on top and land near 155%. It uses a real
+// *awsprovider.RecommendationsClientAdapter with no credentials so
+// GetRICoverageMap fails the same way a real CE throttle or a missing
+// ce:GetReservationCoverage permission would.
+func TestFetchExistingCoverage_FetchFailure(t *testing.T) {
+	ctx := context.Background()
+	awsCfg := aws.Config{Region: "us-east-1"}
+	realClient := awsprovider.NewRecommendationsClientDirect(awsCfg)
+
+	t.Run("purchase run aborts: returns the error and a nil map", func(t *testing.T) {
+		cfg := Config{TargetCoverage: 80, Regions: []string{"us-east-1"}, ActualPurchase: true}
+		got, err := fetchExistingCoverage(ctx, awsCfg, realClient, cfg)
+		require.Error(t, err, "a real purchase run must abort rather than size against a nil coverage map")
+		assert.Nil(t, got)
+	})
+
+	t.Run("dry run keeps the previous best-effort behavior: nil map, no error", func(t *testing.T) {
+		cfg := Config{TargetCoverage: 80, Regions: []string{"us-east-1"}, ActualPurchase: false}
+		got, err := fetchExistingCoverage(ctx, awsCfg, realClient, cfg)
+		require.NoError(t, err, "a dry run must not abort; nothing is bought")
+		assert.Nil(t, got)
+	})
 }
