@@ -41,7 +41,7 @@
 
 ## Build & Test
 
-The whole repo is a single Go module rooted at `cmd/`.
+The whole repo is a single Go module rooted at the repository root; the main package lives in `cmd/`.
 
 ```bash
 # Build
