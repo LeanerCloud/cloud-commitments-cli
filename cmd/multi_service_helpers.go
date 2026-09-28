@@ -21,6 +21,13 @@ type EC2ClientInterface interface {
 	DescribeRegions(ctx context.Context, params *awsec2.DescribeRegionsInput, optFns ...func(*awsec2.Options)) (*awsec2.DescribeRegionsOutput, error)
 }
 
+// dropDuplicateCheckFailed is a cmd-local drop reason for recommendations
+// dropped because the duplicate-purchase check itself failed (not because it
+// found and subtracted an actual duplicate, which is common.DropDuplicateDedup).
+// It is not a common.Drop* constant because adding one is a
+// cloud-commitments-go change; this string is exclusive to this package.
+const dropDuplicateCheckFailed = "duplicate-check-failed"
+
 // formatServices formats a list of services for display.
 func formatServices(services []common.ServiceType) string {
 	names := make([]string, len(services))
@@ -427,7 +434,7 @@ func processRegionRecommendations(
 	}
 
 	// Check for duplicate RIs. Drop tracking skipped (nil).
-	adjustedRecs := checkDuplicates(ctx, filteredRecs, serviceClient, nil)
+	adjustedRecs := checkDuplicates(ctx, filteredRecs, serviceClient, isDryRun, nil)
 
 	// Process purchases
 	regionResults := processPurchaseLoop(ctx, adjustedRecs, region, isDryRun, serviceClient, cfg)
@@ -576,18 +583,39 @@ func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverag
 // is applied once run-wide instead, after every region has been fetched
 // (applyGlobalInstanceLimit in multi_service.go).
 //
+// The duplicate check is the only guard between a re-run and a double
+// purchase, so a failed check (throttling, a describe-call AccessDenied, a
+// transient 5xx) must not fall back to the un-deduplicated counts on a
+// purchase run: that would buy reserved capacity the account already owns.
+// isDryRun selects the behavior on error: a dry run logs a loud warning and
+// continues (nothing is bought, so reporting fidelity wins), while a purchase
+// run refuses to spend and drops these recommendations entirely, mirroring
+// the "refuse to spend rather than purchase uncapped" stance already taken
+// for --max-instances in processRegionRecommendations.
+//
 // drops accumulates per-reason drop counts for the end-of-run summary; pass nil to skip.
+//
+// A recommendation dropped because the check itself failed is counted under
+// dropDuplicateCheckFailed, not common.DropDuplicateDedup: the latter means
+// "an actual duplicate was found and subtracted", and reusing it for a failed
+// check would report the failure as a successful dedup in the summary.
 func checkDuplicates(
 	ctx context.Context,
 	filteredRecs []common.Recommendation,
 	serviceClient provider.ServiceClient,
+	isDryRun bool,
 	drops *common.DropSummary,
 ) []common.Recommendation {
 	// Check for duplicate RIs to avoid double purchasing
 	duplicateChecker := NewDuplicateChecker(0)
 	adjustedRecs, dedupedOut, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
 	if err != nil {
-		AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v\n", err)
+		if !isDryRun {
+			AppLogger.Printf("  ❌ Refusing to purchase %d instance(s): could not check for existing RIs (%v). Dropping these recommendations rather than risking a duplicate purchase.\n", CalculateTotalInstances(filteredRecs), err)
+			drops.Add(dropDuplicateCheckFailed, len(filteredRecs))
+			return nil
+		}
+		AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v (dry run; continuing with un-deduplicated counts)\n", err)
 		// Continue with original filteredRecs on error; adjustedRecs is not used in this branch.
 	} else {
 		// Always use the adjusted recommendations (they might have different counts even if same length)
@@ -663,7 +691,7 @@ func fetchAndFilterRegionRecs(
 	// --max-instances is NOT applied here; it is enforced once run-wide by the
 	// caller so the cap covers every service and region together.
 	if serviceClient != nil {
-		recs = checkDuplicates(ctx, recs, serviceClient, drops)
+		recs = checkDuplicates(ctx, recs, serviceClient, effectiveDryRun(cfg), drops)
 	}
 
 	return recs

@@ -461,6 +461,48 @@ func TestAdjustRecsForDuplicatesError(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
+// TestCheckDuplicates_ErrorOnPurchaseRun_DropsRecsRatherThanFallingBack
+// reproduces #1941 at the checkDuplicates layer used by the main (non-CSV)
+// pipeline: a failed duplicate check on a purchase run (isDryRun=false) must
+// not fall back to the un-deduplicated input. Before the fix, the error
+// branch left filteredRecs unchanged and only logged a warning, so the run
+// proceeded to buy the full pre-dedup counts.
+func TestCheckDuplicates_ErrorOnPurchaseRun_DropsRecsRatherThanFallingBack(t *testing.T) {
+	ctx := context.Background()
+	recs := []common.Recommendation{
+		{ResourceType: "db.t3.small", Count: 5},
+	}
+
+	mockClient := &MockServiceClient{}
+	mockClient.On("GetExistingCommitments", ctx).Return([]common.Commitment(nil), errors.New("throttling"))
+
+	drops := common.NewDropSummary()
+	result := checkDuplicates(ctx, recs, mockClient, false /* isDryRun */, drops)
+
+	assert.Nil(t, result, "a failed duplicate check on a purchase run must drop the recommendations, not fall back to the un-deduplicated input")
+	assert.Equal(t, 1, drops.Total())
+	mockClient.AssertExpectations(t)
+}
+
+// TestCheckDuplicates_ErrorOnDryRun_ContinuesUnadjusted asserts the dry-run
+// side of the same branch is unchanged: nothing is purchased, so a failed
+// duplicate check logs a warning and keeps reporting the un-deduplicated
+// counts rather than silently dropping recommendations from the dry-run report.
+func TestCheckDuplicates_ErrorOnDryRun_ContinuesUnadjusted(t *testing.T) {
+	ctx := context.Background()
+	recs := []common.Recommendation{
+		{ResourceType: "db.t3.small", Count: 5},
+	}
+
+	mockClient := &MockServiceClient{}
+	mockClient.On("GetExistingCommitments", ctx).Return([]common.Commitment(nil), errors.New("throttling"))
+
+	result := checkDuplicates(ctx, recs, mockClient, true /* isDryRun */, nil)
+
+	assert.Equal(t, recs, result)
+	mockClient.AssertExpectations(t)
+}
+
 func TestGroupRecommendationsByServiceRegion(t *testing.T) {
 	tests := []struct {
 		expectedGroups  map[common.ServiceType]map[string]int

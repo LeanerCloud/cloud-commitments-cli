@@ -88,7 +88,7 @@ A duplicate check runs before every purchase, on both the `--services` and `--in
 
 That 24-hour lookback is fixed. This flag is accepted as a Go duration string (e.g. `24h`, `48h`, `1h30m`) and stored, but its value is never read by the check - passing `--idempotency-window 72h` (or any other value) has no effect on which recommendations are purchased ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262) tracks wiring it in).
 
-If the existing-commitments lookup itself fails (a transient API error), the check is skipped for that batch and the run continues un-deduplicated, with a warning printed to the log rather than the run stopping ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)). Treat that warning as a signal to check the audit log for the run before trusting its purchase counts.
+If the existing-commitments lookup itself fails (a transient API error), the two modes diverge: a dry run continues with a warning printed to the log (nothing is bought, so reporting fidelity wins), while a `--purchase` run refuses that (service, region) - it prints a "Refusing to purchase" line and buys nothing there, rather than falling back to the un-deduplicated counts ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)).
 
 The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server-side scheduler path and is not emitted by this CLI's dedup check.
 
@@ -104,6 +104,8 @@ cudly --services rds --idempotency-window 72h
 ```
 
 When using `--target-coverage`, cudly subtracts existing RI coverage from the sizing calculation so it only recommends incremental purchases. By default this subtraction treats all existing RIs as fully covering demand regardless of when they expire.
+
+If the Cost Explorer coverage fetch fails, a dry run warns and sizes as if nothing is owned; a `--purchase` run aborts before sizing, since sizing against unknown coverage risks buying on top of what the account already owns ([#1942](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1942)).
 
 Setting `--rebuy-window-days` changes that behavior: any existing RI whose remaining term is at most this many days is treated as if it has already expired, so `--target-coverage` sizes a replacement recommendation before it actually lapses. This is useful to avoid the coverage gap that would otherwise appear between an RI expiring and a new one taking effect.
 
@@ -137,5 +139,5 @@ Before any real purchase run:
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
-6. Note that `--idempotency-window`'s value is not applied - dedup always uses a fixed 24h lookback ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262)) - and that a failed existing-commitments lookup lets the run proceed un-deduplicated with a warning ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for that warning and check the audit log afterward.
+6. Note that `--idempotency-window`'s value is not applied - dedup always uses a fixed 24h lookback ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262)) - and that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward.
 7. If an AI agent or other automation drives `cudly`, never pass `--yes` to it directly - have the agent hand off the dry-run recommendation to a human, who runs `--purchase` themselves. See [Automation and AI agents](#automation-and-ai-agents).

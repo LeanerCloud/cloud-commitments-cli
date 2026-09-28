@@ -1782,6 +1782,48 @@ elasticache,us-west-2,cache.t3.micro,redis,1,1yr,All Upfront,123456789012
 	}
 }
 
+// TestRunToolFromCSV_DuplicateCheckFailureRefusesToPurchase reproduces #1941:
+// on a real purchase run (--input-csv ... --purchase), a failed duplicate
+// check (throttling, a describe-call AccessDenied, a transient 5xx) must not
+// fall back to purchasing the un-deduplicated counts. isolateAWSEnv points
+// the SDK at invalid credentials so GetExistingCommitments fails the same way
+// a real AWS error would, and the region must be skipped entirely rather than
+// purchased with the original (potentially duplicate) counts. Before the fix,
+// adjustRecsForDuplicates' error was logged as a warning and adjustedRecs was
+// reset to the original recs, so the region proceeded into the purchase loop
+// unchanged.
+func TestRunToolFromCSV_DuplicateCheckFailureRefusesToPurchase(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
+
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
+`)
+	reportPath := filepath.Join(t.TempDir(), "report.csv")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = reportPath
+	toolCfg.AuditLog = auditPath
+	toolCfg.ActualPurchase = true // the money path: a duplicate-check failure here must fail closed
+	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.MaxInstances = 0
+	toolCfg.OverrideCount = 0
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
+
+	// The region is skipped before executePurchase or processPurchaseLoop
+	// ever run, so no PurchaseResult is produced and no report is written
+	// (writeMultiServiceCSVReport no-ops on an empty results slice). Before
+	// the fix, the un-deduplicated recommendation reached the purchase loop
+	// and a report row (attempting a real AWS purchase call) was produced.
+	_, statErr := os.Stat(reportPath)
+	assert.True(t, os.IsNotExist(statErr), "a failed duplicate check on a purchase run must skip the region entirely, not attempt to purchase the un-deduplicated counts")
+}
+
 // TestRunToolFromCSV_NonExistentFile asserts the unreadable-input error path
 // surfaces as an error (previously log.Fatalf, which made it untestable).
 func TestRunToolFromCSV_NonExistentFile(t *testing.T) {

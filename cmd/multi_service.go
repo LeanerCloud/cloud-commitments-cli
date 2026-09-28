@@ -80,7 +80,7 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 // instead of sizing every recommendation as if nothing is owned.
 func coverageFetchFailure(cfg Config, err error) error {
 	if effectiveDryRun(cfg) {
-		AppLogger.Printf("  ⚠️  %v; sizing will assume zero existing coverage (dry run only — a real --purchase run aborts instead, since --target-coverage would overbuy on top of what is already owned)\n", err)
+		AppLogger.Printf("  ⚠️  %v; sizing will assume zero existing coverage (dry run only; a real --purchase run aborts instead, since --target-coverage would overbuy on top of what is already owned)\n", err)
 		return nil
 	}
 	return err
@@ -564,11 +564,10 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 				continue
 			}
 
-			// Check for duplicate RIs to avoid double purchasing
-			adjustedRecs, err := adjustRecsForDuplicates(ctx, recs, serviceClient)
-			if err != nil {
-				AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v\n", err)
-				adjustedRecs = recs // Continue with original recommendations if check fails
+			// Check for duplicate RIs to avoid double purchasing.
+			adjustedRecs, ok := checkDuplicatesForCSVRegion(ctx, recs, serviceClient, service, region, isDryRun)
+			if !ok {
+				continue
 			}
 			// Deducting existing commitments shrinks Count, which can push a
 			// row that cleared the floor in filterAndAdjustRecommendations back
@@ -609,6 +608,29 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 	// actually processed, not the pre-dedup input passed into the outer loop.
 	printMultiServiceSummary(allAdjustedRecs, allResults, serviceStats, isDryRun)
 	return nil
+}
+
+// checkDuplicatesForCSVRegion runs the duplicate check for a single
+// (service, region) pair in CSV mode and reports whether the caller should
+// still process that region (ok). The duplicate check is the only guard
+// between a re-run and a double purchase, so a failed check must not fall
+// back to the un-deduplicated counts on a purchase run: that would buy
+// reserved capacity the account already owns. A dry run logs a loud warning
+// and continues with the un-deduplicated counts (nothing is bought, so
+// reporting fidelity wins); a purchase run refuses to spend and returns
+// ok=false, mirroring the fail-closed behavior of checkDuplicates on the
+// non-CSV pipeline.
+func checkDuplicatesForCSVRegion(ctx context.Context, recs []common.Recommendation, serviceClient provider.ServiceClient, service common.ServiceType, region string, isDryRun bool) (adjustedRecs []common.Recommendation, ok bool) {
+	adjustedRecs, err := adjustRecsForDuplicates(ctx, recs, serviceClient)
+	if err == nil {
+		return adjustedRecs, true
+	}
+	if !isDryRun {
+		AppLogger.Printf("  ❌ Refusing to purchase %s/%s: could not check for existing RIs (%v). Skipping this region rather than risking a duplicate purchase.\n", getServiceDisplayName(service), region, err)
+		return nil, false
+	}
+	AppLogger.Printf("  ⚠️  Warning: Could not check for existing RIs: %v (dry run; continuing with un-deduplicated counts)\n", err)
+	return recs, true
 }
 
 // filterAndAdjustRecommendations applies filters, coverage, count override,
