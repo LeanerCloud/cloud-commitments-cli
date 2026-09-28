@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/spf13/cobra"
@@ -684,5 +686,78 @@ func TestValidateCSVModeFilterFlags(t *testing.T) {
 				t.Errorf("validateCSVModeFilterFlags() error = %v, want substring %q", err, tt.errSubstr)
 			}
 		})
+	}
+}
+
+// TestValidateIdempotencyWindow covers #1262: the flag used to be accepted
+// unparsed, so "banana" or "90m" ran silently with a hardcoded 24h window.
+func TestValidateIdempotencyWindow(t *testing.T) {
+	tests := []struct {
+		window    string
+		wantHours int
+		wantErr   bool
+	}{
+		{window: "24h", wantHours: 24},
+		{window: "72h", wantHours: 72},
+		{window: "1h", wantHours: 1},
+		{window: "", wantErr: true},
+		{window: "banana", wantErr: true},
+		{window: "0h", wantErr: true},
+		{window: "-24h", wantErr: true},
+		{window: "90m", wantErr: true},
+		{window: "1h30m", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.window, func(t *testing.T) {
+			origCfg := toolCfg
+			defer func() { toolCfg = origCfg }()
+			toolCfg.IdempotencyWindow = tt.window
+			err := validateIdempotencyWindow()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "invalid idempotency-window") {
+					t.Fatalf("validateIdempotencyWindow(%q) error = %v, want invalid idempotency-window", tt.window, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateIdempotencyWindow(%q) unexpected error = %v", tt.window, err)
+			}
+			if toolCfg.IdempotencyWindowHours != tt.wantHours {
+				t.Errorf("IdempotencyWindowHours = %d, want %d", toolCfg.IdempotencyWindowHours, tt.wantHours)
+			}
+		})
+	}
+}
+
+// TestCheckDuplicates_HonorsIdempotencyWindow reproduces the #1262 scenario:
+// a re-run 30h after a purchase with --idempotency-window 72h must subtract
+// that purchase. With the window ignored the lookback stayed at 24h and the
+// same 5 RIs were bought again.
+func TestCheckDuplicates_HonorsIdempotencyWindow(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	toolCfg.IdempotencyWindow = "72h"
+	if err := validateIdempotencyWindow(); err != nil {
+		t.Fatalf("validateIdempotencyWindow: %v", err)
+	}
+
+	ctx := context.Background()
+	recs := []common.Recommendation{{
+		ResourceType: "db.t3.small", Region: "us-east-1", Count: 5,
+		Details: &common.DatabaseDetails{Engine: "mysql"},
+	}}
+	existing := []common.Commitment{{
+		ResourceType: "db.t3.small", Region: "us-east-1", Engine: "mysql",
+		Count: 5, State: "active", StartDate: time.Now().Add(-30 * time.Hour),
+	}}
+	mockClient := &MockServiceClient{}
+	mockClient.On("GetExistingCommitments", ctx).Return(existing, nil)
+	t.Cleanup(func() { mockClient.AssertExpectations(t) })
+
+	if got := checkDuplicates(ctx, recs, mockClient, false /* isDryRun */, nil); CalculateTotalInstances(got) != 0 {
+		t.Errorf("checkDuplicates kept %d instance(s); the 30h-old purchase is inside the 72h window and must be subtracted", CalculateTotalInstances(got))
+	}
+	if got, err := adjustRecsForDuplicates(ctx, recs, mockClient); err != nil || CalculateTotalInstances(got) != 0 {
+		t.Errorf("adjustRecsForDuplicates (CSV path) kept %d instance(s), err=%v; want 0", CalculateTotalInstances(got), err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/spf13/cobra"
@@ -37,6 +38,26 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if err := validateIdempotencyWindow(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateIdempotencyWindow parses --idempotency-window into the whole hours
+// the duplicate check's lookback is measured in. Anything it cannot represent
+// exactly is rejected rather than rounded, since a shorter window than asked
+// for lets a duplicate purchase through.
+func validateIdempotencyWindow() error {
+	window, err := time.ParseDuration(toolCfg.IdempotencyWindow)
+	if err != nil {
+		return fmt.Errorf("invalid idempotency-window %q: %w", toolCfg.IdempotencyWindow, err)
+	}
+	if window <= 0 || window%time.Hour != 0 {
+		return fmt.Errorf("invalid idempotency-window %q: must be a positive whole number of hours (e.g. 24h, 72h)", toolCfg.IdempotencyWindow)
+	}
+	toolCfg.IdempotencyWindowHours = int(window / time.Hour)
 	return nil
 }
 

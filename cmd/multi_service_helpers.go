@@ -203,7 +203,7 @@ func populateAccountNames(ctx context.Context, recs []common.Recommendation, acc
 
 // adjustRecsForDuplicates checks for existing RIs and adjusts recommendations to avoid duplicates.
 func adjustRecsForDuplicates(ctx context.Context, recs []common.Recommendation, serviceClient provider.ServiceClient) ([]common.Recommendation, error) {
-	duplicateChecker := NewDuplicateChecker(0)
+	duplicateChecker := NewDuplicateChecker(toolCfg.IdempotencyWindowHours)
 	adjustedRecs, _, err := duplicateChecker.AdjustRecommendationsForExisting(ctx, recs, serviceClient)
 	if err != nil {
 		return recs, err // Return original recommendations with error
@@ -598,7 +598,7 @@ func checkDuplicates(
 	drops *common.DropSummary,
 ) []common.Recommendation {
 	// Check for duplicate RIs to avoid double purchasing
-	duplicateChecker := NewDuplicateChecker(0)
+	duplicateChecker := NewDuplicateChecker(toolCfg.IdempotencyWindowHours)
 	adjustedRecs, dedupedOut, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
 	if err != nil {
 		if !isDryRun {

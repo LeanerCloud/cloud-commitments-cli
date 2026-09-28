@@ -62,6 +62,7 @@ type Config struct {
 	TermYears              int
 	CoverageLookbackDays   int
 	MinCount               int
+	IdempotencyWindowHours int
 	MinSavingsPct          float64
 	OverrideCount          int32
 	MaxInstances           int32
