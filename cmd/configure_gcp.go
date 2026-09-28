@@ -153,20 +153,32 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 	}
 	store := NewAWSSecretsStore(secretsmanager.NewFromConfig(cfg))
 
-	credsFile, mintedKeyName, err := getGCPCredentialsFilePath(ctx, reader)
+	var stop context.CancelFunc
+	defer func() {
+		if stop != nil {
+			stop()
+		}
+	}()
+	beginUpload := func() context.Context {
+		if stop == nil {
+			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		}
+		return ctx
+	}
+	credsFile, mintedKeyName, err := getGCPCredentialsFilePath(ctx, reader, beginUpload)
 	if err != nil {
 		return err
 	}
 
-	// Scoped to the upload (no stdin reads) so an interrupt cancels the
-	// Secrets Manager call and the minted-key cleanup still runs.
-	uploadCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	creds, err := uploadGCPCredentialsFile(uploadCtx, store, gcpOpts.StackName, credsFile, mintedKeyName, deleteGCPServiceAccountKey)
+	creds, err := uploadGCPCredentialsFile(beginUpload(), store, gcpOpts.StackName, credsFile, mintedKeyName, deleteGCPServiceAccountKey)
 	if err != nil {
 		return err
 	}
 
+	stop()
+	if mintedKeyName != "" {
+		fmt.Println("Removed the local copy of the minted key.")
+	}
 	printGCPConfigurationSuccess(creds)
 	return nil
 }
@@ -183,8 +195,6 @@ func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName
 			}
 			if rmErr := removeMintedGCPKey(credsFile); rmErr != nil {
 				err = errors.Join(err, rmErr)
-			} else if err == nil {
-				fmt.Println("Removed the local copy of the minted key.")
 			}
 		}()
 	}
@@ -209,7 +219,6 @@ func deleteMintedGCPKeyRemotely(cause error, keyName string, deleteKey func(cont
 	if err := deleteKey(ctx, keyName); err != nil {
 		return fmt.Errorf("%w; the minted key is still active in GCP and deleting it failed (%w); delete it with: %s", cause, err, gcloudDeleteKeyCommand(keyName))
 	}
-	fmt.Println("Deleted the minted key from GCP.")
 	return cause
 }
 
@@ -226,11 +235,11 @@ func gcloudDeleteKeyCommand(keyName string) string {
 // getGCPCredentialsFilePath determines the credentials file path from options
 // or user input. mintedKeyName is the IAM key resource name when the setup
 // wizard created the file, and empty otherwise.
-func getGCPCredentialsFilePath(ctx context.Context, reader *bufio.Reader) (credsFile, mintedKeyName string, err error) {
+func getGCPCredentialsFilePath(ctx context.Context, reader *bufio.Reader, beginUpload func() context.Context) (credsFile, mintedKeyName string, err error) {
 	if gcpOpts.CredentialsFile != "" {
 		credsFile = gcpOpts.CredentialsFile
 	} else if !gcpOpts.SkipSetup {
-		credsFile, mintedKeyName, err = runGCPSetupCommands(ctx, reader)
+		credsFile, mintedKeyName, err = runGCPSetupCommands(ctx, reader, beginUpload)
 		if err != nil {
 			return "", "", err
 		}
@@ -623,7 +632,7 @@ func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, k
 // Steps 4-6 (create SA, grant role, create key): performed via GCP IAM and
 // Cloud Resource Manager SDK v1 APIs using ADC. Fail loud on any SDK error
 // (no CLI fallback).
-func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader) (keyFile, keyName string, err error) {
+func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader, beginUpload func() context.Context) (keyFile, keyName string, err error) {
 	err = gcpStepLogin(reader)
 	if err != nil {
 		return "", "", err
@@ -644,7 +653,7 @@ func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader) (keyFile, ke
 		return "", "", err
 	}
 
-	return gcpStepCreateKey(ctx, reader, saEmail)
+	return gcpStepCreateKey(reader, saEmail, beginUpload)
 }
 
 // gcpStepLogin runs the two interactive gcloud logins the wizard needs:
@@ -791,7 +800,7 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 // actually created; on skip or an unknown choice it returns empty strings so
 // the caller knows to prompt for an existing credentials file instead of
 // assuming one was written.
-func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string) (keyFile, keyName string, err error) {
+func gcpStepCreateKey(reader *bufio.Reader, saEmail string, beginUpload func() context.Context) (keyFile, keyName string, err error) {
 	keyFile, err = newMintedGCPKeyPath()
 	if err != nil {
 		return "", "", err
@@ -810,12 +819,10 @@ func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string)
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		keyName, err = createGCPServiceAccountKey(ctx, saEmail, keyFile)
+		keyName, err = createGCPServiceAccountKey(beginUpload(), saEmail, keyFile)
 		if err != nil {
 			return "", "", errors.Join(err, removeMintedGCPKey(keyFile))
 		}
-		fmt.Printf("Key written to temporary file: %s\n", keyFile)
-		fmt.Println()
 		return keyFile, keyName, nil
 	case "s", "skip":
 		fmt.Println("Skipping Create Key")
