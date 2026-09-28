@@ -152,7 +152,7 @@ func TestWriteServiceAccountKey_Success(t *testing.T) {
 	}
 	keyFile := filepath.Join(t.TempDir(), "cudly-gcp-key.json")
 
-	err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
+	_, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
 	require.NoError(t, err)
 
 	assert.True(t, m.createCalled)
@@ -176,7 +176,7 @@ func TestWriteServiceAccountKey_DecodeFailureRollsBack(t *testing.T) {
 	}
 	keyFile := filepath.Join(t.TempDir(), "cudly-gcp-key.json")
 
-	err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
+	_, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to decode key data")
 
@@ -200,7 +200,7 @@ func TestWriteServiceAccountKey_RollbackFailureSurfaced(t *testing.T) {
 	}
 	keyFile := filepath.Join(t.TempDir(), "cudly-gcp-key.json")
 
-	err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
+	_, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
 	require.Error(t, err)
 	assert.True(t, m.deleteCalled)
 	assert.Contains(t, err.Error(), "failed to decode key data", "the original cause must be surfaced")
@@ -217,7 +217,7 @@ func TestWriteServiceAccountKey_CreateFailureNoOrphan(t *testing.T) {
 	}
 	keyFile := filepath.Join(t.TempDir(), "cudly-gcp-key.json")
 
-	err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
+	_, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create service account key")
 	assert.False(t, m.deleteCalled, "no remote key was minted, so DeleteKey must not be called")
@@ -238,7 +238,7 @@ func TestWriteServiceAccountKey_ReserveFailureNoMint(t *testing.T) {
 		privateKeyData: base64.StdEncoding.EncodeToString([]byte("{}")),
 	}
 
-	err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
+	_, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to reserve key file")
 	assert.False(t, m.createCalled, "the remote key must not be minted when the file cannot be reserved")
@@ -251,27 +251,32 @@ func TestWriteServiceAccountKey_ReserveFailureNoMint(t *testing.T) {
 
 // --- uploadGCPCredentialsFile (minted key cleanup, #1947) --------------------
 
+const testMintedKeyName = "projects/proj/serviceAccounts/sa@proj.iam.gserviceaccount.com/keys/abc123"
+
 // mintTestGCPKey mints a key into a newMintedGCPKeyPath location through the
-// real writeServiceAccountKey flow and asserts it was created with 0600.
-func mintTestGCPKey(t *testing.T) string {
+// real writeServiceAccountKey flow, asserts it was created with 0600, and
+// returns the file and the key resource name.
+func mintTestGCPKey(t *testing.T) (string, string) {
 	t.Helper()
 	keyMaterial := []byte(`{"type":"service_account","project_id":"proj","client_email":"sa@proj.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n"}`)
 	m := &mockGCPKeyProvisioner{
-		keyName:        "projects/-/serviceAccounts/sa@proj.iam.gserviceaccount.com/keys/abc123",
+		keyName:        testMintedKeyName,
 		privateKeyData: base64.StdEncoding.EncodeToString(keyMaterial),
 	}
 	keyFile, err := newMintedGCPKeyPath()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(keyFile)) })
 
-	require.NoError(t, writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile))
+	keyName, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
+	require.NoError(t, err)
+	require.Equal(t, testMintedKeyName, keyName)
 	info, err := os.Stat(keyFile)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), "minted key must be 0600")
 	dirInfo, err := os.Stat(filepath.Dir(keyFile))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm(), "minted key dir must be 0700")
-	return keyFile
+	return keyFile, keyName
 }
 
 func assertMintedKeyGone(t *testing.T, keyFile string) {
@@ -283,55 +288,109 @@ func assertMintedKeyGone(t *testing.T, keyFile string) {
 }
 
 func TestUploadGCPCredentialsFile_MintedKeyRemovedAfterSuccess(t *testing.T) {
-	keyFile := mintTestGCPKey(t)
+	keyFile, keyName := mintTestGCPKey(t)
 	store := NewMockSecretsStore()
+	m := &mockGCPKeyProvisioner{}
 
-	creds, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, true)
+	creds, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, keyName, m.DeleteKey)
 	require.NoError(t, err)
 	assert.Equal(t, "sa@proj.iam.gserviceaccount.com", creds.ClientEmail)
 	assert.Contains(t, store.updatedSecrets, "stack-GCPCredentials")
+	assert.False(t, m.deleteCalled, "a successfully uploaded key must stay active in GCP")
 	assertMintedKeyGone(t, keyFile)
 }
 
-func TestUploadGCPCredentialsFile_MintedKeyRemovedAfterUploadFailure(t *testing.T) {
-	keyFile := mintTestGCPKey(t)
+func TestUploadGCPCredentialsFile_UploadFailureDeletesRemoteKey(t *testing.T) {
+	keyFile, keyName := mintTestGCPKey(t)
 	store := NewMockSecretsStore()
 	store.updateSecretFunc = func(context.Context, string, string) error { return errors.New("access denied") }
+	m := &mockGCPKeyProvisioner{}
 
-	_, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, true)
+	_, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, keyName, m.DeleteKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "access denied")
-	assert.Contains(t, err.Error(), "still active in GCP")
+	assert.True(t, m.deleteCalled, "the minted key must be deleted from GCP when the upload fails")
+	assert.Equal(t, testMintedKeyName, m.deletedKeyName)
 	assertMintedKeyGone(t, keyFile)
 }
 
-func TestUploadGCPCredentialsFile_MintedKeyRemovedAfterParseFailure(t *testing.T) {
+func TestUploadGCPCredentialsFile_RemoteDeleteFailureNamesGcloudCommand(t *testing.T) {
+	keyFile, keyName := mintTestGCPKey(t)
+	store := NewMockSecretsStore()
+	store.updateSecretFunc = func(context.Context, string, string) error { return errors.New("access denied") }
+	m := &mockGCPKeyProvisioner{deleteErr: errors.New("permission denied")}
+
+	_, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, keyName, m.DeleteKey)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "access denied")
+	assert.Contains(t, err.Error(), "permission denied")
+	assert.Contains(t, err.Error(), "gcloud iam service-accounts keys delete abc123 --iam-account=sa@proj.iam.gserviceaccount.com")
+	assert.NotContains(t, err.Error(), "PRIVATE KEY", "the error must never carry key material")
+	assertMintedKeyGone(t, keyFile)
+}
+
+// TestUploadGCPCredentialsFile_CanceledContextStillCleansUp models an
+// interrupt during the Secrets Manager call: the remote delete must run on a
+// live context even though the upload context is canceled.
+func TestUploadGCPCredentialsFile_CanceledContextStillCleansUp(t *testing.T) {
+	keyFile, keyName := mintTestGCPKey(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	store := NewMockSecretsStore()
+	store.updateSecretFunc = func(ctx context.Context, _, _ string) error { return ctx.Err() }
+	var deleteCtxErr error
+	deleted := false
+	deleteKey := func(ctx context.Context, name string) error {
+		deleted = true
+		deleteCtxErr = ctx.Err()
+		return nil
+	}
+
+	_, err := uploadGCPCredentialsFile(ctx, store, "stack", keyFile, keyName, deleteKey)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.True(t, deleted, "the minted key must be deleted from GCP after an interrupt")
+	assert.NoError(t, deleteCtxErr, "the remote delete must not inherit the canceled context")
+	assertMintedKeyGone(t, keyFile)
+}
+
+func TestUploadGCPCredentialsFile_ParseFailureDeletesRemoteKey(t *testing.T) {
 	keyFile, err := newMintedGCPKeyPath()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(keyFile)) })
 	require.NoError(t, os.WriteFile(keyFile, []byte("not json"), 0600))
+	m := &mockGCPKeyProvisioner{}
 
-	_, err = uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, true)
+	_, err = uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, testMintedKeyName, m.DeleteKey)
 	require.Error(t, err)
+	assert.Equal(t, testMintedKeyName, m.deletedKeyName, "a minted key that cannot be parsed must still be deleted from GCP")
 	assertMintedKeyGone(t, keyFile)
 }
 
 func TestUploadGCPCredentialsFile_RemovalFailureReported(t *testing.T) {
-	keyFile := mintTestGCPKey(t)
+	keyFile, keyName := mintTestGCPKey(t)
 	// A read-only parent dir makes the unlink fail.
 	require.NoError(t, os.Chmod(filepath.Dir(keyFile), 0500))
 	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(keyFile), 0700) })
+	m := &mockGCPKeyProvisioner{}
 
-	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, true)
+	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, keyName, m.DeleteKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove the minted key file")
 }
 
 func TestUploadGCPCredentialsFile_OperatorFileKept(t *testing.T) {
-	keyFile := mintTestGCPKey(t)
+	keyFile, _ := mintTestGCPKey(t)
+	m := &mockGCPKeyProvisioner{}
 
-	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, false)
+	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, "", m.DeleteKey)
 	require.NoError(t, err)
 	_, err = os.Stat(keyFile)
 	assert.NoError(t, err, "an operator-supplied credentials file must not be deleted")
+	assert.False(t, m.deleteCalled, "an operator-supplied key must never be deleted from GCP")
+}
+
+func TestGcloudDeleteKeyCommand(t *testing.T) {
+	assert.Equal(t,
+		"gcloud iam service-accounts keys delete abc123 --iam-account=sa@proj.iam.gserviceaccount.com",
+		gcloudDeleteKeyCommand(testMintedKeyName))
 }
