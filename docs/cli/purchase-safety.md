@@ -84,16 +84,16 @@ The default path (`./cudly-audit.jsonl`) writes to the current working directory
 --idempotency-window   string   default: 24h
 ```
 
-A duplicate check runs before every purchase, on both the `--services` and `--input-csv` paths: it fetches existing commitments and subtracts anything purchased in the last 24 hours from each recommendation's count, so a retried run doesn't buy the same capacity twice.
+A duplicate check runs before every purchase, on both the `--services` and `--input-csv` paths: it fetches existing commitments and subtracts anything purchased within the window from each recommendation's count, so a retried run doesn't buy the same capacity twice.
 
-That 24-hour lookback is fixed. This flag is accepted as a Go duration string (e.g. `24h`, `48h`, `1h30m`) and stored, but its value is never read by the check - passing `--idempotency-window 72h` (or any other value) has no effect on which recommendations are purchased ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262) tracks wiring it in).
+The window is a Go duration string that must be a positive whole number of hours (e.g. `24h`, `48h`, `72h`). A value that doesn't parse, is zero or negative, or isn't whole hours (e.g. `90m`, `1h30m`) is rejected at startup, before any API call, rather than rounded or replaced with the default.
 
 If the existing-commitments lookup itself fails (a transient API error), the two modes diverge: a dry run continues with a warning printed to the log (nothing is bought, so reporting fidelity wins), while a `--purchase` run refuses that (service, region) - it prints a "Refusing to purchase" line and buys nothing there, rather than falling back to the un-deduplicated counts ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)).
 
 The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server-side scheduler path and is not emitted by this CLI's dedup check.
 
 ```bash
-# The dedup check always runs with a fixed 24h lookback; this flag's value is not applied:
+# Subtract anything purchased in the last 72 hours:
 cudly --services rds --idempotency-window 72h
 ```
 
@@ -139,5 +139,5 @@ Before any real purchase run:
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
-6. Note that `--idempotency-window`'s value is not applied - dedup always uses a fixed 24h lookback ([#1262](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1262)) - and that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward.
+6. Set `--idempotency-window` to cover the time since the earlier run (e.g. `72h` for a re-run two days later), and note that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward.
 7. If an AI agent or other automation drives `cudly`, never pass `--yes` to it directly - have the agent hand off the dry-run recommendation to a human, who runs `--purchase` themselves. See [Automation and AI agents](#automation-and-ai-agents).

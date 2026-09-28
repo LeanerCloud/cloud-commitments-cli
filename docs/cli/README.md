@@ -50,7 +50,7 @@ All flags belong to the root command unless noted otherwise.
 | `--purchase` | | `false` | Execute real purchases. This is the only purchase control: a bare run is always a dry run, and `--purchase` alone executes real purchases (identically in cloud-fetch and `--input-csv` modes). Still gated by the `--yes` / interactive confirmation prompt. See [purchase-safety.md](purchase-safety.md). |
 | `--yes` | | `false` | Skip the interactive confirmation prompt. Use with caution in automation. |
 | `--audit-log` | | `./cudly-audit.jsonl` | Path to the JSONL audit log file. Written for every recommendation (dry-run and real). See [purchase-safety.md](purchase-safety.md). |
-| `--idempotency-window` | | `24h` | Lookback window for duplicate purchase detection. Accepted as a Go duration string (not validated by the CLI; currently has no effect on CLI runs). See [purchase-safety.md](purchase-safety.md). |
+| `--idempotency-window` | | `24h` | Lookback window for duplicate purchase detection. A Go duration string that must be a positive whole number of hours (e.g. `24h`, `72h`); anything else is rejected at startup. See [purchase-safety.md](purchase-safety.md). |
 
 ### Recommendation quality filters
 
