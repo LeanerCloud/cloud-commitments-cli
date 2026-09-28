@@ -638,6 +638,7 @@ rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,All Upfront,123456789012
 			reportPath := filepath.Join(t.TempDir(), "report.csv")
 			toolCfg.CSVInput = csvPath
 			toolCfg.CSVOutput = reportPath
+			toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 			toolCfg.ActualPurchase = false
 			toolCfg.Coverage = 100.0
 			toolCfg.TargetCoverage = 0

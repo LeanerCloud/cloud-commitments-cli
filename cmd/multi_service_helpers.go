@@ -14,6 +14,7 @@ import (
 	azureprovider "github.com/LeanerCloud/cloud-commitments-go/providers/azure"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/google/uuid"
 )
 
 // EC2ClientInterface defines the interface for EC2 operations.
@@ -436,8 +437,13 @@ func processRegionRecommendations(
 	// Check for duplicate RIs. Drop tracking skipped (nil).
 	adjustedRecs := checkDuplicates(ctx, filteredRecs, serviceClient, isDryRun, nil)
 
-	// Process purchases
-	regionResults := processPurchaseLoop(ctx, adjustedRecs, region, isDryRun, serviceClient, cfg)
+	// Process purchases. This legacy per-region entry point has no run-wide
+	// runID of its own (unlike runToolMultiService/runToolFromCSV, which mint
+	// one per invocation), so each call gets its own -- every recommendation
+	// it processes still ends up in cfg.AuditLog with a durable, groupable
+	// record; it is simply not grouped with a sibling region's run.
+	runID := uuid.New().String()
+	regionResults := processPurchaseLoop(ctx, adjustedRecs, region, isDryRun, serviceClient, cfg, runID)
 	result.results = regionResults
 
 	return result
