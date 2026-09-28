@@ -721,14 +721,14 @@ TOTAL,,,,,3,,`,
 			csvContent: `Service,Region,ResourceType,Count
 rds,us-east-1,db.t3.micro,abc`,
 			wantErr:     true,
-			errContains: "invalid Count value",
+			errContains: `column 4 "Count": invalid integer`,
 		},
 		{
 			name: "Invalid EstimatedSavings value - non-numeric",
 			csvContent: `Service,Region,ResourceType,Count,EstimatedSavings
 rds,us-east-1,db.t3.micro,5,invalid`,
 			wantErr:     true,
-			errContains: "invalid EstimatedSavings value",
+			errContains: `column 5 "EstimatedSavings": invalid number`,
 		},
 		{
 			name: "Multiple rows with various services",
