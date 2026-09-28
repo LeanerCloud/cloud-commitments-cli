@@ -106,11 +106,12 @@ Forgetting this rule has been a recurring failure mode in this
 project. Before declaring a "pushed and done" turn complete, confirm
 at least one `ci-watch-*` background task is armed.
 
-## CodeRabbit loop — iterate to silence (MANDATORY)
+## CodeRabbit loop: iterate to silence (when required by the review gate)
 
-CodeRabbit reviews this repo on every push to a PR branch. The full
+Run this loop when CodeRabbit is the chosen review path, or when the
+independent-review condition in "Review gate" below is not met. The full
 rules live in `~/.claude/git-workflow.md` §"Post-PR review loop"
-(§§3, 3a) — read them. The minimum-viable loop for this project:
+(§§3, 3a); read them. The minimum-viable loop for this project:
 
 1. After every push, ping `@coderabbitai review` on the PR (CR doesn't
    always re-review automatically; the explicit ping makes it
