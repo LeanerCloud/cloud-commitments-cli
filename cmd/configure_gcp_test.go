@@ -248,3 +248,90 @@ func TestWriteServiceAccountKey_ReserveFailureNoMint(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, []byte("pre-existing"), got)
 }
+
+// --- uploadGCPCredentialsFile (minted key cleanup, #1947) --------------------
+
+// mintTestGCPKey mints a key into a newMintedGCPKeyPath location through the
+// real writeServiceAccountKey flow and asserts it was created with 0600.
+func mintTestGCPKey(t *testing.T) string {
+	t.Helper()
+	keyMaterial := []byte(`{"type":"service_account","project_id":"proj","client_email":"sa@proj.iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n"}`)
+	m := &mockGCPKeyProvisioner{
+		keyName:        "projects/-/serviceAccounts/sa@proj.iam.gserviceaccount.com/keys/abc123",
+		privateKeyData: base64.StdEncoding.EncodeToString(keyMaterial),
+	}
+	keyFile, err := newMintedGCPKeyPath()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(keyFile)) })
+
+	require.NoError(t, writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile))
+	info, err := os.Stat(keyFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(), "minted key must be 0600")
+	dirInfo, err := os.Stat(filepath.Dir(keyFile))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm(), "minted key dir must be 0700")
+	return keyFile
+}
+
+func assertMintedKeyGone(t *testing.T, keyFile string) {
+	t.Helper()
+	_, err := os.Stat(keyFile)
+	assert.ErrorIs(t, err, os.ErrNotExist, "minted key file must be removed")
+	_, err = os.Stat(filepath.Dir(keyFile))
+	assert.ErrorIs(t, err, os.ErrNotExist, "minted key dir must be removed")
+}
+
+func TestUploadGCPCredentialsFile_MintedKeyRemovedAfterSuccess(t *testing.T) {
+	keyFile := mintTestGCPKey(t)
+	store := NewMockSecretsStore()
+
+	creds, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, true)
+	require.NoError(t, err)
+	assert.Equal(t, "sa@proj.iam.gserviceaccount.com", creds.ClientEmail)
+	assert.Contains(t, store.updatedSecrets, "stack-GCPCredentials")
+	assertMintedKeyGone(t, keyFile)
+}
+
+func TestUploadGCPCredentialsFile_MintedKeyRemovedAfterUploadFailure(t *testing.T) {
+	keyFile := mintTestGCPKey(t)
+	store := NewMockSecretsStore()
+	store.updateSecretFunc = func(context.Context, string, string) error { return errors.New("access denied") }
+
+	_, err := uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "access denied")
+	assert.Contains(t, err.Error(), "still active in GCP")
+	assertMintedKeyGone(t, keyFile)
+}
+
+func TestUploadGCPCredentialsFile_MintedKeyRemovedAfterParseFailure(t *testing.T) {
+	keyFile, err := newMintedGCPKeyPath()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(keyFile)) })
+	require.NoError(t, os.WriteFile(keyFile, []byte("not json"), 0600))
+
+	_, err = uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, true)
+	require.Error(t, err)
+	assertMintedKeyGone(t, keyFile)
+}
+
+func TestUploadGCPCredentialsFile_RemovalFailureReported(t *testing.T) {
+	keyFile := mintTestGCPKey(t)
+	// A read-only parent dir makes the unlink fail.
+	require.NoError(t, os.Chmod(filepath.Dir(keyFile), 0500))
+	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(keyFile), 0700) })
+
+	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, true)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to remove the minted key file")
+}
+
+func TestUploadGCPCredentialsFile_OperatorFileKept(t *testing.T) {
+	keyFile := mintTestGCPKey(t)
+
+	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, false)
+	require.NoError(t, err)
+	_, err = os.Stat(keyFile)
+	assert.NoError(t, err, "an operator-supplied credentials file must not be deleted")
+}

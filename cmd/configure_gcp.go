@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -141,25 +143,21 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 	fmt.Println("===================================================")
 	fmt.Println()
 
-	credsFile, err := getGCPCredentialsFilePath(ctx, reader)
-	if err != nil {
-		return err
-	}
-
+	// Load the AWS config before the wizard can mint a key, so a config error
+	// never strands a freshly minted key.
 	cfg, err := loadAWSConfigForGCP(ctx)
 	if err != nil {
 		return err
 	}
+	store := NewAWSSecretsStore(secretsmanager.NewFromConfig(cfg))
 
-	creds, credsData, err := loadAndUpdateGCPCredentials(credsFile)
+	credsFile, minted, err := getGCPCredentialsFilePath(ctx, reader)
 	if err != nil {
 		return err
 	}
 
-	smClient := secretsmanager.NewFromConfig(cfg)
-	store := NewAWSSecretsStore(smClient)
-
-	if err := storeGCPCredentials(ctx, store, gcpOpts.StackName, string(credsData)); err != nil {
+	creds, err := uploadGCPCredentialsFile(ctx, store, gcpOpts.StackName, credsFile, minted)
+	if err != nil {
 		return err
 	}
 
@@ -167,34 +165,63 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getGCPCredentialsFilePath determines the credentials file path from options or user input.
-func getGCPCredentialsFilePath(ctx context.Context, reader *bufio.Reader) (string, error) {
-	var credsFile string
+// uploadGCPCredentialsFile stores credsFile in the secrets store. When minted
+// is true the file is a key this run created, so it is removed on every path,
+// and a removal failure is returned rather than ignored.
+func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName, credsFile string, minted bool) (creds GCPCredentials, err error) {
+	if minted {
+		defer func() {
+			if rmErr := removeMintedGCPKey(credsFile); rmErr != nil {
+				err = errors.Join(err, rmErr)
+			} else if err == nil {
+				fmt.Println("Removed the local copy of the minted key.")
+			}
+		}()
+	}
 
+	creds, credsData, err := loadAndUpdateGCPCredentials(credsFile)
+	if err != nil {
+		return GCPCredentials{}, err
+	}
+
+	if err := storeGCPCredentials(ctx, store, stackName, string(credsData)); err != nil {
+		if minted {
+			err = fmt.Errorf("%w (the key minted for %s is still active in GCP; delete it with 'gcloud iam service-accounts keys delete' and re-run)", err, creds.ClientEmail)
+		}
+		return GCPCredentials{}, err
+	}
+
+	return creds, nil
+}
+
+// getGCPCredentialsFilePath determines the credentials file path from options
+// or user input. minted reports whether the setup wizard created the file.
+func getGCPCredentialsFilePath(ctx context.Context, reader *bufio.Reader) (credsFile string, minted bool, err error) {
 	if gcpOpts.CredentialsFile != "" {
 		credsFile = gcpOpts.CredentialsFile
 	} else if !gcpOpts.SkipSetup {
-		var err error
 		credsFile, err = runGCPSetupCommands(ctx, reader)
 		if err != nil {
-			return "", err
+			return "", false, err
+		}
+		if credsFile != "" {
+			return credsFile, true, nil
 		}
 	}
 
 	if credsFile == "" {
 		fmt.Print("Path to GCP service account JSON key file: ")
-		var readErr error
-		credsFile, readErr = readTrimmedLine(reader)
-		if readErr != nil {
-			return "", fmt.Errorf("failed to read credentials file path: %w", readErr)
+		credsFile, err = readTrimmedLine(reader)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to read credentials file path: %w", err)
 		}
 	}
 
 	if credsFile == "" {
-		return "", fmt.Errorf("credentials file is required")
+		return "", false, fmt.Errorf("credentials file is required")
 	}
 
-	return credsFile, nil
+	return credsFile, false, nil
 }
 
 // loadAWSConfigForGCP loads AWS configuration with optional profile.
@@ -484,7 +511,7 @@ func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) er
 func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, keyFile string) error {
 	// Reserve the destination file first (fails if it already exists), so we
 	// never mint a remote key we cannot persist locally.
-	// #nosec G304 -- keyFile is the sole caller's fixed path filepath.Join(os.UserHomeDir(), "cudly-gcp-key.json"); a constant filename under the operator's own home dir, program-controlled and not attacker input
+	// #nosec G304 -- keyFile is the sole caller's fixed filename inside a private os.MkdirTemp dir (newMintedGCPKeyPath); program-controlled and not attacker input
 	f, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to reserve key file %s: %w", keyFile, err)
@@ -715,29 +742,28 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 // an unknown choice it returns an empty string so the caller knows to prompt
 // for an existing credentials file instead of assuming one was written.
 func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string) (string, error) {
-	home, err := os.UserHomeDir()
+	keyFile, err := newMintedGCPKeyPath()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", err
 	}
-	keyFile := filepath.Join(home, "cudly-gcp-key.json")
 
 	fmt.Println()
 	fmt.Println("Step 5: Create and Download Key")
 	fmt.Println("-------------------------------")
 	fmt.Println("Create a JSON key file for the service account.")
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? (creates key for %s, writes to %s via SDK) ", saEmail, keyFile)
+	fmt.Printf("[R]un, [S]kip? (creates key for %s via SDK; the local copy is removed after upload) ", saEmail)
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
-		return "", fmt.Errorf("failed to read create-key choice: %w", err)
+		return "", errors.Join(fmt.Errorf("failed to read create-key choice: %w", err), removeMintedGCPKey(keyFile))
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
 		if keyErr := createGCPServiceAccountKey(ctx, saEmail, keyFile); keyErr != nil {
-			return "", keyErr
+			return "", errors.Join(keyErr, removeMintedGCPKey(keyFile))
 		}
-		fmt.Printf("Key file written to: %s\n", keyFile)
+		fmt.Printf("Key written to temporary file: %s\n", keyFile)
 		fmt.Println()
 		return keyFile, nil
 	case "s", "skip":
@@ -748,7 +774,32 @@ func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string)
 
 	// No key file was written; the caller will prompt for an existing one.
 	fmt.Println()
-	return "", nil
+	return "", removeMintedGCPKey(keyFile)
+}
+
+// mintedGCPKeyFilename is the key file's name inside its private temp dir.
+const mintedGCPKeyFilename = "key.json"
+
+// newMintedGCPKeyPath returns a key path inside a fresh 0700 temp dir, so the
+// minted key is never readable by other users or left in a synced home dir.
+func newMintedGCPKeyPath() (string, error) {
+	dir, err := os.MkdirTemp("", "cudly-gcp-key-")
+	if err != nil {
+		return "", fmt.Errorf("failed to create private directory for the key: %w", err)
+	}
+	return filepath.Join(dir, mintedGCPKeyFilename), nil
+}
+
+// removeMintedGCPKey deletes a key path from newMintedGCPKeyPath and its dir.
+// It removes non-recursively so it can never delete anything else.
+func removeMintedGCPKey(keyFile string) error {
+	if err := os.Remove(keyFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove the minted key file %s; delete it manually: %w", keyFile, err)
+	}
+	if err := os.Remove(filepath.Dir(keyFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove the minted key directory %s: %w", filepath.Dir(keyFile), err)
+	}
+	return nil
 }
 
 // readRequiredInputLine prints prompt, reads a line, trims whitespace, and
