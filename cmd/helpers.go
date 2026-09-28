@@ -227,7 +227,8 @@ func ConfirmPurchase(totalInstances int, totalSavings float64, skipConfirmation 
 	return response == "yes" || response == "y"
 }
 
-// CheckAuditLogWritable reports whether the audit log at path can be appended to.
+// CheckAuditLogWritable reports whether the audit log and its immediate parent
+// directories satisfy the read, append, and durability requirements.
 // Thin wrapper over common.CheckAuditLogWritable; kept so cmd's existing call sites
 // and tests are unchanged.
 func CheckAuditLogWritable(path string) error { return common.CheckAuditLogWritable(path) }

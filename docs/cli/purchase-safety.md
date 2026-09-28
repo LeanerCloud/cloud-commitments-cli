@@ -68,7 +68,7 @@ Every recommendation - whether purchased or dry-run - gets a JSON line in the au
 - Whether the run was a dry run
 - Purchase source (`cli`)
 
-cudly verifies that the audit log path is writable before making any cloud API calls. If it is not writable (e.g. the directory does not exist), the command exits immediately with an error.
+cudly verifies that the audit log is readable and writable and that the immediate configured and resolved parent directories can be opened and synced before making any cloud API calls. Higher ancestors need search permission; the immediate parent directories also need read permission and a filesystem that supports directory `fsync`. If the parent does not exist or these durability checks fail, the command exits immediately with an error.
 
 ```bash
 # Write audit records to a shared directory
@@ -135,7 +135,7 @@ Setting this environment variable skips the between-purchase delay. This is an i
 Before any real purchase run:
 
 1. Run without `--purchase` first to review the dry-run CSV output.
-2. Check that `--audit-log` points to a writable, durable location.
+2. Check that `--audit-log` points to a readable, writable, durable location.
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
