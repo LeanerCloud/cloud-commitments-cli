@@ -1293,50 +1293,6 @@ func TestProcessPurchaseLoopPurchaseFailure(t *testing.T) {
 	mockClient.AssertExpectations(t)
 }
 
-func TestProcessPurchaseLoopUserCancellation(t *testing.T) {
-	ctx := context.Background()
-	origCfg := toolCfg
-	defer func() { toolCfg = origCfg }()
-
-	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
-	toolCfg.Coverage = 90.0
-	toolCfg.SkipConfirmation = false // User will be prompted
-
-	recs := []common.Recommendation{
-		{Service: common.ServiceEC2, ResourceType: "m5.large", Count: 10, EstimatedSavings: 5000},
-		{Service: common.ServiceEC2, ResourceType: "m5.xlarge", Count: 5, EstimatedSavings: 3000},
-	}
-
-	mockClient := &MockServiceClient{}
-	// No expectations - should not be called if user cancels
-
-	// Since we can't mock user input easily, we'll skip confirmation instead
-	// But the test verifies the cancellation logic is present
-	toolCfg.SkipConfirmation = true // Actually proceed for test
-
-	// Setup mock to succeed
-	for _, rec := range recs {
-		result := common.PurchaseResult{
-			Recommendation: rec,
-			Success:        true,
-			CommitmentID:   "test-id",
-			Timestamp:      time.Now(),
-		}
-		mockClient.On("PurchaseCommitment", ctx, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
-	}
-
-	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
-
-	results := processPurchaseLoop(ctx, recs, "eu-central-1", false, mockClient, toolCfg, "test-run")
-
-	assert.Len(t, results, 2)
-	for _, result := range results {
-		assert.True(t, result.Success)
-	}
-
-	mockClient.AssertExpectations(t)
-}
-
 func TestProcessPurchaseLoopEmptyRecommendations(t *testing.T) {
 	ctx := context.Background()
 	origCfg := toolCfg
@@ -1549,14 +1505,15 @@ func TestProcessPurchaseLoopWithConfirmation(t *testing.T) {
 
 	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 80.0
-	toolCfg.SkipConfirmation = true // Skip confirmation to proceed with purchase
 
 	recs := []common.Recommendation{
 		{Service: common.ServiceRDS, ResourceType: "db.r5.large", Count: 5, SourceRecommendation: "Expensive", EstimatedSavings: 1000},
 	}
 
 	mockClient := &MockServiceClient{}
-	// Mock the purchase since skipConfirmation=true will proceed
+	// processPurchaseLoop no longer confirms internally (confirmPurchaseRun
+	// runs once in runToolFromCSV before this loop is reached), so it always
+	// proceeds straight to the purchase call.
 	result := common.PurchaseResult{
 		Recommendation: recs[0],
 		Success:        true,
@@ -2074,6 +2031,64 @@ rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
 	err := runToolFromCSV(context.Background(), toolCfg)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "audit log")
+}
+
+// TestRunToolFromCSV_ConfirmsOnceBeforeAnyRegion reproduces #1610 through the
+// public --input-csv entry point. Before the fix, confirmation lived inside
+// processPurchaseLoop and was asked once per (service, region), after that
+// region's AWS config, service client and duplicate check; declining only
+// canceled that region. Now prepareCSVPurchaseRun asks exactly once, against
+// the whole post-filter set (both regions here: 5 instances), before any AWS
+// call. stdin is not a terminal in tests, so ConfirmPurchase declines without
+// blocking, which is the "operator declines" and non-interactive fail-closed
+// path at once.
+func TestRunToolFromCSV_ConfirmsOnceBeforeAnyRegion(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
+
+	var appOut, stdOut bytes.Buffer
+	oldLogger := AppLogger
+	AppLogger = log.New(&appOut, "", 0)
+	t.Cleanup(func() { AppLogger = oldLogger })
+	oldWriter := log.Writer()
+	log.SetOutput(&stdOut)
+	t.Cleanup(func() { log.SetOutput(oldWriter) })
+
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,2,1yr,All Upfront,123456789012
+rds,us-west-2,db.t3.medium,postgres,3,1yr,All Upfront,123456789012
+`)
+	reportPath := filepath.Join(t.TempDir(), "report.csv")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = reportPath
+	toolCfg.AuditLog = auditPath
+	toolCfg.ActualPurchase = true
+	toolCfg.SkipConfirmation = false
+	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.MaxInstances = 0
+	toolCfg.OverrideCount = 0
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, strings.Count(stdOut.String(), "stdin is not a terminal"),
+		"the purchase must be confirmed exactly once for the whole run, not per region")
+	assert.Contains(t, appOut.String(), "Purchase canceled.")
+	assert.NotContains(t, appOut.String(), "Region:",
+		"a declined confirmation must abort before any region is processed")
+
+	_, statErr := os.Stat(reportPath)
+	assert.True(t, os.IsNotExist(statErr), "a declined run must write no purchase report")
+	data, readErr := os.ReadFile(auditPath) // #nosec G304 -- test-owned tempdir path
+	if readErr == nil {
+		assert.Empty(t, data, "a declined run attempts no purchase, so it writes no audit record")
+	} else {
+		assert.True(t, os.IsNotExist(readErr), "unexpected audit log read error: %v", readErr)
+	}
 }
 
 // ==================== Tests for adjustRecommendationForExcludedVersions ====================
