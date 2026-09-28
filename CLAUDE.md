@@ -106,11 +106,12 @@ Forgetting this rule has been a recurring failure mode in this
 project. Before declaring a "pushed and done" turn complete, confirm
 at least one `ci-watch-*` background task is armed.
 
-## CodeRabbit loop — iterate to silence (MANDATORY)
+## CodeRabbit loop: iterate to silence (when required by the review gate)
 
-CodeRabbit reviews this repo on every push to a PR branch. The full
+Run this loop when CodeRabbit is the chosen review path, or when the
+independent-review condition in "Review gate" below is not met. The full
 rules live in `~/.claude/git-workflow.md` §"Post-PR review loop"
-(§§3, 3a) — read them. The minimum-viable loop for this project:
+(§§3, 3a); read them. The minimum-viable loop for this project:
 
 1. After every push, ping `@coderabbitai review` on the PR (CR doesn't
    always re-review automatically; the explicit ping makes it
@@ -135,7 +136,8 @@ rules live in `~/.claude/git-workflow.md` §"Post-PR review loop"
 Forgetting this rule leaves CR threads silently unresolved and pushes
 the triage burden onto the human reviewer.
 
-**When delegating PR work to a subagent**: the prompt MUST include the
+When the CodeRabbit loop applies (see Review gate) and you are
+**delegating PR work to a subagent**, the prompt MUST include the
 full CR loop, not stop at the first `@coderabbitai review` ping. A fork
 that pushes the PR, pings CR, then exits leaves the CR threads
 unresolved — same failure mode as forgetting the post-push CI watcher.
@@ -144,6 +146,28 @@ Actionable items AND every Nitpick is either fixed or has a
 justification reply on the thread", not "PR opened and CR pinged". When
 in doubt, copy the iteration loop above (steps 2–6) into the fork
 prompt verbatim.
+
+## Review gate
+
+Merge only at the reviewed SHA, and only when all of these cover it:
+
+- An independent adversarial review of the full PR diff on Opus 5.5
+  (exact model `claude-opus-5-5`; never Fable, a floating alias, or a
+  cross-provider substitute) names the SHA.
+- All actionable findings from any reviewer (independent review,
+  CodeRabbit, CI) are resolved. CodeRabbit is optional when
+  exact-revision local verification plus a thorough independent review
+  cover the SHA; otherwise run the loop above. CI is green on the SHA.
+- Local verification exercises the real affected scenario on macOS
+  (Linux via CI; Windows out of scope). Label fixture- or mock-based
+  evidence as such; it does not count as real-scenario verification.
+- The verdict, the reviewed SHA and the local verification evidence are
+  recorded on the PR itself.
+
+Merge normally; never bypass failing or required checks (no
+`gh pr merge --admin`, no `--no-verify`). Verification never authorizes
+real purchases, deploys or the CLI's `--yes`. Any new commit or rebase
+restarts the gate; a missing reviewer or verification blocks the PR.
 
 ## PR labeling — mirror closing-issue labels (MANDATORY)
 
@@ -154,8 +178,8 @@ it. Skipping this leaves PRs invisible to the same priority queries
 that surface the issues, so an unlabeled PR is effectively
 unreviewable in priority order.
 
-Mechanics — fold into the **same `gh pr create` round**, before pinging
-CodeRabbit:
+Mechanics: apply the labels right after `gh pr create`, in the same
+round:
 
 ```bash
 # Right after `gh pr create ...` returns the PR URL:
