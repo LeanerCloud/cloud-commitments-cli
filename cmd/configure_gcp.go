@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/cloudresourcemanager/v1"
+	"google.golang.org/api/googleapi"
 	iamv1 "google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
 )
@@ -445,7 +447,11 @@ func grantGCPIAMRole(ctx context.Context, projectID, member, role string) error 
 		return fmt.Errorf("failed to get IAM policy for project %s: %w", projectID, err)
 	}
 
-	if !addMemberToPolicyBinding(policy, member, role) {
+	changed, err := addMemberToPolicyBinding(policy, member, role)
+	if err != nil {
+		return err
+	}
+	if !changed {
 		// Member already bound to the role; nothing to write.
 		return nil
 	}
@@ -463,27 +469,38 @@ func grantGCPIAMRole(ctx context.Context, projectID, member, role string) error 
 	return nil
 }
 
-// addMemberToPolicyBinding adds member to the binding for role in policy,
-// creating the binding if absent. It returns false if member is already bound
-// (no change needed) and true if the policy was modified.
-func addMemberToPolicyBinding(policy *cloudresourcemanager.Policy, member, role string) bool {
+// Existing conditions must not be silently widened or treated as unconditional grants.
+func addMemberToPolicyBinding(policy *cloudresourcemanager.Policy, member, role string) (bool, error) {
+	conditionalMember := false
+	var unconditional *cloudresourcemanager.Binding
 	for _, b := range policy.Bindings {
 		if b.Role != role {
 			continue
 		}
 		for _, m := range b.Members {
 			if m == member {
-				return false
+				if b.Condition == nil {
+					return false, nil
+				}
+				conditionalMember = true
 			}
 		}
-		b.Members = append(b.Members, member)
-		return true
+		if b.Condition == nil {
+			unconditional = b
+		}
+	}
+	if conditionalMember {
+		return false, fmt.Errorf("%s has only conditional access to %s; review the existing IAM condition before granting unconditional access", member, role)
+	}
+	if unconditional != nil {
+		unconditional.Members = append(unconditional.Members, member)
+		return true, nil
 	}
 	policy.Bindings = append(policy.Bindings, &cloudresourcemanager.Binding{
 		Role:    role,
 		Members: []string{member},
 	})
-	return true
+	return true, nil
 }
 
 // gcpKeyProvisioner abstracts the IAM service-account key operations used by
@@ -763,19 +780,48 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 	return saEmail, nil
 }
 
-// gcpStepGrantRole grants the compute.admin role to the service account via
-// the Cloud Resource Manager SDK. It fails loud on any SDK error (no CLI
-// fallback).
+const gcpPurchaserRoleID = "cudlyCommitmentPurchaser"
+
+func ensureGCPPurchaserRole(ctx context.Context, projectID string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
+	defer cancel()
+	opt, err := newGCPAPIOption(ctx)
+	if err != nil {
+		return "", err
+	}
+	svc, err := iamv1.NewService(ctx, opt)
+	if err != nil {
+		return "", fmt.Errorf("failed to create IAM client: %w", err)
+	}
+	parent := "projects/" + projectID
+	name := parent + "/roles/" + gcpPurchaserRoleID
+	role, err := svc.Projects.Roles.Get(name).Context(ctx).Do()
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) && apiErr.Code == 404 {
+		role, err = svc.Projects.Roles.Create(parent, &iamv1.CreateRoleRequest{
+			RoleId: gcpPurchaserRoleID,
+			Role: &iamv1.Role{Title: "CUDly Commitment Purchaser", Stage: "GA",
+				IncludedPermissions: []string{"compute.commitments.create"}},
+		}).Context(ctx).Do()
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to provision custom role %s; review the role and setup permissions before retrying: %w", name, err)
+	}
+	if role.Name != name || role.Deleted || role.Stage == "DISABLED" || !slices.Equal(role.IncludedPermissions, []string{"compute.commitments.create"}) {
+		return "", fmt.Errorf("unsafe custom role %s: expected an enabled role containing only compute.commitments.create; review it before retrying", name)
+	}
+	return name, nil
+}
+
 func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEmail string) error {
 	member := fmt.Sprintf("serviceAccount:%s", saEmail)
-	role := "roles/compute.admin"
 
 	fmt.Println()
 	fmt.Println("Step 4: Grant IAM Roles")
 	fmt.Println("-----------------------")
 	fmt.Println("Grant the required roles to the service account.")
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? (grants %s to %s on project %s via SDK) ", role, saEmail, projectID)
+	fmt.Printf("[R]un, [S]kip? (creates or validates %s with compute.commitments.create, then grants it and roles/compute.viewer to %s on project %s via SDK) ", gcpPurchaserRoleID, saEmail, projectID)
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
@@ -783,10 +829,16 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		if grantErr := grantGCPIAMRole(ctx, projectID, member, role); grantErr != nil {
-			return grantErr
+		role, roleErr := ensureGCPPurchaserRole(ctx, projectID)
+		if roleErr != nil {
+			return roleErr
 		}
-		fmt.Printf("Role %s granted to %s on project %s.\n", role, saEmail, projectID)
+		for _, grant := range []string{"roles/compute.viewer", role} {
+			if grantErr := grantGCPIAMRole(ctx, projectID, member, grant); grantErr != nil {
+				return grantErr
+			}
+			fmt.Printf("Role %s granted to %s on project %s.\n", grant, saEmail, projectID)
+		}
 	case "s", "skip":
 		fmt.Println("Skipping Grant IAM Roles")
 	default:

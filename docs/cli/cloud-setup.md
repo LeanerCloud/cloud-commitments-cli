@@ -107,7 +107,7 @@ When `--skip-setup` is not set, the command runs an interactive guided flow:
 2. **`gcloud projects list`** - lists projects so you can identify your Project ID.
 3. **`gcloud config set project <id>`** - sets the active project.
 4. **Creates a `cudly-service-account` Service Account** with the display name "CUDly Service Account".
-5. **`gcloud projects add-iam-policy-binding`** - grants `roles/compute.admin` to the new Service Account.
+5. **Grant IAM roles via SDK** - creates or validates the project custom role `cudlyCommitmentPurchaser`, then grants it and `roles/compute.viewer` to the Service Account.
 6. **`gcloud iam service-accounts keys create ~/cudly-gcp-key.json`** - downloads a JSON key to your home directory.
 
 After the guided steps (or with `--skip-setup --credentials-file <path>`), the command reads and validates the JSON file and writes it to the `<stack-name>-GCPCredentials` secret.
@@ -136,7 +136,19 @@ The Service Account needs the following roles:
 
 | Role | Purpose |
 |------|---------|
-| `roles/compute.admin` | Manage Compute Engine Committed Use Discounts |
+| `roles/compute.viewer` | Read Compute Engine resources and commitment operations |
+| `projects/PROJECT_ID/roles/cudlyCommitmentPurchaser` | Purchase commitments with only `compute.commitments.create` |
+
+The setup operator needs `iam.roles.get`, `iam.roles.create`,
+`resourcemanager.projects.getIamPolicy`, and `resourcemanager.projects.setIamPolicy`
+for this step. These setup permissions are not granted to the Service Account.
+An existing custom role must have exactly the purchase permission and be enabled;
+the wizard refuses incompatible roles rather than changing them. It also refuses
+to widen an existing conditional-only grant for this Service Account.
+
+Rerunning the wizard does not remove broad grants from older installations.
+Review existing `roles/compute.admin` grants separately. Recommendation access
+requires additional Recommender permissions; neither role above provides them.
 
 If you manage Cloud SQL or Memorystore commitments, you may need additional roles. Check the GCP documentation for the minimum required permissions per commitment type.
 
