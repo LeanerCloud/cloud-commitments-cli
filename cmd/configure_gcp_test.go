@@ -25,8 +25,9 @@ func TestAddMemberToPolicyBinding_AppendsToExistingBinding(t *testing.T) {
 		},
 	}
 
-	changed := addMemberToPolicyBinding(policy, "serviceAccount:sa@proj.iam.gserviceaccount.com", "roles/viewer")
+	changed, err := addMemberToPolicyBinding(policy, "serviceAccount:sa@proj.iam.gserviceaccount.com", "roles/viewer")
 
+	require.NoError(t, err)
 	require.True(t, changed, "adding a new member to an existing role binding must report a change")
 	require.Len(t, policy.Bindings, 1)
 	assert.Equal(t, []string{
@@ -45,8 +46,9 @@ func TestAddMemberToPolicyBinding_AlreadyBoundNoChange(t *testing.T) {
 		},
 	}
 
-	changed := addMemberToPolicyBinding(policy, member, "roles/viewer")
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
 
+	require.NoError(t, err)
 	require.False(t, changed, "re-adding a member already bound to the role must report no change")
 	require.Len(t, policy.Bindings, 1)
 	assert.Equal(t, []string{member}, policy.Bindings[0].Members,
@@ -63,8 +65,9 @@ func TestAddMemberToPolicyBinding_CreatesMissingBinding(t *testing.T) {
 	}
 
 	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
-	changed := addMemberToPolicyBinding(policy, member, "roles/billing.projectManager")
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/billing.projectManager")
 
+	require.NoError(t, err)
 	require.True(t, changed, "adding a member to an absent role must create the binding and report a change")
 	require.Len(t, policy.Bindings, 2)
 	newBinding := policy.Bindings[1]
@@ -94,7 +97,8 @@ func TestAddMemberToPolicyBinding_PreservesConditionalBindings(t *testing.T) {
 	}
 
 	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
-	changed := addMemberToPolicyBinding(policy, member, "roles/viewer")
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
+	require.NoError(t, err)
 	require.True(t, changed)
 
 	// The conditional binding must still be present, unchanged.
