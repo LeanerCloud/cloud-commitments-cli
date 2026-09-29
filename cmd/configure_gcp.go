@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -141,60 +145,122 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 	fmt.Println("===================================================")
 	fmt.Println()
 
-	credsFile, err := getGCPCredentialsFilePath(ctx, reader)
-	if err != nil {
-		return err
-	}
-
+	// Load the AWS config before the wizard can mint a key, so a config error
+	// never strands a freshly minted key.
 	cfg, err := loadAWSConfigForGCP(ctx)
 	if err != nil {
 		return err
 	}
+	store := NewAWSSecretsStore(secretsmanager.NewFromConfig(cfg))
 
-	creds, credsData, err := loadAndUpdateGCPCredentials(credsFile)
+	var stop context.CancelFunc
+	defer func() {
+		if stop != nil {
+			stop()
+		}
+	}()
+	beginUpload := func() context.Context {
+		if stop == nil {
+			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		}
+		return ctx
+	}
+	credsFile, mintedKeyName, err := getGCPCredentialsFilePath(ctx, reader, beginUpload)
 	if err != nil {
 		return err
 	}
 
-	smClient := secretsmanager.NewFromConfig(cfg)
-	store := NewAWSSecretsStore(smClient)
-
-	if err := storeGCPCredentials(ctx, store, gcpOpts.StackName, string(credsData)); err != nil {
+	creds, err := uploadGCPCredentialsFile(beginUpload(), store, gcpOpts.StackName, credsFile, mintedKeyName, deleteGCPServiceAccountKey)
+	if err != nil {
 		return err
 	}
 
+	stop()
+	if mintedKeyName != "" {
+		fmt.Println("Removed the local copy of the minted key.")
+	}
 	printGCPConfigurationSuccess(creds)
 	return nil
 }
 
-// getGCPCredentialsFilePath determines the credentials file path from options or user input.
-func getGCPCredentialsFilePath(ctx context.Context, reader *bufio.Reader) (string, error) {
-	var credsFile string
+// uploadGCPCredentialsFile stores credsFile in the secrets store. A non-empty
+// mintedKeyName means the file is a key this run created: the local copy is
+// removed on every path, and on failure the remote key is deleted via
+// deleteKey so it does not stay active. Cleanup failures are returned.
+func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName, credsFile, mintedKeyName string, deleteKey func(context.Context, string) error) (creds GCPCredentials, err error) {
+	if mintedKeyName != "" {
+		defer func() {
+			if err != nil {
+				err = deleteMintedGCPKeyRemotely(err, mintedKeyName, deleteKey)
+			}
+			if rmErr := removeMintedGCPKey(credsFile); rmErr != nil {
+				err = errors.Join(err, rmErr)
+			}
+		}()
+	}
 
+	creds, credsData, err := loadAndUpdateGCPCredentials(credsFile)
+	if err != nil {
+		return GCPCredentials{}, err
+	}
+
+	if err := storeGCPCredentials(ctx, store, stackName, string(credsData)); err != nil {
+		return GCPCredentials{}, err
+	}
+
+	return creds, nil
+}
+
+// deleteMintedGCPKeyRemotely deletes the minted key after cause aborted the
+// upload. It uses a fresh context so a canceled parent does not skip it.
+func deleteMintedGCPKeyRemotely(cause error, keyName string, deleteKey func(context.Context, string) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), gcpSDKCallTimeout)
+	defer cancel()
+	if err := deleteKey(ctx, keyName); err != nil {
+		return fmt.Errorf("%w; the minted key is still active in GCP and deleting it failed (%w); delete it with: %s", cause, err, gcloudDeleteKeyCommand(keyName))
+	}
+	return cause
+}
+
+// gcloudDeleteKeyCommand renders the manual delete command for an IAM key
+// resource name (projects/<p>/serviceAccounts/<sa>/keys/<id>).
+func gcloudDeleteKeyCommand(keyName string) string {
+	parts := strings.Split(keyName, "/")
+	if len(parts) == 6 && parts[2] == "serviceAccounts" && parts[4] == "keys" {
+		return fmt.Sprintf("gcloud iam service-accounts keys delete %s --iam-account=%s", parts[5], parts[3])
+	}
+	return fmt.Sprintf("gcloud iam service-accounts keys delete <id of %s>", keyName)
+}
+
+// getGCPCredentialsFilePath determines the credentials file path from options
+// or user input. mintedKeyName is the IAM key resource name when the setup
+// wizard created the file, and empty otherwise.
+func getGCPCredentialsFilePath(ctx context.Context, reader *bufio.Reader, beginUpload func() context.Context) (credsFile, mintedKeyName string, err error) {
 	if gcpOpts.CredentialsFile != "" {
 		credsFile = gcpOpts.CredentialsFile
 	} else if !gcpOpts.SkipSetup {
-		var err error
-		credsFile, err = runGCPSetupCommands(ctx, reader)
+		credsFile, mintedKeyName, err = runGCPSetupCommands(ctx, reader, beginUpload)
 		if err != nil {
-			return "", err
+			return "", "", err
+		}
+		if credsFile != "" {
+			return credsFile, mintedKeyName, nil
 		}
 	}
 
 	if credsFile == "" {
 		fmt.Print("Path to GCP service account JSON key file: ")
-		var readErr error
-		credsFile, readErr = readTrimmedLine(reader)
-		if readErr != nil {
-			return "", fmt.Errorf("failed to read credentials file path: %w", readErr)
+		credsFile, err = readTrimmedLine(reader)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read credentials file path: %w", err)
 		}
 	}
 
 	if credsFile == "" {
-		return "", fmt.Errorf("credentials file is required")
+		return "", "", fmt.Errorf("credentials file is required")
 	}
 
-	return credsFile, nil
+	return credsFile, "", nil
 }
 
 // loadAWSConfigForGCP loads AWS configuration with optional profile.
@@ -454,40 +520,57 @@ func (k *iamKeyProvisioner) DeleteKey(ctx context.Context, keyName string) error
 	return err
 }
 
-// createGCPServiceAccountKey creates a JSON key for the given service account
-// and writes it to keyFile. This replaces
-// "gcloud iam service-accounts keys create <file> --iam-account=<sa>".
-func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) error {
-	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
-	defer cancel()
-
+// newIAMKeyProvisioner builds an iamKeyProvisioner authenticated via ADC.
+func newIAMKeyProvisioner(ctx context.Context) (*iamKeyProvisioner, error) {
 	opt, err := newGCPAPIOption(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	svc, err := iamv1.NewService(ctx, opt)
 	if err != nil {
-		return fmt.Errorf("failed to create IAM client: %w", err)
+		return nil, fmt.Errorf("failed to create IAM client: %w", err)
 	}
+	return &iamKeyProvisioner{svc: svc}, nil
+}
 
-	return writeServiceAccountKey(ctx, &iamKeyProvisioner{svc: svc}, saEmail, keyFile)
+// createGCPServiceAccountKey creates a JSON key for the given service account,
+// writes it to keyFile and returns the key resource name. This replaces
+// "gcloud iam service-accounts keys create <file> --iam-account=<sa>".
+func createGCPServiceAccountKey(ctx context.Context, saEmail, keyFile string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
+	defer cancel()
+
+	p, err := newIAMKeyProvisioner(ctx)
+	if err != nil {
+		return "", err
+	}
+	return writeServiceAccountKey(ctx, p, saEmail, keyFile)
+}
+
+// deleteGCPServiceAccountKey deletes the IAM key keyName via ADC.
+func deleteGCPServiceAccountKey(ctx context.Context, keyName string) error {
+	p, err := newIAMKeyProvisioner(ctx)
+	if err != nil {
+		return err
+	}
+	return p.DeleteKey(ctx, keyName)
 }
 
 // writeServiceAccountKey reserves keyFile with exclusive-create semantics
 // BEFORE minting the remote key (so it never mints a key it cannot persist
 // locally), then mints the key via p, decodes the base64 material and writes it
-// to keyFile. If decoding or writing fails after the remote key is minted it
+// to keyFile, returning the key resource name. If decoding or writing fails after the remote key is minted it
 // deletes the remote key so it does not linger as an active, unused credential.
 // Extracted from createGCPServiceAccountKey so the reserve / mint / rollback
 // flow is unit-testable with a mock (no GCP credentials).
-func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, keyFile string) error {
+func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, keyFile string) (string, error) {
 	// Reserve the destination file first (fails if it already exists), so we
 	// never mint a remote key we cannot persist locally.
-	// #nosec G304 -- keyFile is the sole caller's fixed path filepath.Join(os.UserHomeDir(), "cudly-gcp-key.json"); a constant filename under the operator's own home dir, program-controlled and not attacker input
+	// #nosec G304 -- keyFile is the sole caller's fixed filename inside a private os.MkdirTemp dir (newMintedGCPKeyPath); program-controlled and not attacker input
 	f, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return fmt.Errorf("failed to reserve key file %s: %w", keyFile, err)
+		return "", fmt.Errorf("failed to reserve key file %s: %w", keyFile, err)
 	}
 	// Best-effort: remove the reserved file if we return before writing it.
 	wrote := false
@@ -500,7 +583,7 @@ func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, k
 
 	keyName, privateKeyData, err := p.CreateKey(ctx, saEmail)
 	if err != nil {
-		return fmt.Errorf("failed to create service account key: %w", err)
+		return "", fmt.Errorf("failed to create service account key: %w", err)
 	}
 
 	// From here on, any failure must delete the newly minted remote key so it
@@ -518,14 +601,14 @@ func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, k
 	// PrivateKeyData is base64-encoded JSON.
 	decoded, err := base64.StdEncoding.DecodeString(privateKeyData)
 	if err != nil {
-		return deleteRemoteKey(fmt.Errorf("failed to decode key data: %w", err))
+		return "", deleteRemoteKey(fmt.Errorf("failed to decode key data: %w", err))
 	}
 
 	if _, err := f.Write(decoded); err != nil {
-		return deleteRemoteKey(fmt.Errorf("failed to write key file %s: %w", keyFile, err))
+		return "", deleteRemoteKey(fmt.Errorf("failed to write key file %s: %w", keyFile, err))
 	}
 	wrote = true
-	return nil
+	return keyName, nil
 }
 
 // runGCPSetupCommands guides the operator through GCP setup.
@@ -549,26 +632,28 @@ func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, k
 // Steps 4-6 (create SA, grant role, create key): performed via GCP IAM and
 // Cloud Resource Manager SDK v1 APIs using ADC. Fail loud on any SDK error
 // (no CLI fallback).
-func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader) (string, error) {
-	if err := gcpStepLogin(reader); err != nil {
-		return "", err
+func runGCPSetupCommands(ctx context.Context, reader *bufio.Reader, beginUpload func() context.Context) (keyFile, keyName string, err error) {
+	err = gcpStepLogin(reader)
+	if err != nil {
+		return "", "", err
 	}
 
 	projectID, err := gcpStepSelectProject(ctx, reader)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	saEmail, err := gcpStepCreateServiceAccount(ctx, reader, projectID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	if err := gcpStepGrantRole(ctx, reader, projectID, saEmail); err != nil {
-		return "", err
+	err = gcpStepGrantRole(ctx, reader, projectID, saEmail)
+	if err != nil {
+		return "", "", err
 	}
 
-	return gcpStepCreateKey(ctx, reader, saEmail)
+	return gcpStepCreateKey(reader, saEmail, beginUpload)
 }
 
 // gcpStepLogin runs the two interactive gcloud logins the wizard needs:
@@ -711,35 +796,34 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 }
 
 // gcpStepCreateKey creates a JSON key file for the service account. It returns
-// the written key-file path only when a key was actually created; on skip or
-// an unknown choice it returns an empty string so the caller knows to prompt
-// for an existing credentials file instead of assuming one was written.
-func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string) (string, error) {
-	home, err := os.UserHomeDir()
+// the written key-file path and the key resource name only when a key was
+// actually created; on skip or an unknown choice it returns empty strings so
+// the caller knows to prompt for an existing credentials file instead of
+// assuming one was written.
+func gcpStepCreateKey(reader *bufio.Reader, saEmail string, beginUpload func() context.Context) (keyFile, keyName string, err error) {
+	keyFile, err = newMintedGCPKeyPath()
 	if err != nil {
-		return "", fmt.Errorf("failed to get home directory: %w", err)
+		return "", "", err
 	}
-	keyFile := filepath.Join(home, "cudly-gcp-key.json")
 
 	fmt.Println()
 	fmt.Println("Step 5: Create and Download Key")
 	fmt.Println("-------------------------------")
 	fmt.Println("Create a JSON key file for the service account.")
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? (creates key for %s, writes to %s via SDK) ", saEmail, keyFile)
+	fmt.Printf("[R]un, [S]kip? (creates key for %s via SDK; the local copy is removed after upload) ", saEmail)
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
-		return "", fmt.Errorf("failed to read create-key choice: %w", err)
+		return "", "", errors.Join(fmt.Errorf("failed to read create-key choice: %w", err), removeMintedGCPKey(keyFile))
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		if keyErr := createGCPServiceAccountKey(ctx, saEmail, keyFile); keyErr != nil {
-			return "", keyErr
+		keyName, err = createGCPServiceAccountKey(beginUpload(), saEmail, keyFile)
+		if err != nil {
+			return "", "", errors.Join(err, removeMintedGCPKey(keyFile))
 		}
-		fmt.Printf("Key file written to: %s\n", keyFile)
-		fmt.Println()
-		return keyFile, nil
+		return keyFile, keyName, nil
 	case "s", "skip":
 		fmt.Println("Skipping Create Key")
 	default:
@@ -748,7 +832,32 @@ func gcpStepCreateKey(ctx context.Context, reader *bufio.Reader, saEmail string)
 
 	// No key file was written; the caller will prompt for an existing one.
 	fmt.Println()
-	return "", nil
+	return "", "", removeMintedGCPKey(keyFile)
+}
+
+// mintedGCPKeyFilename is the key file's name inside its private temp dir.
+const mintedGCPKeyFilename = "key.json"
+
+// newMintedGCPKeyPath returns a key path inside a fresh 0700 temp dir, so the
+// minted key is never readable by other users or left in a synced home dir.
+func newMintedGCPKeyPath() (string, error) {
+	dir, err := os.MkdirTemp("", "cudly-gcp-key-")
+	if err != nil {
+		return "", fmt.Errorf("failed to create private directory for the key: %w", err)
+	}
+	return filepath.Join(dir, mintedGCPKeyFilename), nil
+}
+
+// removeMintedGCPKey deletes a key path from newMintedGCPKeyPath and its dir.
+// It removes non-recursively so it can never delete anything else.
+func removeMintedGCPKey(keyFile string) error {
+	if err := os.Remove(keyFile); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove the minted key file %s; delete it manually: %w", keyFile, err)
+	}
+	if err := os.Remove(filepath.Dir(keyFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("failed to remove the minted key directory %s: %w", filepath.Dir(keyFile), err)
+	}
+	return nil
 }
 
 // readRequiredInputLine prints prompt, reads a line, trims whitespace, and
