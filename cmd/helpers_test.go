@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -655,76 +654,11 @@ func TestGetEngineFromRecommendation(t *testing.T) {
 	}
 }
 
-// confirmPurchaseWithInput is a testable variant of ConfirmPurchase that reads
-// from the provided reader rather than os.Stdin, allowing stdin to be mocked in tests.
-func confirmPurchaseWithInput(skipConfirmation bool, input string) bool {
-	if skipConfirmation {
-		return true
-	}
-	response := strings.TrimSpace(strings.ToLower(strings.SplitN(input, "\n", 2)[0]))
-	return response == "yes" || response == "y"
-}
-
-func TestConfirmPurchase(t *testing.T) {
-	tests := []struct {
-		name             string
-		totalInstances   int
-		totalCost        float64
-		skipConfirmation bool
-		expected         bool
-	}{
-		{
-			name:             "Skip confirmation returns true",
-			totalInstances:   10,
-			totalCost:        100.50,
-			skipConfirmation: true,
-			expected:         true,
-		},
-		{
-			name:             "Skip confirmation with zero cost",
-			totalInstances:   0,
-			totalCost:        0.0,
-			skipConfirmation: true,
-			expected:         true,
-		},
-		{
-			name:             "Skip confirmation with high cost",
-			totalInstances:   1000,
-			totalCost:        999999.99,
-			skipConfirmation: true,
-			expected:         true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ConfirmPurchase(tt.totalInstances, tt.totalCost, tt.skipConfirmation)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestConfirmPurchaseInput(t *testing.T) {
-	// Tests for the interactive stdin branch of ConfirmPurchase logic
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		{name: "yes accepts", input: "yes\n", expected: true},
-		{name: "y accepts", input: "y\n", expected: true},
-		{name: "YES accepts (case insensitive)", input: "YES\n", expected: true},
-		{name: "Y accepts (case insensitive)", input: "Y\n", expected: true},
-		{name: "no rejects", input: "no\n", expected: false},
-		{name: "n rejects", input: "n\n", expected: false},
-		{name: "empty string rejects", input: "\n", expected: false},
-		{name: "arbitrary text rejects", input: "maybe\n", expected: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := confirmPurchaseWithInput(false, tt.input)
-			assert.Equal(t, tt.expected, result)
+func TestConfirmPurchaseRejectsNonterminalInput(t *testing.T) {
+	for _, input := range []string{"yes\n", "y\n", "YES\n", "no\n", ""} {
+		t.Run(input, func(t *testing.T) {
+			setConfirmationStdin(t, input)
+			assert.False(t, ConfirmPurchase(5, 125))
 		})
 	}
 }

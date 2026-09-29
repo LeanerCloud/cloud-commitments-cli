@@ -69,7 +69,6 @@ type Config struct {
 	IncludeExtendedSupport bool
 	AllServices            bool
 	ActualPurchase         bool
-	SkipConfirmation       bool
 	// RecLookbackPeriod controls the LookbackPeriodInDays passed to
 	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d"
 	// (recommendations.DefaultRecLookbackPeriod is the shared default).
@@ -122,7 +121,6 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeEngines, "exclude-engines", []string{}, "Exclude these engines (comma-separated)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeAccounts, "include-accounts", []string{}, "Only include recommendations for these account names (comma-separated)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeAccounts, "exclude-accounts", []string{}, "Exclude recommendations for these account names (comma-separated)")
-	rootCmd.Flags().BoolVar(&toolCfg.SkipConfirmation, "yes", false, "Skip confirmation prompt for purchases (use with caution)")
 	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
 	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
 	rootCmd.Flags().StringVar(&toolCfg.ValidationProfile, "validation-profile", "", "AWS profile to use for validating running instances (if different from main profile)")
