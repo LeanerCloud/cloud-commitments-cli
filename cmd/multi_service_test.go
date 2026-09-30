@@ -1264,7 +1264,6 @@ func TestProcessPurchaseLoopPurchaseFailure(t *testing.T) {
 
 	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 80.0
-	toolCfg.SkipConfirmation = true
 
 	recs := []common.Recommendation{
 		{Service: common.ServiceRDS, ResourceType: "db.t3.large", Count: 1, EstimatedSavings: 500},
@@ -1315,7 +1314,6 @@ func TestProcessServicePurchasesUserCancellation(t *testing.T) {
 
 	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 85.0
-	toolCfg.SkipConfirmation = true // Skip for testing
 
 	recs := []common.Recommendation{
 		{Service: common.ServiceElastiCache, ResourceType: "cache.r6g.large", Count: 2, EstimatedSavings: 200},
@@ -1459,7 +1457,6 @@ func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
 
 	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
 	toolCfg.Coverage = 80.0
-	toolCfg.SkipConfirmation = true // Skip confirmation for testing
 
 	recs := []common.Recommendation{
 		{Service: common.ServiceEC2, ResourceType: "t3.small", Count: 1, SourceRecommendation: "EC2 Test 1", EstimatedSavings: 100},
@@ -1978,7 +1975,6 @@ func TestProcessPurchaseLoop_WritesAuditRecordForRealPurchase(t *testing.T) {
 			origCfg := toolCfg
 			defer func() { toolCfg = origCfg }()
 			toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
-			toolCfg.SkipConfirmation = true
 			t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
 			recs := []common.Recommendation{
@@ -2066,7 +2062,6 @@ rds,us-west-2,db.t3.medium,postgres,3,1yr,All Upfront,123456789012
 	toolCfg.CSVOutput = reportPath
 	toolCfg.AuditLog = auditPath
 	toolCfg.ActualPurchase = true
-	toolCfg.SkipConfirmation = false
 	toolCfg.Coverage = 100.0
 	toolCfg.TargetCoverage = 0
 	toolCfg.MaxInstances = 0

@@ -185,7 +185,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 // runToolMultiService within the cyclomatic-complexity limit.
 func runPurchaseAndReport(ctx context.Context, awsCfg aws.Config, scoredResult scorer.ScoredResult, isDryRun bool, cfg Config, drops *common.DropSummary) {
 	runID := uuid.New().String()
-	if !confirmPurchaseRun(scoredResult.Passed, isDryRun, cfg) {
+	if !confirmPurchaseRun(scoredResult.Passed, isDryRun) {
 		printDropSummary(drops)
 		AppLogger.Printf("\n❌ Purchase canceled.\n")
 		return
@@ -204,12 +204,12 @@ func runPurchaseAndReport(ctx context.Context, awsCfg aws.Config, scoredResult s
 // and the --input-csv path (runToolFromCSV) so both entry points show the
 // operator the total they are actually authorizing and require exactly one
 // confirmation per invocation.
-func confirmPurchaseRun(recs []common.Recommendation, isDryRun bool, cfg Config) bool {
+func confirmPurchaseRun(recs []common.Recommendation, isDryRun bool) bool {
 	if isDryRun {
 		return true
 	}
 	totalInstances, totalSavings := sumPassedRecs(recs)
-	return ConfirmPurchase(totalInstances, totalSavings, cfg.SkipConfirmation)
+	return ConfirmPurchase(totalInstances, totalSavings)
 }
 
 // writeReportAndSummary writes the CSV report and prints the final summary.
@@ -571,7 +571,7 @@ func prepareCSVPurchaseRun(ctx context.Context, cfg Config, csvModeCoverage floa
 		AppLogger.Println("⚠️  No recommendations to process after filtering")
 		return nil, aws.Config{}, "", nil
 	}
-	if !confirmPurchaseRun(recs, isDryRun, cfg) {
+	if !confirmPurchaseRun(recs, isDryRun) {
 		AppLogger.Printf("\n❌ Purchase canceled.\n")
 		return nil, aws.Config{}, "", nil
 	}

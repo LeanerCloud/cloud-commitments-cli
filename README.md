@@ -2,7 +2,7 @@
 
 CUDly is an open source CLI for discovering and purchasing AWS Reserved Instances and Savings Plans in a single command. It is dry-run by default: nothing is purchased until you pass `--purchase`. `configure-azure` and `configure-gcp` bootstrap credentials for the separate [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform); this CLI's own recommend-and-purchase workflow is AWS-only today. See [cloud setup](docs/cli/cloud-setup.md).
 
-It is also built to be driven by an AI agent for the discovery and analysis side: searching recommendations, sizing a plan, filtering by account or region. The purchase step still needs a human to review the numbers before committing money. **`--yes` currently skips the confirmation prompt outright, including for a non-interactive caller** (a script, a CI job, an agent driving the CLI as a subprocess): see [Safety Features](#safety-features) and [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) before wiring `--purchase --yes` into anything unattended.
+It is also built to be driven by an AI agent for the discovery and analysis side: searching recommendations, sizing a plan, filtering by account or region. Real purchases require `--purchase` and confirmation at an interactive terminal. The `--yes` bypass has been removed; scripts and agents should hand their dry-run recommendations to a human for review and purchase.
 
 The CLI depends on the published shared Go modules in [cloud-commitments-go](https://github.com/LeanerCloud/cloud-commitments-go), pinned to fixed versions in `go.mod`. No sibling checkout or parent workspace is needed for local development.
 
@@ -17,7 +17,7 @@ The CLI depends on the published shared Go modules in [cloud-commitments-go](htt
 ## Safety Features
 
 1. **Dry-run by default** - no purchase without the explicit `--purchase` flag.
-2. **Confirmation prompt** - `--purchase` prints a summary of instance count and estimated savings, then prompts for confirmation. `--yes` skips this prompt, including for a non-interactive caller - it is not currently an automation boundary. [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) tracks closing that gap.
+2. **Confirmation prompt** - At an interactive terminal, `--purchase` prints the total instance count and estimated savings, then asks for confirmation once for the whole run. Nonterminal input is refused, including piped `yes`. Dry runs need no confirmation.
 3. **Coverage and instance limits** - `--coverage`, `--target-coverage`, and `--max-instances` shape what a dry run recommends before there is anything to confirm.
 4. **RDS extended-support filtering** - by default, recommendations for instances running an engine version in AWS Extended Support are excluded, since the surcharge can erase RI savings; pass `--include-extended-support` to include them.
 5. **Audit log written per recommendation** - the audit log path is checked for writability before any cloud API call. Each recommendation then gets its own audit record: for a dry run, written as soon as its (local, no-API-call) result is generated; for a real purchase, written after that purchase call returns.

@@ -4,7 +4,9 @@ CUDly is designed to be safe by default. Real purchases require an explicit `--p
 
 ## Automation and AI agents
 
-An AI agent (or any other non-interactive caller) can safely drive discovery, sizing, and filtering: that reads recommendations and existing commitments (for example, `--target-coverage`'s coverage lookup and the duplicate check that runs before every purchase), but never purchases anything on its own. Purchasing is different. `--purchase --yes` executes a real purchase from any invocation - a script, a CI job, or an agent running `cudly` as a subprocess included - because `--yes` skips the confirmation prompt before the interactive-terminal check ever runs. There is currently no automation boundary on the purchase path; [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) tracks closing that gap. Until it lands, treat `--purchase --yes` as unattended purchase automation, and keep it out of anything an agent can trigger on its own.
+Scripts and AI agents can run discovery, sizing, filtering and dry-run reports without confirmation. Real purchases require `--purchase` and an affirmative response at an interactive terminal, once for the whole run. Nonterminal stdin is refused, even if it contains `yes`.
+
+The `--yes` bypass has been removed ([#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943)). Existing commands that pass it are rejected during command parsing. Hand dry-run recommendations to a human, who reviews the totals and runs `--purchase` at a terminal. This prompt is an operator safeguard, not a security boundary against software that can control a terminal.
 
 ## The purchase decision: --purchase
 
@@ -18,40 +20,31 @@ Whether a run executes real purchases is controlled by a single flag:
 isDryRun = !ActualPurchase
 ```
 
-A bare invocation is always a dry run; passing `--purchase` is the one and only opt-in that moves money. This rule is identical in both cloud-fetch mode (the default) and CSV input mode (`--input-csv`).
+A bare invocation is always a dry run; passing `--purchase` opts into real purchases, subject to interactive confirmation. This rule is identical in both cloud-fetch mode (the default) and CSV input mode (`--input-csv`).
 
 | `--purchase` | Result |
 |---|---|
 | (not set / false) | Dry run - nothing purchased |
-| `true` | Real purchases |
+| `true` | Real purchases after interactive confirmation |
 
-> **History:** earlier versions had a separate `--dry-run` flag. As a default-true flag it silently suppressed purchases even when `--purchase` was set (you had to pass `--purchase --dry-run=false` to actually buy - a footgun surfaced on #1364), and once its default was flipped to false it became a redundant "force dry-run even with `--purchase`" override that only muddied the contract. It has been removed in favour of the single `--purchase` control. Real purchases still require the `--yes` confirmation (or the interactive prompt) below, so moving money remains a deliberate act.
+> **History:** earlier versions had a separate `--dry-run` flag. As a default-true flag it silently suppressed purchases even when `--purchase` was set (you had to pass `--purchase --dry-run=false` to actually buy - a footgun surfaced on #1364), and once its default was flipped to false it became a redundant "force dry-run even with `--purchase`" override that only muddied the contract. It has been removed in favour of the single `--purchase` control. Real purchases still require the interactive confirmation below.
 
 ```bash
 # Dry run (the default - nothing is purchased):
 cudly --services rds
 
-# Execute real purchases (prompts for confirmation unless --yes is given):
+# Execute real purchases (requires interactive confirmation):
 cudly --services rds --purchase
 
 # CSV mode behaves identically:
 cudly --input-csv recs.csv --purchase
 ```
 
-## Confirmation prompt: --yes
+## Confirmation prompt
 
-```text
---yes   bool   default: false
-```
+When running in purchase mode (`isDryRun=false`) at a terminal, cudly prints the total instance count and estimated monthly savings and prompts once before executing purchases. Enter `yes` or `y` to proceed; any other answer or an input error cancels the entire run. Input is case-insensitive. There is no flag to skip confirmation.
 
-When running in purchase mode (`isDryRun=false`), cudly prints a summary of the total instance count and estimated savings and prompts for confirmation before executing any purchase. Pass `--yes` to skip this prompt in automation.
-
-`--yes` skips the prompt unconditionally - it is not gated on whether the process has a real, interactive terminal. A script, a CI job, or an agent driving `cudly` as a subprocess can pass `--yes` and execute a purchase exactly as a human at a terminal would. Treat `--purchase --yes` as fully unattended purchase automation, not as a convenience for a human who already confirmed elsewhere. See [#1943](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1943) for the tracked work to close this gap.
-
-```bash
-# Unattended purchase (use with care - see the note above):
-cudly --services rds --purchase --yes
-```
+Dry runs never prompt. A purchase run with nonterminal stdin is canceled, so piping `yes` into the command does not authorize a purchase.
 
 ## Audit log: --audit-log
 
@@ -140,4 +133,4 @@ Before any real purchase run:
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run.
 6. Set `--idempotency-window` to cover the time since the earlier run (e.g. `72h` for a re-run two days later), and note that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward.
-7. If an AI agent or other automation drives `cudly`, never pass `--yes` to it directly - have the agent hand off the dry-run recommendation to a human, who runs `--purchase` themselves. See [Automation and AI agents](#automation-and-ai-agents).
+7. If an AI agent or other automation drives `cudly`, have it hand off the dry-run recommendation to a human, who reviews the totals and confirms `--purchase` at a terminal. See [Automation and AI agents](#automation-and-ai-agents).

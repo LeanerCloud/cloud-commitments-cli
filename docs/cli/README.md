@@ -11,7 +11,7 @@ This section documents the full CLI surface of the `cudly` binary. The Makefile 
 | Page | Covers |
 |------|--------|
 | [filtering.md](filtering.md) | Account, region, engine, instance-type, and Savings Plan type include/exclude filters; numeric threshold filters (min-count, min-savings-pct, max-break-even-months, min-pool-size, max-instances) |
-| [purchase-safety.md](purchase-safety.md) | Purchase pipeline guardrails: dry-run, --purchase, --yes, --audit-log, --idempotency-window, --rebuy-window-days, DISABLE_PURCHASE_DELAY env |
+| [purchase-safety.md](purchase-safety.md) | Purchase pipeline guardrails: dry-run, --purchase, interactive confirmation, --audit-log, --idempotency-window, --rebuy-window-days, DISABLE_PURCHASE_DELAY env |
 | [cloud-setup.md](cloud-setup.md) | `configure-azure` and `configure-gcp` subcommands for self-hosted credential bootstrap |
 
 ## Complete flag reference
@@ -47,8 +47,7 @@ All flags belong to the root command unless noted otherwise.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--purchase` | | `false` | Execute real purchases. This is the only purchase control: a bare run is always a dry run, and `--purchase` alone executes real purchases (identically in cloud-fetch and `--input-csv` modes). Still gated by the `--yes` / interactive confirmation prompt. See [purchase-safety.md](purchase-safety.md). |
-| `--yes` | | `false` | Skip the interactive confirmation prompt. Use with caution in automation. |
+| `--purchase` | | `false` | Opt into real purchases, requiring confirmation at an interactive terminal. A bare run is always a dry run. Applies to both cloud-fetch and `--input-csv` modes. See [purchase-safety.md](purchase-safety.md). |
 | `--audit-log` | | `./cudly-audit.jsonl` | Path to the JSONL audit log file. Written for every recommendation (dry-run and real). See [purchase-safety.md](purchase-safety.md). |
 | `--idempotency-window` | | `24h` | Lookback window for duplicate purchase detection. A Go duration string that must be a positive whole number of hours (e.g. `24h`, `72h`); anything else is rejected at startup. See [purchase-safety.md](purchase-safety.md). |
 

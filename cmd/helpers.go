@@ -200,17 +200,10 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 	return result
 }
 
-// ConfirmPurchase asks the user for confirmation before proceeding.
-// totalSavings is the estimated monthly savings from the purchase (not the purchase cost),
-// matching the EstimatedSavings column and the "Estimated monthly savings" summary.
-// Returns false without prompting if stdin is not a TTY and skipConfirmation is false.
-func ConfirmPurchase(totalInstances int, totalSavings float64, skipConfirmation bool) bool {
-	if skipConfirmation {
-		return true
-	}
-
+// ConfirmPurchase requires terminal input; totalSavings is monthly savings, not purchase cost.
+func ConfirmPurchase(totalInstances int, totalSavings float64) bool {
 	if !term.IsTerminal(int(os.Stdin.Fd())) { //nolint:gosec // G115: uintptr->int for file descriptor; FD values are always small positive integers
-		log.Printf("stdin is not a terminal and --yes was not set; skipping purchase")
+		log.Printf("stdin is not a terminal; interactive confirmation is required, skipping purchase")
 		return false
 	}
 

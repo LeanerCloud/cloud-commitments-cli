@@ -1,6 +1,20 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestYesFlagRemoved(t *testing.T) {
+	if flag := rootCmd.Flags().Lookup("yes"); flag != nil {
+		t.Fatal("--yes must not bypass interactive purchase confirmation")
+	}
+	for _, arg := range []string{"--yes", "--yes=false"} {
+		if err := rootCmd.ParseFlags([]string{arg}); err == nil || !strings.Contains(err.Error(), "unknown flag: --yes") {
+			t.Errorf("%s must be rejected as an unknown flag, got %v", arg, err)
+		}
+	}
+}
 
 // TestEffectiveDryRun documents the single-flag purchase contract: a run is a
 // dry run unless the user opts into real purchases with --purchase. This guards
