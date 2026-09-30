@@ -180,8 +180,7 @@ const archeraSignupURL = common.ArcheraSignupURL
 // printFinalMessage prints the final message based on mode and results.
 func printFinalMessage(isDryRun bool, riSuccess int) {
 	if isDryRun {
-		AppLogger.Println("\n💡 To actually purchase these RIs, run with --purchase flag")
-		AppLogger.Println("   Note: Savings Plans purchasing not yet implemented")
+		AppLogger.Println("\n💡 To actually purchase these commitments, run with --purchase flag")
 	} else if riSuccess > 0 {
 		AppLogger.Println("\n🎉 Purchase operations completed!")
 		AppLogger.Println("⏰ Allow up to 15 minutes for RIs to appear in your account")
