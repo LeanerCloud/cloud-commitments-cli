@@ -40,14 +40,28 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run golangci-lint
+      - name: Install golangci-lint
         uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
           version: v2.10.1
-          args: --timeout=10m
+          install-only: true
+
+      - name: Run golangci-lint
+        run: |
+          set -euo pipefail
+          export GOLANGCI_LINT_CACHE="$HOME/.cache/golangci-lint"
+          for mod in .; do
+            echo "==> golangci-lint in $mod"
+            (cd "$mod" && golangci-lint config verify && golangci-lint run --timeout=10m)
+          done
 
       - name: Run go vet
-        run: go vet ./...
+        run: |
+          set -euo pipefail
+          for mod in .; do
+            echo "==> go vet in $mod"
+            (cd "$mod" && go vet ./...)
+          done
 
       - name: Install gocyclo
         run: go install github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0
