@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -26,22 +27,34 @@ import (
 )
 
 type completenessProxy struct {
-	t        *testing.T
-	mu       sync.Mutex
-	handlers sync.WaitGroup
-	regions  string
-	details  string
-	requests map[string]int
-	cert     tls.Certificate
+	t          *testing.T
+	mu         sync.Mutex
+	handlers   sync.WaitGroup
+	regions    string
+	details    string
+	service    string
+	requests   map[string]int
+	spRequests []completenessSPRequest
+	engines    []string
+	cert       tls.Certificate
 }
 
-func newCompletenessProxy(t *testing.T, dir, regions, details string) (*completenessProxy, string, string) {
+type completenessSPRequest struct {
+	SavingsPlansType     string
+	NextPageToken        string
+	TermInYears          string
+	PaymentOption        string
+	LookbackPeriodInDays string
+	AccountScope         string
+}
+
+func newCompletenessProxy(t *testing.T, dir, regions, details, service string) (*completenessProxy, string, string) {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(54), Subject: pkix.Name{CommonName: "recommendation fixture"},
-		DNSNames:  []string{"ce.us-east-1.amazonaws.com", "ec2.us-east-1.amazonaws.com", "rds.us-east-1.amazonaws.com"},
+		DNSNames:  []string{"ce.us-east-1.amazonaws.com", "ec2.us-east-1.amazonaws.com", "rds.us-east-1.amazonaws.com", "savingsplans.amazonaws.com"},
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
 		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -52,7 +65,7 @@ func newCompletenessProxy(t *testing.T, dir, regions, details string) (*complete
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	caPath := filepath.Join(dir, "ca.pem")
 	require.NoError(t, os.WriteFile(caPath, certPEM, 0600))
-	fixture := &completenessProxy{t: t, regions: regions, details: details, requests: make(map[string]int),
+	fixture := &completenessProxy{t: t, regions: regions, details: details, service: service, requests: make(map[string]int),
 		cert: tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}}
 	server := httptest.NewServer(http.HandlerFunc(fixture.serveConnect))
 	t.Cleanup(func() {
@@ -65,7 +78,7 @@ func newCompletenessProxy(t *testing.T, dir, regions, details string) (*complete
 func (p *completenessProxy) serveConnect(w http.ResponseWriter, r *http.Request) {
 	p.handlers.Add(1)
 	defer p.handlers.Done()
-	allowed := r.Host == "ce.us-east-1.amazonaws.com:443" || r.Host == "ec2.us-east-1.amazonaws.com:443" || r.Host == "rds.us-east-1.amazonaws.com:443"
+	allowed := r.Host == "ce.us-east-1.amazonaws.com:443" || r.Host == "ec2.us-east-1.amazonaws.com:443" || r.Host == "rds.us-east-1.amazonaws.com:443" || r.Host == "savingsplans.amazonaws.com:443"
 	if r.Method != http.MethodConnect || !allowed {
 		p.t.Errorf("unexpected CONNECT %s %s", r.Method, r.Host)
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -121,24 +134,78 @@ func (p *completenessProxy) respond(req *http.Request) *http.Response {
 		p.t.Error(err)
 	}
 	op := req.Header.Get("X-Amz-Target")
-	if op == "" {
+	if req.Host == "savingsplans.amazonaws.com" && op == "" {
+		op = strings.TrimPrefix(req.URL.Path, "/")
+		if req.Method != http.MethodPost || req.URL.Path != "/DescribeSavingsPlans" || req.URL.RawQuery != "" {
+			p.t.Errorf("unexpected Savings Plans REST request %s %s", req.Method, req.URL)
+			op = "fixture-rejected"
+		} else {
+			var inventory struct {
+				States     []string `json:"states"`
+				MaxResults int      `json:"maxResults"`
+				NextToken  string   `json:"nextToken"`
+			}
+			if decodeErr := json.Unmarshal(body, &inventory); decodeErr != nil || inventory.MaxResults != 100 || inventory.NextToken != "" || strings.Join(inventory.States, ",") != "active,payment-pending,pending-return,queued" {
+				p.t.Errorf("unexpected SP inventory request: %s (%v)", body, decodeErr)
+				op = "fixture-rejected"
+			}
+		}
+	} else if op == "" {
 		values, parseErr := url.ParseQuery(string(body))
 		if parseErr != nil {
 			p.t.Error(parseErr)
 		}
 		op = values.Get("Action")
+		if p.service != "rds" && req.Host == "rds.us-east-1.amazonaws.com" {
+			want := url.Values{"Action": {op}, "Version": {"2014-10-31"}}
+			if op == "DescribeDBMajorEngineVersions" {
+				engine := values.Get("Engine")
+				want.Set("Engine", engine)
+				p.mu.Lock()
+				p.engines = append(p.engines, engine)
+				p.mu.Unlock()
+			}
+			if req.Method != http.MethodPost || req.URL.Path != "/" || req.URL.RawQuery != "" || values.Encode() != want.Encode() {
+				p.t.Errorf("unexpected SP ancillary RDS request %s %s: %s", req.Method, req.URL, body)
+				op = "fixture-rejected"
+			}
+		}
 	}
 	p.mu.Lock()
 	p.requests[op]++
 	call := p.requests[op]
 	p.mu.Unlock()
 	status, contentType, payload := p.operation(req.Host, op, call)
+	if p.service != "rds" && req.Host == "ce.us-east-1.amazonaws.com" && op == "AWSInsightsIndexService.GetSavingsPlansPurchaseRecommendation" {
+		status, contentType, payload = p.spRecommendation(body)
+	}
 	return &http.Response{StatusCode: status, ProtoMajor: 1, ProtoMinor: 1,
 		Header: http.Header{"Content-Type": []string{contentType}},
 		Body:   io.NopCloser(strings.NewReader(payload)), ContentLength: int64(len(payload))}
 }
 
 func (p *completenessProxy) operation(host, op string, call int) (int, string, string) {
+	responses := map[string]string{
+		"DescribeDBInstances":           "DBInstances",
+		"DescribeDBMajorEngineVersions": "DBMajorEngineVersions",
+		"DescribeReservedDBInstances":   "ReservedDBInstances",
+	}
+	if element, ok := responses[op]; ok && host == "rds.us-east-1.amazonaws.com" && (p.service == "rds" || op != "DescribeReservedDBInstances") {
+		return 200, "text/xml", fmt.Sprintf(`<%sResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><%sResult><%s/></%sResult></%sResponse>`, op, op, element, op, op)
+	}
+	if p.service != "rds" {
+		if host == "ce.us-east-1.amazonaws.com" && op == "AWSInsightsIndexService.GetSavingsPlansPurchaseRecommendation" {
+			return 200, "application/x-amz-json-1.1", ""
+		}
+		if host == "savingsplans.amazonaws.com" && op == "DescribeSavingsPlans" {
+			return 200, "application/json", `{"savingsPlans":[]}`
+		}
+		if host == "ec2.us-east-1.amazonaws.com" && op == "DescribeRegions" {
+			return 200, "text/xml", `<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><regionInfo><item><regionName>us-east-1</regionName></item></regionInfo></DescribeRegionsResponse>`
+		}
+		p.t.Errorf("unexpected SP operation %s %s", host, op)
+		return 403, "text/plain", "fixture rejected operation"
+	}
 	if host == "ce.us-east-1.amazonaws.com" && op == "AWSInsightsIndexService.GetReservationCoverage" {
 		return 200, "application/x-amz-json-1.1", `{"CoveragesByTime":[]}`
 	}
@@ -164,14 +231,6 @@ func (p *completenessProxy) operation(host, op string, call int) (int, string, s
 		}
 		return 200, "text/xml", `<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><regionInfo><item><regionName>us-east-1</regionName></item></regionInfo></DescribeRegionsResponse>`
 	}
-	responses := map[string]string{
-		"DescribeDBInstances":           "DBInstances",
-		"DescribeDBMajorEngineVersions": "DBMajorEngineVersions",
-		"DescribeReservedDBInstances":   "ReservedDBInstances",
-	}
-	if element, ok := responses[op]; ok && host == "rds.us-east-1.amazonaws.com" {
-		return 200, "text/xml", fmt.Sprintf(`<%sResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><%sResult><%s/></%sResult></%sResponse>`, op, op, element, op, op)
-	}
 	p.t.Errorf("unexpected operation %s %s", host, op)
 	return 403, "text/plain", "fixture rejected operation"
 }
@@ -181,6 +240,10 @@ func (p *completenessProxy) assertRequests(t *testing.T) {
 	p.handlers.Wait()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.service != "rds" {
+		p.assertSPRequests(t)
+		return
+	}
 	ceCalls := 1
 	if p.regions == "fallback" {
 		ceCalls = 6
@@ -195,4 +258,86 @@ func (p *completenessProxy) assertRequests(t *testing.T) {
 	}
 	require.Equal(t, wantRegions, p.requests["DescribeRegions"], "region calls")
 	t.Logf("actual root command, config loader, SDK and CSV; synthetic operations=%v", p.requests)
+}
+
+func completenessSPTypes(service string) []string {
+	if service == "savingsplans" {
+		return []string{"COMPUTE_SP", "EC2_INSTANCE_SP", "SAGEMAKER_SP", "DATABASE_SP"}
+	}
+	for _, plan := range []string{"COMPUTE_SP", "EC2_INSTANCE_SP", "SAGEMAKER_SP", "DATABASE_SP"} {
+		if completenessSPService(plan) == strings.Replace(service, "savingsplans-", "savings-plans-", 1) {
+			return []string{plan}
+		}
+	}
+	panic("unexpected fixture service: " + service)
+}
+
+func completenessSPService(plan string) string {
+	return map[string]string{"COMPUTE_SP": "savings-plans-compute", "EC2_INSTANCE_SP": "savings-plans-ec2instance", "SAGEMAKER_SP": "savings-plans-sagemaker", "DATABASE_SP": "savings-plans-database"}[plan]
+}
+
+func (p *completenessProxy) spRecommendation(body []byte) (int, string, string) {
+	var request completenessSPRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		p.t.Errorf("decode SP request: %v", err)
+		return 403, "application/json", `{}`
+	}
+	p.mu.Lock()
+	p.spRequests = append(p.spRequests, request)
+	p.mu.Unlock()
+	if p.details == "api-error" || (p.details == "failed-type" && (p.service != "savingsplans" || request.SavingsPlansType == "DATABASE_SP")) || request.NextPageToken == "unfinished" {
+		return 400, "application/x-amz-json-1.1", `{"__type":"AccessDeniedException","message":"fixture denied recommendations"}`
+	}
+	const valid = `{"HourlyCommitmentToPurchase":"2","EstimatedMonthlySavingsAmount":"10","UpfrontCost":"3","CurrentAverageHourlyOnDemandSpend":"4"}`
+	const invalid = `{"HourlyCommitmentToPurchase":"not-a-number","EstimatedMonthlySavingsAmount":"10","UpfrontCost":"3"}`
+	details := valid
+	if request.SavingsPlansType == "EC2_INSTANCE_SP" {
+		details = strings.TrimSuffix(valid, "}") + `,"SavingsPlansDetails":{"Region":"us-east-1"}}`
+	}
+	switch p.details {
+	case "mixed":
+		details += "," + invalid
+	case "all-invalid":
+		details = invalid
+	case "empty":
+		details = ""
+	}
+	token := ""
+	if p.details == "late-page" {
+		token = `,"NextPageToken":"unfinished"`
+	}
+	return 200, "application/x-amz-json-1.1", `{"SavingsPlansPurchaseRecommendation":{"SavingsPlansPurchaseRecommendationDetails":[` + details + `]}` + token + `}`
+}
+
+func (p *completenessProxy) assertSPRequests(t *testing.T) {
+	t.Helper()
+	types := completenessSPTypes(p.service)
+	expected := make([]completenessSPRequest, 0, len(types)*2)
+	for _, plan := range types {
+		request := completenessSPRequest{SavingsPlansType: plan, TermInYears: "ONE_YEAR", PaymentOption: "NO_UPFRONT", LookbackPeriodInDays: "SEVEN_DAYS", AccountScope: "LINKED"}
+		expected = append(expected, request)
+		if p.details == "late-page" {
+			request.NextPageToken = "unfinished"
+			expected = append(expected, request)
+		}
+	}
+	require.Equal(t, expected, p.spRequests, "actual SDK SP request tuples")
+	rows := len(types)
+	switch p.details {
+	case "empty", "all-invalid", "api-error":
+		rows = 0
+	case "failed-type":
+		if p.service == "savingsplans" {
+			rows--
+		} else {
+			rows = 0
+		}
+	}
+	operations := map[string]int{"DescribeRegions": 1, "DescribeDBInstances": 1, "DescribeDBMajorEngineVersions": 4, "AWSInsightsIndexService.GetSavingsPlansPurchaseRecommendation": len(expected)}
+	if rows > 0 {
+		operations["DescribeSavingsPlans"] = rows
+	}
+	require.Equal(t, operations, p.requests, "unexpected read or purchase")
+	require.Equal(t, []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}, p.engines, "ancillary RDS engine reads")
+	t.Logf("actual root command, SP SDK and CSV; synthetic operations=%v", p.requests)
 }
