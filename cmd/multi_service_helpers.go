@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -108,7 +109,10 @@ func getAllAWSRegionsWithClient(ctx context.Context, ec2Client EC2ClientInterfac
 // discoverRegionsForService discovers regions that have recommendations for a specific service.
 func discoverRegionsForService(ctx context.Context, client provider.RecommendationsClient, service common.ServiceType) ([]string, error) {
 	recs, err := client.GetRecommendationsForService(ctx, service)
-	if partial := azureprovider.AsPartialSubscriptionFailure(err); partial != nil {
+	var incomplete *recommendations.IncompleteRecommendationsError
+	if errors.As(err, &incomplete) {
+		AppLogger.Printf("  ⚠️  Region discovery incomplete: %v\n", incomplete)
+	} else if partial := azureprovider.AsPartialSubscriptionFailure(err); partial != nil {
 		// Region discovery is best-effort: the subscriptions that answered
 		// still tell us where to look. Report the gap rather than dropping
 		// the discovered regions or failing outright.
@@ -463,6 +467,11 @@ func fetchRecommendationsForRegion(
 	}
 
 	recs, err := recClient.GetRecommendations(ctx, &params)
+	var incomplete *recommendations.IncompleteRecommendationsError
+	if errors.As(err, &incomplete) {
+		AppLogger.Printf("  ⚠️  %v\n", incomplete)
+		return recs
+	}
 	if partial := azureprovider.AsPartialSubscriptionFailure(err); partial != nil {
 		// Keep the subscriptions that did answer, but say plainly that the
 		// sweep was incomplete: without this the operator would read a short
