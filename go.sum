@@ -78,10 +78,10 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0.54.0/go.mod h1:vB2GH9GAYYJTO3mEn8oYwzEdhlayZIdQz6zdzgUIRvA=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.54.0 h1:s0WlVbf9qpvkh1c/uDAPElam0WrL7fHRIidgZJ7UqZI=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.54.0/go.mod h1:Mf6O40IAyB9zR/1J8nGDDPirZQQPbYJni8Yisy7NTMc=
-github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20260929105827-b3b4cb5e3d80 h1:wVKlMokfaME/Lw525Qz3F155R3nY4VmuaIyh+6d4sCU=
-github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20260929105827-b3b4cb5e3d80/go.mod h1:ApWBliDXe099f3oDXBz41K/I9v4bHvn1dG/BGoRmHlw=
-github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261003204812-9962786e0695 h1:DfNEBzFS7/MaBZljLGRRRUaarfnXXZyBE/6iozzp9/k=
-github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261003204812-9962786e0695/go.mod h1:d4nsy61/Ptib0SxqMg0ble3yksVm3+QbtUtmGja82PA=
+github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261004010532-e6c7eb87968a h1:V+bK9BxoTOXPsA3QGATpFuQddLhYbMYk3v2N2fPftJU=
+github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261004010532-e6c7eb87968a/go.mod h1:ApWBliDXe099f3oDXBz41K/I9v4bHvn1dG/BGoRmHlw=
+github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261004034603-d4b69ab4f8b1 h1:OpFvGbU3SznhjC+cKVeOnY5adySAS+4eLIiLJVDUGKM=
+github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261004034603-d4b69ab4f8b1/go.mod h1:DxzPn1ciRE6FfgSQjpWArRz44Fjyl2b0H+CrRRw4BPo=
 github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261004143708-56555e1be095 h1:biK3afDC9+O7GOquE9AmjslC70nAgNAN3lCYQuzYc9o=
 github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261004143708-56555e1be095/go.mod h1:Na4KM+0ORVTgT9xsvyfzoH7cS01eacC3EyFzgaDC1+w=
 github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20260928214714-ce9513612901 h1:i6OwXLUheudN3GfwnYXdKuEq8vPdE9qkNJ+r71LRLKA=
