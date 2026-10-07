@@ -60,8 +60,11 @@ func (f *fakeGCPServiceClient) FilterRecommendationsForRecentCommitments(recs []
 
 var _ provider.ServiceClient = (*fakeGCPServiceClient)(nil)
 
-func TestDuplicateChecker_RecentGPCCUDSuppressesFamilyRetry_2121(t *testing.T) {
+func TestDuplicateChecker_RecentGCPCUDSuppressesFamilyRetry_2121(t *testing.T) {
 	ctx := context.Background()
+	previousWindow := toolCfg.IdempotencyWindowHours
+	toolCfg.IdempotencyWindowHours = 0
+	t.Cleanup(func() { toolCfg.IdempotencyWindowHours = previousWindow })
 
 	recentCUD := common.Commitment{
 		Provider:       common.ProviderGCP,
@@ -91,10 +94,9 @@ func TestDuplicateChecker_RecentGPCCUDSuppressesFamilyRetry_2121(t *testing.T) {
 		commitments:   []common.Commitment{recentCUD},
 	}
 	recs := []common.Recommendation{cudRec("n2-standard-4"), cudRec("n4-standard-4")}
-	passed, filtered, err := NewDuplicateChecker(0).AdjustRecommendationsForExisting(ctx, recs, client)
-	require.NoError(t, err)
-	require.Len(t, filtered, 1, "recent GENERAL_PURPOSE_N2 purchase must suppress the n2 retry")
-	assert.Equal(t, "n2-standard-4", filtered[0].ResourceType)
-	require.Len(t, passed, 1, "a different commitment family must not be suppressed")
-	assert.Equal(t, "n4-standard-4", passed[0].ResourceType)
+	drops := common.NewDropSummary()
+	adjusted := checkDuplicates(ctx, recs, client, false, drops)
+	assert.Equal(t, "Dropped 1 recs: duplicate-dedup=1", drops.FormatOneLine())
+	require.Len(t, adjusted, 1, "a different commitment family must not be suppressed")
+	assert.Equal(t, "n4-standard-4", adjusted[0].ResourceType)
 }
