@@ -158,12 +158,14 @@ Merge only at the reviewed SHA, and only when all of these cover it:
   exact-revision local verification plus a thorough independent review
   cover the SHA; otherwise run the loop above. CI is freshly green on
   the SHA, mergeability is clean, and the reviewed head is unchanged.
-- Local verification exercises the actual affected user path and data
-  shape on macOS (Linux via CI; Windows out of scope). Realistic fixtures,
-  mocks, recorded responses, or local integration may satisfy this gate.
+- For runtime changes, local verification exercises the actual affected
+  user path and data shape on macOS (Linux via CI; Windows out of scope).
+  Realistic fixtures, mocks, recorded responses, or local integration may
+  satisfy this gate.
   Label the evidence honestly and record real-account coverage gaps.
-  Require regression fail-before/pass-after evidence where applicable,
-  a fresh build, and relevant tests.
+  For runtime changes, require regression fail-before/pass-after evidence
+  where applicable, a fresh build, and relevant tests.
+  For non-runtime changes, run checks relevant to the changed artifact.
 - The verdict, the reviewed SHA and the local verification evidence are
   recorded on the PR itself.
 
