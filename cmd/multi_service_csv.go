@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/recommendations"
@@ -47,12 +48,10 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CSV header: %w", err)
 	}
+	if err = validateCSVUTF8(header); err != nil {
+		return nil, fmt.Errorf("CSV header: %w", err)
+	}
 
-	// Build column index map, rejecting headers that lack the columns a
-	// row cannot be meaningful without (#1327). Before this check a header
-	// the parser did not recognize (e.g. "Instance Type" / "Instance Count")
-	// decoded every row to an empty service and was only caught by the
-	// Count cell validation, if at all.
 	colIdx, err := buildColumnIndexMap(header)
 	if err != nil {
 		return nil, err
@@ -67,16 +66,18 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	return parsed, nil
 }
 
-// requiredCSVColumns are the header columns a recommendation row cannot be
-// meaningful without. Term, PaymentOption, Account, Engine and the derived
-// columns stay optional: minimal CSVs and Savings Plans rows legitimately
-// omit them, and their values are validated downstream where they are used.
+// Minimal CSVs require these columns; service-specific columns stay optional.
 var requiredCSVColumns = []string{"Service", "Region", "ResourceType", "Count"}
 
-// buildColumnIndexMap creates a map from column names to indices, failing
-// loudly when a required column is missing. A UTF-8 BOM on the first header
-// cell is stripped so Excel-exported CSVs parse; other encodings (UTF-16,
-// Latin-1) still fail the required-column check with a clear error.
+func validateCSVUTF8(fields []string) error {
+	for i, field := range fields {
+		if !utf8.ValidString(field) {
+			return fmt.Errorf("column %d: invalid UTF-8 encoding", i+1)
+		}
+	}
+	return nil
+}
+
 func buildColumnIndexMap(header []string) (map[string]int, error) {
 	if len(header) > 0 {
 		header[0] = strings.TrimPrefix(header[0], "\ufeff")
@@ -108,6 +109,10 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CSV record: %w", err)
+		}
+		if err = validateCSVUTF8(record); err != nil {
+			line, _ := reader.FieldPos(0)
+			return nil, fmt.Errorf("CSV line %d: %w", line, err)
 		}
 
 		// Skip the trailing TOTAL summary row that writeMultiServiceCSVReport
@@ -193,12 +198,7 @@ func getCSVField(record []string, colIdx map[string]int, fieldName string) strin
 	return ""
 }
 
-// parseCSVCount parses the required Count field as a whole positive
-// integer. It drives purchase quantities, so a blank, missing, zero,
-// fractional or otherwise malformed cell is an error rather than a
-// truncated or zero value. Zero in particular bought nothing but still
-// triggered a live purchase call (#2116); the tool's own CSVs never
-// emit 0 because the Savings Plans client sets Count to 1.
+// Savings Plans exports use Count=1, preserving positive-count round trips.
 func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	const fieldName = "Count"
 	idx, ok := colIdx[fieldName]
@@ -220,11 +220,7 @@ func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	return nil
 }
 
-// parseCSVFloat parses a finite, non-negative float field from a CSV
-// record. A blank or absent cell leaves target untouched (see
-// requireRankingSignal). Negative values are rejected: EstimatedSavings
-// is the only caller, and a negative savings figure is a malformed row,
-// not a signal to buy (#2116).
+// Blank savings stay absent-as-zero for requireRankingSignal.
 func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, target *float64) error {
 	value := strings.TrimSpace(getCSVField(record, colIdx, fieldName))
 	if value == "" {
