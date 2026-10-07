@@ -160,7 +160,7 @@ operator review. Work through this checklist with the project owner's
 authorization:
 
 1. **Inventory broad grants.** List the project IAM policy and identify CUDly
-   identities that still hold Compute Admin, directly or inherited:
+   identities that still hold Compute Admin:
 
    ```bash
    gcloud projects get-iam-policy PROJECT_ID \
@@ -169,9 +169,18 @@ authorization:
      --format='table(bindings.role, bindings.members)'
    ```
 
-   Record every `cudly-service-account@...` match, including bindings inherited
-   from folder or organization policies. Do not change live IAM during the
-   inventory.
+   The project policy does not include inherited bindings, so check folder and
+   organization policies too:
+
+   ```bash
+   gcloud projects get-ancestors-iam-policy PROJECT_ID \
+     --flatten=bindings[].members \
+     --filter=bindings.role:roles/compute.admin \
+     --format='table(bindings.role, bindings.members)'
+   ```
+
+   Record every `cudly-service-account@...` match. Do not change live IAM
+   during the inventory.
 
 2. **Establish the narrow permissions.** Rerun `cudly configure-gcp` (or grant
    manually) so the Service Account holds `roles/compute.viewer` and
@@ -179,8 +188,10 @@ authorization:
    existing custom role must contain exactly `compute.commitments.create` and
    be enabled; the wizard refuses incompatible roles rather than changing them.
 
-3. **Verify without purchasing.** Authenticate as the Service Account and
-   confirm the replacement role is effective on the live project:
+3. **Verify without purchasing.** Authenticate as the Service Account (use
+   the key file path from your installation; mint a fresh key if the local
+   copy is gone) and confirm the replacement roles are effective on the live
+   project:
 
    ```bash
    gcloud auth activate-service-account --key-file=~/cudly-gcp-key.json
@@ -188,9 +199,17 @@ authorization:
      --permissions=compute.commitments.create,compute.commitments.list
    ```
 
-   Then run the read-only analysis workflow and confirm it completes without
-   permission errors. This live validation is required: local HTTP fixtures
-   only prove SDK request behaviour, not IAM propagation.
+   The command silently omits permissions the caller lacks, so confirm both
+   appear in the output. Then run the read-only analysis workflow and confirm
+   it completes without permission errors. This live validation is required:
+   local HTTP fixtures only prove SDK request behaviour, not IAM propagation.
+
+   Switch back to your own identity before continuing; the remaining steps
+   need your operator permissions:
+
+   ```bash
+   gcloud auth login
+   ```
 
 4. **Revoke with approval.** Only after the owner approves the inventory
    result, remove the broad binding while leaving unrelated access and IAM
@@ -201,6 +220,10 @@ authorization:
      --member=serviceAccount:cudly-service-account@PROJECT_ID.iam.gserviceaccount.com \
      --role=roles/compute.admin
    ```
+
+   If the binding carries an IAM condition, the removal command fails until
+   you pass a matching `--condition` flag; treat that as a cue to review the
+   condition with the owner, not to force the removal.
 
    Record the inventory result and any deployment-specific follow-up. Never
    delete bindings or rotate keys without per-resource authorization.
