@@ -48,8 +48,15 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 		return nil, fmt.Errorf("failed to read CSV header: %w", err)
 	}
 
-	// Build column index map
-	colIdx := buildColumnIndexMap(header)
+	// Build column index map, rejecting headers that lack the columns a
+	// row cannot be meaningful without (#1327). Before this check a header
+	// the parser did not recognize (e.g. "Instance Type" / "Instance Count")
+	// decoded every row to an empty service and was only caught by the
+	// Count cell validation, if at all.
+	colIdx, err := buildColumnIndexMap(header)
+	if err != nil {
+		return nil, err
+	}
 
 	// Parse all records
 	parsed, err := parseCSVRecords(reader, colIdx)
@@ -60,13 +67,34 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	return parsed, nil
 }
 
-// buildColumnIndexMap creates a map from column names to indices.
-func buildColumnIndexMap(header []string) map[string]int {
+// requiredCSVColumns are the header columns a recommendation row cannot be
+// meaningful without. Term, PaymentOption, Account, Engine and the derived
+// columns stay optional: minimal CSVs and Savings Plans rows legitimately
+// omit them, and their values are validated downstream where they are used.
+var requiredCSVColumns = []string{"Service", "Region", "ResourceType", "Count"}
+
+// buildColumnIndexMap creates a map from column names to indices, failing
+// loudly when a required column is missing. A UTF-8 BOM on the first header
+// cell is stripped so Excel-exported CSVs parse; other encodings (UTF-16,
+// Latin-1) still fail the required-column check with a clear error.
+func buildColumnIndexMap(header []string) (map[string]int, error) {
+	if len(header) > 0 {
+		header[0] = strings.TrimPrefix(header[0], "\ufeff")
+	}
 	colIdx := make(map[string]int)
 	for i, col := range header {
 		colIdx[col] = i
 	}
-	return colIdx
+	var missing []string
+	for _, req := range requiredCSVColumns {
+		if _, ok := colIdx[req]; !ok {
+			missing = append(missing, req)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("CSV header missing required columns: %s", strings.Join(missing, ", "))
+	}
+	return colIdx, nil
 }
 
 // parseCSVRecords reads and parses all CSV records.
