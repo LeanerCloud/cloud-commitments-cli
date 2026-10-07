@@ -13,31 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Consumer regression test for issue #2121, library #155: a recently
-// purchased GCP committed-use discount suppresses retries for the same
-// commitment family. The CLI reaches this through its duplicate-purchase
-// filter (NewDuplicateChecker in helpers.go), which dispatches to the
-// provider client's recent-commitment filter when the pinned library
-// provides one.
-//
-// The test holds the pinned library's real *computeengine.Client behind an
-// interface probe instead of naming the method statically: with the pre-#155
-// pins the type does not implement the filter, the probe fails at runtime,
-// and this test fails; with the new pins the real family-level filter runs.
-// Either way the file compiles, so the sibling pin-sensitive tests keep
-// running under both pin sets.
-
-// gcpRecentCommitmentFilter mirrors the unexported recfilter dispatch
-// interface so the probe can detect whether the pinned library client
-// implements the family-level suppression.
+// Probe the library interface at runtime so this test also compiles with the old pins.
 type gcpRecentCommitmentFilter interface {
 	FilterRecommendationsForRecentCommitments(recs []common.Recommendation, existing []common.Commitment) (passed, filtered []common.Recommendation, err error)
 }
 
-// fakeGCPServiceClient is a provider.ServiceClient whose existing
-// commitments are fixed and whose recent-commitment filter delegates to the
-// pinned library's real compute engine client, so the family-matching logic
-// under test is the library's, not a reimplementation.
 type fakeGCPServiceClient struct {
 	libraryClient any
 	commitments   []common.Commitment
@@ -80,14 +60,6 @@ func (f *fakeGCPServiceClient) FilterRecommendationsForRecentCommitments(recs []
 
 var _ provider.ServiceClient = (*fakeGCPServiceClient)(nil)
 
-// TestDuplicateChecker_RecentGPCCUDSuppressesFamilyRetry_2121 drives the
-// CLI's duplicate-purchase seam with a recent GCP CUD record: an n2
-// recommendation for the same account and region as the recent
-// GENERAL_PURPOSE_N2 commitment is suppressed (a retry of the purchase that
-// already happened), while an n4 recommendation in the same region belongs
-// to a different commitment family and still passes. With the old pins the
-// gcp client implements no such filter and the generic per-resource-type
-// matching lets the n2 retry through.
 func TestDuplicateChecker_RecentGPCCUDSuppressesFamilyRetry_2121(t *testing.T) {
 	ctx := context.Background()
 
@@ -114,15 +86,12 @@ func TestDuplicateChecker_RecentGPCCUDSuppressesFamilyRetry_2121(t *testing.T) {
 			Count:          2,
 		}
 	}
-
 	client := &fakeGCPServiceClient{
 		libraryClient: &computeengine.Client{}, // zero value: the filter uses only its arguments
 		commitments:   []common.Commitment{recentCUD},
 	}
-
 	recs := []common.Recommendation{cudRec("n2-standard-4"), cudRec("n4-standard-4")}
 	passed, filtered, err := NewDuplicateChecker(0).AdjustRecommendationsForExisting(ctx, recs, client)
-
 	require.NoError(t, err)
 	require.Len(t, filtered, 1, "recent GENERAL_PURPOSE_N2 purchase must suppress the n2 retry")
 	assert.Equal(t, "n2-standard-4", filtered[0].ResourceType)
