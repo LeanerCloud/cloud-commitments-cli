@@ -121,7 +121,10 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 		return
 	}
 
-	servicesToProcess := determineServicesToProcess(cfg)
+	servicesToProcess, serviceErr := determineServicesToProcess(cfg)
+	if serviceErr != nil {
+		log.Fatalf("Invalid services: %v", serviceErr)
+	}
 	if len(servicesToProcess) == 0 {
 		log.Fatalf("No valid services specified")
 	}
