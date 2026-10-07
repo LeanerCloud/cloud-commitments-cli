@@ -378,10 +378,14 @@ func extractNumericPrefix(s string) string {
 }
 
 // isInExtendedSupport checks if a version is currently in extended support based on lifecycle dates.
-func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]MajorEngineVersionInfo) bool {
+// The second return value reports whether lifecycle data was available for the
+// lookup: known is false when the major version cannot be extracted or the
+// engine:majorVersion key is missing from versionInfo. Callers on money paths
+// must not treat known=false as "not in extended support" (issue #1313).
+func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]MajorEngineVersionInfo) (extended, known bool) {
 	majorVersion := extractMajorVersion(engine, fullVersion)
 	if majorVersion == "" {
-		return false
+		return false, false
 	}
 
 	// Normalize engine name for lookup
@@ -392,8 +396,7 @@ func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]Majo
 	key := fmt.Sprintf("%s:%s", normalizedEngine, majorVersion)
 	info, exists := versionInfo[key]
 	if !exists {
-		// If we don't have info, assume not in extended support
-		return false
+		return false, false
 	}
 
 	// Check if current date falls within extended support period
@@ -409,11 +412,11 @@ func isInExtendedSupport(engine, fullVersion string, versionInfo map[string]Majo
 		// Past the end date means extended support is over; a zero end date
 		// is open-ended (issue #1182)
 		if lifecycle.LifecycleSupportEndDate.IsZero() || now.Before(lifecycle.LifecycleSupportEndDate) {
-			return true
+			return true, true
 		}
 	}
 
-	return false
+	return false, true
 }
 
 // adjustRecommendationForExcludedVersions reduces the instance count in a recommendation
@@ -445,33 +448,13 @@ func adjustRecommendationForExcludedVersions(rec common.Recommendation, instance
 	// Count how many instances in this region are running versions in extended support
 	excludedCount := 0
 
+	// Warn once per engine:version when lifecycle data is missing instead of
+	// silently treating the instance as not on extended support (issue #1313).
+	unknownLogged := make(map[string]bool)
+
 	for _, version := range versions {
-		// Only count instances in the same region
-		if version.Region != rec.Region {
-			continue
-		}
-
-		// Match engine (normalize by removing spaces/hyphens and comparing lowercase)
-		normalizeEngine := func(engine string) string {
-			normalized := strings.ToLower(engine)
-			normalized = strings.ReplaceAll(normalized, "-", "")
-			normalized = strings.ReplaceAll(normalized, " ", "")
-			return normalized
-		}
-
-		versionEngineNorm := normalizeEngine(version.Engine)
-		recEngineNorm := normalizeEngine(recEngine)
-
-		if versionEngineNorm != recEngineNorm {
-			continue
-		}
-
-		// Check if this version is in extended support
-		if isInExtendedSupport(version.Engine, version.EngineVersion, versionInfo) {
-			majorVersion := extractMajorVersion(version.Engine, version.EngineVersion)
+		if shouldExcludeForExtendedSupport(version, rec, recEngine, versionInfo, unknownLogged) {
 			excludedCount++
-			log.Printf("🚫 Found extended support instance: %s %s in %s running version %s (major version %s is in extended support)",
-				recEngine, rec.ResourceType, rec.Region, version.EngineVersion, majorVersion)
 		}
 	}
 
@@ -488,4 +471,45 @@ func adjustRecommendationForExcludedVersions(rec common.Recommendation, instance
 	}
 
 	return rec
+}
+
+// shouldExcludeForExtendedSupport reports whether a single running instance
+// should be excluded from the recommendation because its engine version is in
+// extended support. Instances in other regions or with other engines never
+// match. When lifecycle data is missing the instance is kept (conservative
+// skip) and a warning is logged once per engine:version via unknownLogged
+// (issue #1313). Extracted from adjustRecommendationForExcludedVersions to
+// keep both functions under the gocyclo cap.
+func shouldExcludeForExtendedSupport(version InstanceEngineVersion, rec common.Recommendation, recEngine string, versionInfo map[string]MajorEngineVersionInfo, unknownLogged map[string]bool) bool {
+	// Only count instances in the same region
+	if version.Region != rec.Region {
+		return false
+	}
+
+	// Match engine (normalize by removing spaces/hyphens and comparing lowercase)
+	if normalizeEngineNameForVersion(version.Engine) != normalizeEngineNameForVersion(recEngine) {
+		return false
+	}
+
+	extended, known := isInExtendedSupport(version.Engine, version.EngineVersion, versionInfo)
+	if !known {
+		// Leave the instance in the count but make the gap visible so
+		// incomplete lifecycle data can't silently steer purchases (issue #1313).
+		warnKey := version.Engine + ":" + version.EngineVersion
+		if !unknownLogged[warnKey] {
+			unknownLogged[warnKey] = true
+			log.Printf("⚠️  No lifecycle data for %s %s in %s: extended-support status unknown, keeping instance in the count",
+				version.Engine, version.EngineVersion, version.Region)
+		}
+		return false
+	}
+
+	if !extended {
+		return false
+	}
+
+	majorVersion := extractMajorVersion(version.Engine, version.EngineVersion)
+	log.Printf("🚫 Found extended support instance: %s %s in %s running version %s (major version %s is in extended support)",
+		recEngine, rec.ResourceType, rec.Region, version.EngineVersion, majorVersion)
+	return true
 }
