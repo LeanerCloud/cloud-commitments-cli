@@ -147,8 +147,63 @@ the wizard refuses incompatible roles rather than changing them. It also refuses
 to widen an existing conditional-only grant for this Service Account.
 
 Rerunning the wizard does not remove broad grants from older installations.
-Review existing `roles/compute.admin` grants separately. Recommendation access
-requires additional Recommender permissions; neither role above provides them.
+Recommendation access requires additional Recommender permissions; neither
+role above provides them.
+
+### Migrating legacy Compute Admin grants
+
+Earlier setup wizard versions granted
+`roles/compute.admin` to the `cudly-service-account` Service Account before
+minting its key. Rerunning the current wizard adds the narrow roles but
+preserves existing bindings, so every older installation needs a one-time
+operator review. Work through this checklist with the project owner's
+authorization:
+
+1. **Inventory broad grants.** List the project IAM policy and identify CUDly
+   identities that still hold Compute Admin, directly or inherited:
+
+   ```bash
+   gcloud projects get-iam-policy PROJECT_ID \
+     --flatten=bindings[].members \
+     --filter=bindings.role:roles/compute.admin \
+     --format='table(bindings.role, bindings.members)'
+   ```
+
+   Record every `cudly-service-account@...` match, including bindings inherited
+   from folder or organization policies. Do not change live IAM during the
+   inventory.
+
+2. **Establish the narrow permissions.** Rerun `cudly configure-gcp` (or grant
+   manually) so the Service Account holds `roles/compute.viewer` and
+   `projects/PROJECT_ID/roles/cudlyCommitmentPurchaser` as described above. An
+   existing custom role must contain exactly `compute.commitments.create` and
+   be enabled; the wizard refuses incompatible roles rather than changing them.
+
+3. **Verify without purchasing.** Authenticate as the Service Account and
+   confirm the replacement role is effective on the live project:
+
+   ```bash
+   gcloud auth activate-service-account --key-file=~/cudly-gcp-key.json
+   gcloud projects test-iam-permissions PROJECT_ID \
+     --permissions=compute.commitments.create,compute.commitments.list
+   ```
+
+   Then run the read-only analysis workflow and confirm it completes without
+   permission errors. This live validation is required: local HTTP fixtures
+   only prove SDK request behaviour, not IAM propagation.
+
+4. **Revoke with approval.** Only after the owner approves the inventory
+   result, remove the broad binding while leaving unrelated access and IAM
+   conditions intact:
+
+   ```bash
+   gcloud projects remove-iam-policy-binding PROJECT_ID \
+     --member=serviceAccount:cudly-service-account@PROJECT_ID.iam.gserviceaccount.com \
+     --role=roles/compute.admin
+   ```
+
+   Record the inventory result and any deployment-specific follow-up. Never
+   delete bindings or rotate keys without per-resource authorization.
 
 If you manage Cloud SQL or Memorystore commitments, you may need additional roles. Check the GCP documentation for the minimum required permissions per commitment type.
 
