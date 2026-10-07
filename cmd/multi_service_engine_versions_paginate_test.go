@@ -151,3 +151,96 @@ func TestFetchMajorEngineVersionsForEngine_PaginationCapError(t *testing.T) {
 	assert.Equal(t, maxEngineVersionPages, mock.calls,
 		"must stop exactly at the cap")
 }
+
+// cancelOnFirstQueryRDSMock cancels the context from inside the first API call
+// and returns the SDK-shaped error a cancelled request produces, so the fan-out
+// loop sees both a real ctx cancellation and a wrapped context error.
+type cancelOnFirstQueryRDSMock struct {
+	cancel         context.CancelFunc
+	enginesQueried []string
+	wrap           func(error) error
+}
+
+func (m *cancelOnFirstQueryRDSMock) DescribeDBMajorEngineVersions(
+	_ context.Context,
+	params *awsrds.DescribeDBMajorEngineVersionsInput,
+	_ ...func(*awsrds.Options),
+) (*awsrds.DescribeDBMajorEngineVersionsOutput, error) {
+	m.enginesQueried = append(m.enginesQueried, aws.ToString(params.Engine))
+	m.cancel()
+	err := error(context.Canceled)
+	if m.wrap != nil {
+		err = m.wrap(err)
+	}
+	return nil, err
+}
+
+// TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal asserts that a
+// cancelled context stops the per-engine fan-out instead of being downgraded to
+// a warning: the loop must return the error and must not keep querying the
+// remaining engines (issue #1325).
+func TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal(t *testing.T) {
+	tests := []struct {
+		name string
+		wrap func(error) error
+	}{
+		{name: "bare context.Canceled"},
+		{
+			// The AWS SDK wraps transport errors; the mock cancels the real
+			// context, so detection via ctx.Err() works regardless of wrapping.
+			name: "SDK-wrapped context.Canceled",
+			wrap: func(err error) error {
+				return fmt.Errorf("operation error RDS: DescribeDBMajorEngineVersions, %w", err)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			mock := &cancelOnFirstQueryRDSMock{cancel: cancel, wrap: tt.wrap}
+
+			result, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+			require.ErrorIs(t, err, context.Canceled,
+				"a cancelled context must not be reported as a successful query")
+			assert.Nil(t, result,
+				"partial version info must not be handed back as if it were complete")
+			assert.Equal(t, []string{"mysql"}, mock.enginesQueried,
+				"cancellation must stop the fan-out after the first engine")
+		})
+	}
+}
+
+// TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal asserts the same
+// for an expired deadline (issue #1325): it fails fast before the first call.
+func TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Minute))
+	defer cancel()
+
+	mock := &cancelOnFirstQueryRDSMock{cancel: func() {}}
+
+	_, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Empty(t, mock.enginesQueried,
+		"an expired deadline must not issue API calls")
+}
+
+// TestQueryMajorEngineVersionsWithClient_CtxAlreadyCancelled asserts that a
+// context cancelled before the call fails fast without spending a single API
+// call (issue #1325).
+func TestQueryMajorEngineVersionsWithClient_CtxAlreadyCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mock := &cancelOnFirstQueryRDSMock{cancel: func() {}}
+
+	_, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, mock.enginesQueried,
+		"an already-cancelled context must not issue API calls")
+}

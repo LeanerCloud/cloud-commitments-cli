@@ -218,7 +218,15 @@ func queryMajorEngineVersionsWithClient(ctx context.Context, rdsClient RDSMajorV
 	engines := []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}
 
 	for _, engine := range engines {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if err := fetchMajorEngineVersionsForEngine(ctx, rdsClient, engine, versionInfo); err != nil {
+			// Cancelled caller context is terminal (issue #1325); check ctx.Err(),
+			// not the wrapped API error, so SDK-internal timeouts stay warnings.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
 			log.Printf("Warning: Failed to describe major engine versions for %s: %v", engine, err)
 		}
 	}
