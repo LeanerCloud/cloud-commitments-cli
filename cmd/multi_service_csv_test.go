@@ -767,13 +767,13 @@ rds,us-east-1,db.t3.micro,5,1234.5678`,
 			},
 		},
 		{
-			name: "CSV with zero values",
+			name: "CSV with zero EstimatedSavings stays valid",
 			csvContent: `Service,Region,ResourceType,Count,EstimatedSavings
-rds,us-east-1,db.t3.micro,0,0`,
+rds,us-east-1,db.t3.micro,5,0`,
 			wantErr: false,
 			validate: func(t *testing.T, recs []common.Recommendation) {
 				require.Len(t, recs, 1)
-				assert.Equal(t, 0, recs[0].Count)
+				assert.Equal(t, 5, recs[0].Count)
 				assert.Equal(t, float64(0), recs[0].EstimatedSavings)
 			},
 		},

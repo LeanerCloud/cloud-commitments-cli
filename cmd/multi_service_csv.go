@@ -193,9 +193,12 @@ func getCSVField(record []string, colIdx map[string]int, fieldName string) strin
 	return ""
 }
 
-// parseCSVCount parses the required Count field as a whole non-negative
-// integer. It drives purchase quantities, so a blank, missing, fractional or
-// otherwise malformed cell is an error rather than a truncated or zero value.
+// parseCSVCount parses the required Count field as a whole positive
+// integer. It drives purchase quantities, so a blank, missing, zero,
+// fractional or otherwise malformed cell is an error rather than a
+// truncated or zero value. Zero in particular bought nothing but still
+// triggered a live purchase call (#2116); the tool's own CSVs never
+// emit 0 because the Savings Plans client sets Count to 1.
 func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	const fieldName = "Count"
 	idx, ok := colIdx[fieldName]
@@ -208,17 +211,20 @@ func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	}
 	n, err := strconv.Atoi(value)
 	if err != nil {
-		return fmt.Errorf("column %d %q: invalid integer %q: %w", idx+1, fieldName, value, err)
+		return fmt.Errorf("column %d %q: invalid integer: %w", idx+1, fieldName, err)
 	}
-	if n < 0 {
-		return fmt.Errorf("column %d %q: must not be negative, got %d", idx+1, fieldName, n)
+	if n < 1 {
+		return fmt.Errorf("column %d %q: must be at least 1, got %d", idx+1, fieldName, n)
 	}
 	*target = n
 	return nil
 }
 
-// parseCSVFloat parses a finite float field from a CSV record. A blank or
-// absent cell leaves target untouched (see requireRankingSignal).
+// parseCSVFloat parses a finite, non-negative float field from a CSV
+// record. A blank or absent cell leaves target untouched (see
+// requireRankingSignal). Negative values are rejected: EstimatedSavings
+// is the only caller, and a negative savings figure is a malformed row,
+// not a signal to buy (#2116).
 func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, target *float64) error {
 	value := strings.TrimSpace(getCSVField(record, colIdx, fieldName))
 	if value == "" {
@@ -227,10 +233,13 @@ func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, tar
 	col := colIdx[fieldName] + 1
 	f, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return fmt.Errorf("column %d %q: invalid number %q: %w", col, fieldName, value, err)
+		return fmt.Errorf("column %d %q: invalid number: %w", col, fieldName, err)
 	}
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return fmt.Errorf("column %d %q: invalid number %q: must be finite", col, fieldName, value)
+	}
+	if f < 0 {
+		return fmt.Errorf("column %d %q: must not be negative, got %g", col, fieldName, f)
 	}
 	*target = f
 	return nil
