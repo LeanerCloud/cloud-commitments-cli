@@ -151,3 +151,120 @@ func TestFetchMajorEngineVersionsForEngine_PaginationCapError(t *testing.T) {
 	assert.Equal(t, maxEngineVersionPages, mock.calls,
 		"must stop exactly at the cap")
 }
+
+// The mock cancels the caller context, including when returning a wrapped SDK error.
+type cancelOnFirstQueryRDSMock struct {
+	cancel         context.CancelFunc
+	enginesQueried []string
+	wrap           func(error) error
+}
+
+func (m *cancelOnFirstQueryRDSMock) DescribeDBMajorEngineVersions(
+	_ context.Context,
+	params *awsrds.DescribeDBMajorEngineVersionsInput,
+	_ ...func(*awsrds.Options),
+) (*awsrds.DescribeDBMajorEngineVersionsOutput, error) {
+	m.enginesQueried = append(m.enginesQueried, aws.ToString(params.Engine))
+	m.cancel()
+	err := context.Canceled
+	if m.wrap != nil {
+		err = m.wrap(err)
+	}
+	return nil, err
+}
+
+// Caller cancellation must remain terminal even when the SDK wraps the error.
+func TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal(t *testing.T) {
+	tests := []struct {
+		name string
+		wrap func(error) error
+	}{
+		{name: "bare context.Canceled"},
+		{
+			// The AWS SDK wraps transport errors; the mock cancels the real
+			// context, so detection via ctx.Err() works regardless of wrapping.
+			name: "SDK-wrapped context.Canceled",
+			wrap: func(err error) error {
+				return fmt.Errorf("operation error RDS: DescribeDBMajorEngineVersions, %w", err)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			mock := &cancelOnFirstQueryRDSMock{cancel: cancel, wrap: tt.wrap}
+
+			result, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+			require.ErrorIs(t, err, context.Canceled,
+				"a canceled context must not be reported as a successful query")
+			assert.Nil(t, result,
+				"partial version info must not be handed back as if it were complete")
+			assert.Equal(t, []string{"mysql"}, mock.enginesQueried,
+				"cancellation must stop the fan-out after the first engine")
+		})
+	}
+}
+
+// TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal asserts the same
+// for an expired deadline (issue #1325): it fails fast before the first call.
+func TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Minute))
+	defer cancel()
+
+	mock := &cancelOnFirstQueryRDSMock{cancel: func() {}}
+
+	_, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Empty(t, mock.enginesQueried,
+		"an expired deadline must not issue API calls")
+}
+
+func TestQueryMajorEngineVersionsWithClient_CtxAlreadyCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	mock := &cancelOnFirstQueryRDSMock{cancel: func() {}}
+
+	_, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Empty(t, mock.enginesQueried,
+		"an already-canceled context must not issue API calls")
+}
+
+type cancelOnFinalSuccessRDSMock struct {
+	cancel         context.CancelFunc
+	enginesQueried []string
+}
+
+func (m *cancelOnFinalSuccessRDSMock) DescribeDBMajorEngineVersions(
+	_ context.Context,
+	params *awsrds.DescribeDBMajorEngineVersionsInput,
+	_ ...func(*awsrds.Options),
+) (*awsrds.DescribeDBMajorEngineVersionsOutput, error) {
+	engine := aws.ToString(params.Engine)
+	m.enginesQueried = append(m.enginesQueried, engine)
+	if engine == "aurora-postgresql" {
+		m.cancel()
+	}
+	return &awsrds.DescribeDBMajorEngineVersionsOutput{
+		DBMajorEngineVersions: []rdstypes.DBMajorEngineVersion{rdsMajorVersion(engine, "8.0")},
+	}, nil
+}
+
+func TestQueryMajorEngineVersionsWithClient_CtxCanceledOnFinalSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mock := &cancelOnFinalSuccessRDSMock{cancel: cancel}
+
+	result, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result, "cancellation must discard the accumulated lifecycle data")
+	assert.Equal(t, []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}, mock.enginesQueried)
+}
