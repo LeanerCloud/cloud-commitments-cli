@@ -44,27 +44,13 @@ jobs:
         with:
           node-version: "24"
 
-      # Cache the installed tool binaries (gosec, gocyclo). Keyed on the
-      # pinned version strings so a tool-version bump still triggers a
-      # fresh install. Both binaries land in ~/go/bin which setup-go@v6
-      # already adds to PATH. Restored BEFORE the install steps so the
-      # `if: cache-hit != 'true'` guards below can short-circuit them on
-      # cache-hit runs (the `go install` invocations cost ~3-5s each
-      # even when the module cache is warm; skipping them on cache-hit
-      # is worth the extra `if`).
-      - name: Cache Go-installed tools (gosec, gocyclo)
+      # Cache the pinned gocyclo binary before installation.
+      - name: Cache Go-installed tools (gocyclo)
         id: cache-go-tools
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/go/bin
-          key: go-tools-${{ runner.os }}-gosec-v2.28.0-gocyclo-v0.6.0
-
-      - name: Install gosec
-        if: steps.cache-go-tools.outputs.cache-hit != 'true'
-        # Pinned to the same version ci.yml's `securego/gosec` Action uses,
-        # so an upstream gosec release with rule changes can't silently
-        # downgrade the gate between the two workflows.
-        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
+          key: go-tools-${{ runner.os }}-gocyclo-v0.6.0
 
       - name: Install gocyclo
         if: steps.cache-go-tools.outputs.cache-hit != 'true'
@@ -160,7 +146,7 @@ jobs:
       - name: Run pre-commit
         # SKIP the local per-changed-package gosec hook in CI: --all-files
         # feeds every Go file at once, while the dedicated Security Scanning
-        # job remains the authoritative per-module gosec v2.28.0 gate.
+        # job runs the shared strict policy across the root module.
         # nick-fields/retry wraps the run with up to 3 attempts and a
         # 90-second wait so transient flakes do not require a manual rerun.
         uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2

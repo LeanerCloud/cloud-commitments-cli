@@ -157,16 +157,8 @@ repos:
         types: [file]
 
       - id: gosec
-        name: Go security scanner (per-module, per-changed-package)
-        # Scans only the Go packages that contain staged files, resolved to
-        # their owning module (root, pkg/, providers/aws, providers/azure,
-        # providers/gcp).  Fast: never whole-repo, always per-changed-package.
-        #
-        # gosec v2.28.0 is auto-installed to
-        # ~/.cache/pre-commit-gosec/v2.28.0/gosec on first use.
-        #
-        # Exclusion rationale and flag list live in scripts/gosec-hook.sh.
-        # Keep in sync with the exclude= flags there.
+        name: Go security scanner (changed packages)
+        # Version, installation and strict policy are shared with Make and CI.
         entry: bash scripts/gosec-hook.sh
         language: system
         pass_filenames: true

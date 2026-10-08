@@ -375,50 +375,17 @@ jobs:
         # Still requires checkout and Go setup to have succeeded.
         if: always() && steps.checkout.outcome == 'success' && steps.setup_go.outcome == 'success'
         run: |
-          # Install pinned gosec using the job's existing setup-go.
-          # The securego/gosec Docker action bundles its own Go toolchain which
-          # cannot satisfy the module's go directive, causing a toolchain mismatch.
-          go install github.com/securego/gosec/v2/cmd/gosec@v2.28.0
-          # Scan each owned module independently.
-          set -e
+          set -euo pipefail
           status=0
-          for mod in .; do
-            tag=$(echo "$mod" | tr './' '--' | sed 's/^-/root/')
-            out="$RUNNER_TEMP/gosec-${tag}.sarif"
-            echo "==> gosec in $mod"
-            if ! (cd "$mod" && gosec -fmt sarif -out "$out" ./...); then
-              echo "::warning::gosec exited non-zero in $mod (findings or a scan error)"
-              status=1
-            fi
-            if [ ! -f "$out" ]; then
-              echo "::error::gosec produced no SARIF output for $mod"
-              status=1
-              continue
-            fi
-            # Code scanning rejects a SARIF file whose runs share a category
-            # (github.blog changelog 2025-07-21), so give each module's run a
-            # unique automationDetails.id before merging.
-            jq --arg id "gosec-${tag}/" '.runs |= map(.automationDetails = {id: $id})' \
-              "$out" > "$out.tmp" && mv "$out.tmp" "$out"
-          done
-          # Merge per-module SARIF runs into one file for the upload step.
-          # Only modules that actually produced a file are included; if
-          # gosec crashed before writing any of them, fail loud here rather
-          # than uploading an empty result silently.
-          shopt -s nullglob
-          sarif_files=("$RUNNER_TEMP"/gosec-*.sarif)
-          if [ "${#sarif_files[@]}" -eq 0 ]; then
-            echo "::error::no gosec SARIF output was produced by any module" >&2
-            exit 1
+          bash scripts/run-gosec-test.sh || status=$?
+          out="$RUNNER_TEMP/gosec-results.sarif"
+          bash scripts/run-gosec.sh --format sarif --output "$out" || status=$?
+          if ! jq -e '.version == "2.1.0" and (.runs | type == "array" and length > 0) and all(.runs[]; (.tool.driver | type == "object") and (.results | type == "array"))' "$out" >/dev/null; then
+            echo "::error::gosec produced missing or malformed SARIF" >&2
+            exit 2
           fi
-          # jq is preinstalled on the GitHub Ubuntu runner image (no new deps).
-          # Written to $RUNNER_TEMP, not the checkout root: never save working
-          # files in the repository root (repo coding guideline), and this
-          # file is purely a hand-off to the upload step below.
-          merged="$RUNNER_TEMP/gosec-results.sarif"
-          jq -s '{version: "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", runs: [.[].runs[]]}' \
-            "${sarif_files[@]}" > "$merged"
-          echo "Merged $(jq '.runs | length' "$merged") SARIF runs"
+          jq '.runs |= map(.automationDetails = {id: "gosec-root/"})' "$out" > "$out.tmp"
+          mv "$out.tmp" "$out"
           exit "$status"
 
       - name: Upload gosec results to GitHub Security

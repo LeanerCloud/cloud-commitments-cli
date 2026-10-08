@@ -4,7 +4,6 @@
 
 VERSION?=dev
 GOLANGCI_LINT_VERSION?=v2.10.1
-GOSEC_VERSION?=v2.28.0
 GOCYCLO_VERSION?=v0.6.0
 STATICCHECK_VERSION?=v0.7.0
 
@@ -85,8 +84,7 @@ complexity-report:
 security-scan: security-scan-go
 
 security-scan-go:
-	@command -v gosec >/dev/null || { echo "gosec not installed. Install: make install-dev-tools" >&2; exit 1; }
-	gosec -fmt=json -out=gosec-report.json -exclude=G101,G104,G115,G204,G301,G304,G402,G505 ./...
+	bash scripts/run-gosec.sh --format json --output gosec-report.json
 
 security-scan-snyk:
 	@command -v snyk >/dev/null || { echo "snyk not installed. Install: npm install -g snyk" >&2; exit 1; }
@@ -105,8 +103,7 @@ setup-git-secrets:
 install-dev-tools:
 	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
 	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
-	@echo "Installing gosec $(GOSEC_VERSION)..."
-	@go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	@bash scripts/run-gosec.sh --install-only
 	@echo "Installing staticcheck $(STATICCHECK_VERSION)..."
 	@go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 	@echo "Installing gocyclo $(GOCYCLO_VERSION)..."
