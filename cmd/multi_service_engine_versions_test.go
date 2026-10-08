@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,6 +286,69 @@ func TestAdjustRecommendationForExcludedVersions_TypedNilDetails(t *testing.T) {
 	})
 }
 
+// TestAdjustRecommendationForExcludedVersions_UnknownLifecycle pins the
+// issue #1313 contract: when an instance's engine/major version is missing
+// from versionInfo, the instance must NOT be silently treated as "not on
+// extended support". The count stays untouched (conservative skip) and a
+// warning naming the engine, version, and region is logged, once per
+// engine:version pair.
+func TestAdjustRecommendationForExcludedVersions_UnknownLifecycle(t *testing.T) {
+	recommendation := common.Recommendation{
+		Service:      common.ServiceRDS,
+		Region:       "us-east-1",
+		ResourceType: "db.r5.large",
+		Count:        4,
+		Details: &common.DatabaseDetails{
+			Engine: "MySQL",
+		},
+	}
+
+	// Two instances of the same unknown version plus one of another: the
+	// warning must be deduplicated per engine:version, not per instance.
+	instanceVersions := map[string][]InstanceEngineVersion{
+		"db.r5.large": {
+			{Engine: "mysql", EngineVersion: "9.0.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+			{Engine: "mysql", EngineVersion: "9.0.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+			{Engine: "mysql", EngineVersion: "10.1.0", InstanceClass: "db.r5.large", Region: "us-east-1"},
+		},
+	}
+
+	// versionInfo has data for mysql:8.0 only, so 9.x and 10.x lookups miss.
+	versionInfo := map[string]MajorEngineVersionInfo{
+		"mysql:8.0": {
+			Engine:             "mysql",
+			MajorEngineVersion: "8.0",
+			SupportedEngineLifecycles: []EngineLifecycleInfo{
+				{
+					LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsStandardSupport),
+					LifecycleSupportStartDate: time.Now().AddDate(-2, 0, 0),
+					LifecycleSupportEndDate:   time.Now().AddDate(3, 0, 0),
+				},
+			},
+		},
+	}
+
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	origFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(origOutput)
+		log.SetFlags(origFlags)
+	}()
+
+	result := adjustRecommendationForExcludedVersions(recommendation, instanceVersions, versionInfo)
+
+	assert.Equal(t, 4, result.Count, "unknown lifecycle status must leave the count untouched")
+
+	logged := logBuf.String()
+	assert.Contains(t, logged, "mysql 9.0.1", "warning must name the unknown engine and version")
+	assert.Contains(t, logged, "mysql 10.1.0", "warning must name the unknown engine and version")
+	assert.Contains(t, logged, "us-east-1", "warning must name the region")
+	assert.Equal(t, 2, strings.Count(logged, "No lifecycle data for"), "warning must be logged once per engine:version, not per instance")
+}
+
 func TestExtractMajorVersion_Additional(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -531,11 +597,12 @@ func TestIsInExtendedSupport(t *testing.T) {
 	futureDate := now.AddDate(3, 0, 0)
 
 	tests := []struct {
-		versionInfo map[string]MajorEngineVersionInfo
-		name        string
-		engine      string
-		version     string
-		expected    bool
+		versionInfo   map[string]MajorEngineVersionInfo
+		name          string
+		engine        string
+		version       string
+		expected      bool
+		expectedKnown bool
 	}{
 		{
 			name:    "Version in extended support",
@@ -554,7 +621,8 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: true,
+			expected:      true,
+			expectedKnown: true,
 		},
 		{
 			name:    "Version not in extended support - still in standard support",
@@ -573,10 +641,11 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: false,
+			expected:      false,
+			expectedKnown: true,
 		},
 		{
-			name:    "Version info not found",
+			name:    "Version info not found - unknown, not silently false",
 			engine:  "mysql",
 			version: "5.7.44",
 			versionInfo: map[string]MajorEngineVersionInfo{
@@ -585,14 +654,16 @@ func TestIsInExtendedSupport(t *testing.T) {
 					MajorEngineVersion: "13",
 				},
 			},
-			expected: false,
+			expected:      false,
+			expectedKnown: false,
 		},
 		{
-			name:        "Empty version info",
-			engine:      "mysql",
-			version:     "5.7.44",
-			versionInfo: map[string]MajorEngineVersionInfo{},
-			expected:    false,
+			name:          "Empty version info - unknown, not silently false",
+			engine:        "mysql",
+			version:       "5.7.44",
+			versionInfo:   map[string]MajorEngineVersionInfo{},
+			expected:      false,
+			expectedKnown: false,
 		},
 		{
 			name:    "Extended support not started yet",
@@ -611,7 +682,8 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: false,
+			expected:      false,
+			expectedKnown: true,
 		},
 		{
 			name:    "Extended support started on current date",
@@ -630,7 +702,8 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: true,
+			expected:      true,
+			expectedKnown: true,
 		},
 		{
 			name:    "Extended support already ended",
@@ -649,7 +722,8 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: false,
+			expected:      false,
+			expectedKnown: true,
 		},
 		{
 			name:    "Zero end date treated as open-ended",
@@ -667,7 +741,8 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: true,
+			expected:      true,
+			expectedKnown: true,
 		},
 		{
 			name:    "Engine name normalization with spaces",
@@ -686,14 +761,16 @@ func TestIsInExtendedSupport(t *testing.T) {
 					},
 				},
 			},
-			expected: true,
+			expected:      true,
+			expectedKnown: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isInExtendedSupport(tt.engine, tt.version, tt.versionInfo)
-			assert.Equal(t, tt.expected, result)
+			extended, known := isInExtendedSupport(tt.engine, tt.version, tt.versionInfo)
+			assert.Equal(t, tt.expected, extended)
+			assert.Equal(t, tt.expectedKnown, known, "known flag mismatch")
 		})
 	}
 }

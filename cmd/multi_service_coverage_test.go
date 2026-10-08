@@ -272,37 +272,43 @@ func TestIsInExtendedSupport_EdgeCases(t *testing.T) {
 		engine           string
 		fullVersion      string
 		expectedExtended bool
+		expectedKnown    bool
 	}{
 		{
 			name:             "MySQL 5.7 in extended support",
 			engine:           "mysql",
 			fullVersion:      "5.7.44",
 			expectedExtended: true,
+			expectedKnown:    true,
 		},
 		{
 			name:             "MySQL 8.0 in standard support",
 			engine:           "mysql",
 			fullVersion:      "8.0.35",
 			expectedExtended: false,
+			expectedKnown:    true,
 		},
 		{
 			name:             "Unknown version",
 			engine:           "mysql",
 			fullVersion:      "9.0.0",
 			expectedExtended: false,
+			expectedKnown:    false,
 		},
 		{
 			name:             "Empty version",
 			engine:           "mysql",
 			fullVersion:      "",
 			expectedExtended: false,
+			expectedKnown:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isInExtendedSupport(tt.engine, tt.fullVersion, versionInfo)
-			assert.Equal(t, tt.expectedExtended, result)
+			extended, known := isInExtendedSupport(tt.engine, tt.fullVersion, versionInfo)
+			assert.Equal(t, tt.expectedExtended, extended)
+			assert.Equal(t, tt.expectedKnown, known, "known flag mismatch")
 		})
 	}
 }
