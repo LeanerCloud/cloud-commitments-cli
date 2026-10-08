@@ -80,12 +80,12 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.54.0/go.mod h1:Mf6O40IAyB9zR/1J8nGDDPirZQQPbYJni8Yisy7NTMc=
 github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261006104817-90e61e668b99 h1:inu/nYSAVY6cLsTn4qc64RIbCsymURLlEdgkhha79cw=
 github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261006104817-90e61e668b99/go.mod h1:ApWBliDXe099f3oDXBz41K/I9v4bHvn1dG/BGoRmHlw=
-github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261005004231-945a4045d11f h1:c3K60juwiY6t25Gr0HWAxajIDsXH4LzDO4e3ENGAsAM=
-github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261005004231-945a4045d11f/go.mod h1:wpW9/TvGFUUOqBEleJL639loh6Ue5aVIcZKdubRnYPQ=
+github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261006205158-7ff8c1aee1bb h1:gtfWXNBATJDSS+q3+5Jxt2+HYijOSVEnpGkXmeCkudY=
+github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261006205158-7ff8c1aee1bb/go.mod h1:zgv5QhLOIk9Hqw1xcmr1lSFg4ZeChwTCMwxETFVcfj4=
 github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261007133317-58c25f04c49b h1:yurugmfdZjf+dqjfqfDyfoBR3IAiFUpMKQ8URnZnJzQ=
 github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261007133317-58c25f04c49b/go.mod h1:iIvPuWLWd+SXqLHAQNdodYMUAAcq7PnwfScXWgARt5A=
-github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20260928214714-ce9513612901 h1:i6OwXLUheudN3GfwnYXdKuEq8vPdE9qkNJ+r71LRLKA=
-github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20260928214714-ce9513612901/go.mod h1:UnMqDe2mBUHHF6gnKAgJn9/JeXa7WZqQxfWPs4unGrg=
+github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20261006205158-7ff8c1aee1bb h1:AJ4nKDtttjiTDemo9PDp2esoc35ymVaiCSr0zIewwpY=
+github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20261006205158-7ff8c1aee1bb/go.mod h1:vLtjCWuAcgFc6vlY4l4wpWOYvlj4itk25qjreylWpDQ=
 github.com/aws/aws-sdk-go-v2 v1.41.5 h1:dj5kopbwUsVUVFgO4Fi5BIT3t4WyqIDjGKCangnV/yY=
 github.com/aws/aws-sdk-go-v2 v1.41.5/go.mod h1:mwsPRE8ceUUpiTgF7QmQIJ7lgsKUPQOUl3o72QBrE1o=
 github.com/aws/aws-sdk-go-v2/config v1.29.12 h1:Y/2a+jLPrPbHpFkpAAYkVEtJmxORlXoo5k2g1fa2sUo=
