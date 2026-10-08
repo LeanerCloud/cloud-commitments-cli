@@ -231,6 +231,9 @@ func queryMajorEngineVersionsWithClient(ctx context.Context, rdsClient RDSMajorV
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return versionInfo, nil
 }
 

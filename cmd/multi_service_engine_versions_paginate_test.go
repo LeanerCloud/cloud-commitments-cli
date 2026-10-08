@@ -152,9 +152,7 @@ func TestFetchMajorEngineVersionsForEngine_PaginationCapError(t *testing.T) {
 		"must stop exactly at the cap")
 }
 
-// cancelOnFirstQueryRDSMock cancels the context from inside the first API call
-// and returns the SDK-shaped error a canceled request produces, so the fan-out
-// loop sees both a real ctx cancellation and a wrapped context error.
+// The mock cancels the caller context, including when returning a wrapped SDK error.
 type cancelOnFirstQueryRDSMock struct {
 	cancel         context.CancelFunc
 	enginesQueried []string
@@ -175,10 +173,7 @@ func (m *cancelOnFirstQueryRDSMock) DescribeDBMajorEngineVersions(
 	return nil, err
 }
 
-// TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal asserts that a
-// canceled context stops the per-engine fan-out instead of being downgraded to
-// a warning: the loop must return the error and must not keep querying the
-// remaining engines (issue #1325).
+// Caller cancellation must remain terminal even when the SDK wraps the error.
 func TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal(t *testing.T) {
 	tests := []struct {
 		name string
@@ -229,9 +224,6 @@ func TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal(t *testing.T) 
 		"an expired deadline must not issue API calls")
 }
 
-// TestQueryMajorEngineVersionsWithClient_CtxAlreadyCanceled asserts that a
-// context canceled before the call fails fast without spending a single API
-// call (issue #1325).
 func TestQueryMajorEngineVersionsWithClient_CtxAlreadyCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -243,4 +235,36 @@ func TestQueryMajorEngineVersionsWithClient_CtxAlreadyCanceled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Empty(t, mock.enginesQueried,
 		"an already-canceled context must not issue API calls")
+}
+
+type cancelOnFinalSuccessRDSMock struct {
+	cancel         context.CancelFunc
+	enginesQueried []string
+}
+
+func (m *cancelOnFinalSuccessRDSMock) DescribeDBMajorEngineVersions(
+	_ context.Context,
+	params *awsrds.DescribeDBMajorEngineVersionsInput,
+	_ ...func(*awsrds.Options),
+) (*awsrds.DescribeDBMajorEngineVersionsOutput, error) {
+	engine := aws.ToString(params.Engine)
+	m.enginesQueried = append(m.enginesQueried, engine)
+	if engine == "aurora-postgresql" {
+		m.cancel()
+	}
+	return &awsrds.DescribeDBMajorEngineVersionsOutput{
+		DBMajorEngineVersions: []rdstypes.DBMajorEngineVersion{rdsMajorVersion(engine, "8.0")},
+	}, nil
+}
+
+func TestQueryMajorEngineVersionsWithClient_CtxCanceledOnFinalSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mock := &cancelOnFinalSuccessRDSMock{cancel: cancel}
+
+	result, err := queryMajorEngineVersionsWithClient(ctx, mock)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, result, "cancellation must discard the accumulated lifecycle data")
+	assert.Equal(t, []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}, mock.enginesQueried)
 }
