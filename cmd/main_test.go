@@ -9,6 +9,7 @@ import (
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -31,9 +32,10 @@ func TestMain(m *testing.M) {
 
 func TestParseServices(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    []string
-		expected []common.ServiceType
+		name          string
+		input         []string
+		expected      []common.ServiceType
+		errorContains string
 	}{
 		{
 			name:  "Valid services",
@@ -54,17 +56,16 @@ func TestParseServices(t *testing.T) {
 			},
 		},
 		{
-			name:     "Invalid services",
-			input:    []string{"invalid", "unknown"},
-			expected: nil,
+			name:          "Invalid services",
+			errorContains: "invalid",
+			input:         []string{"invalid", "unknown"},
+			expected:      nil,
 		},
 		{
-			name:  "Mix of valid and invalid",
-			input: []string{"rds", "invalid", "ec2"},
-			expected: []common.ServiceType{
-				common.ServiceRDS,
-				common.ServiceEC2,
-			},
+			name:          "Mix of valid and invalid",
+			input:         []string{"rds", "invalid", "ec2"},
+			errorContains: "invalid",
+			expected:      nil,
 		},
 		{
 			name:  "All supported services",
@@ -89,7 +90,12 @@ func TestParseServices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := parseServices(tt.input)
+			result, err := parseServices(tt.input)
+			if tt.errorContains != "" {
+				assert.ErrorContains(t, err, tt.errorContains)
+			} else {
+				assert.NoError(t, err)
+			}
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -680,18 +686,30 @@ func TestEffectiveSizingPct(t *testing.T) {
 }
 
 func TestParseServicesWithEmptyAndNil(t *testing.T) {
-	// Empty slice
-	result := parseServices([]string{})
-	assert.Empty(t, result)
+	for _, input := range [][]string{nil, {}} {
+		result, err := parseServices(input)
+		assert.NoError(t, err)
+		assert.Nil(t, result)
+	}
+	for _, input := range [][]string{{"", "rds", ""}, {"rds", ""}, {"foo", "bar", "baz"}, {" rds"}} {
+		result, err := parseServices(input)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+	}
+}
 
-	// Slice with empty strings
-	result = parseServices([]string{"", "rds", ""})
-	assert.Len(t, result, 1)
-	assert.Equal(t, common.ServiceRDS, result[0])
-
-	// All invalid
-	result = parseServices([]string{"foo", "bar", "baz"})
-	assert.Empty(t, result)
+func TestParseServicesSavingsPlanAliases(t *testing.T) {
+	expected := []common.ServiceType{common.ServiceSavingsPlansCompute, common.ServiceSavingsPlansEC2Instance, common.ServiceSavingsPlansSageMaker, common.ServiceSavingsPlansDatabase}
+	for _, alias := range []string{"savingsplans", "savings-plans", "SP"} {
+		result, err := parseServices([]string{"ec2", alias, "savingsplans-compute", "rds", "EC2"})
+		assert.NoError(t, err)
+		assert.Equal(t, append(append([]common.ServiceType{common.ServiceEC2}, expected...), common.ServiceRDS), result)
+	}
+	for i, name := range []string{"compute", "ec2instance", "sagemaker", "database"} {
+		result, err := parseServices([]string{"savingsplans-" + name, "savings-plans-" + name})
+		assert.NoError(t, err)
+		assert.Equal(t, []common.ServiceType{expected[i]}, result)
+	}
 }
 
 func TestFilterFlagValidation(t *testing.T) {
@@ -1252,6 +1270,46 @@ func TestValidateInstanceTypes(t *testing.T) {
 				}
 			} else {
 				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestServicesCommandRejectsUnknownBeforeRun(t *testing.T) {
+	original := toolCfg
+	t.Cleanup(func() { toolCfg = original })
+	tests := []struct {
+		name          string
+		args          []string
+		errorContains string
+	}{
+		{"mixed", []string{"--services=rds,elasticahe"}, "elasticahe"},
+		{"unknown", []string{"--services=elasticahe"}, "elasticahe"},
+		{"empty", []string{"--services="}, "--services must contain"},
+		{"empty element", []string{"--services=rds,"}, "unknown service \"\""},
+		{"all-services", []string{"--all-services", "--services=rds,elasticahe"}, "elasticahe"},
+		{"CSV", []string{"--input-csv=missing.csv", "--services=rds,elasticahe"}, "elasticahe"},
+		{"empty all-services", []string{"--all-services", "--services="}, "--services must contain"},
+		{"empty CSV", []string{"--input-csv=missing.csv", "--services="}, "--services must contain"},
+		{"default", nil, ""},
+		{"valid", []string{"--services=RDS,SP,elasticsearch"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			toolCfg = Config{Coverage: 80, CoverageLookbackDays: 30, PaymentOption: "partial-upfront", TermYears: 1, RecLookbackPeriod: "30d", IdempotencyWindow: "24h"}
+			ran := false
+			cmd := &cobra.Command{Use: "test", PreRunE: validateFlags, Run: func(*cobra.Command, []string) { ran = true }, SilenceUsage: true, SilenceErrors: true}
+			cmd.Flags().StringSliceVar(&toolCfg.Services, "services", []string{"rds"}, "")
+			cmd.Flags().BoolVar(&toolCfg.AllServices, "all-services", false, "")
+			cmd.Flags().StringVar(&toolCfg.CSVInput, "input-csv", "", "")
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if tt.errorContains != "" {
+				assert.ErrorContains(t, err, tt.errorContains)
+				assert.False(t, ran, "invalid services must stop before Run")
+			} else {
+				assert.NoError(t, err)
+				assert.True(t, ran)
 			}
 		})
 	}

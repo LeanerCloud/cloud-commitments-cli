@@ -14,6 +14,10 @@ import (
 
 // validateFlags performs validation on command line flags before execution.
 func validateFlags(cmd *cobra.Command, args []string) error {
+	if err := validateServices(cmd); err != nil {
+		return err
+	}
+
 	if err := validateNumericRanges(cmd); err != nil {
 		return err
 	}
@@ -43,6 +47,14 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func validateServices(cmd *cobra.Command) error {
+	if cmd != nil && cmd.Flags().Changed("services") && len(toolCfg.Services) == 0 {
+		return fmt.Errorf("--services must contain at least one service")
+	}
+	_, err := parseServices(toolCfg.Services)
+	return err
 }
 
 // validateIdempotencyWindow parses --idempotency-window into the whole hours
@@ -180,7 +192,10 @@ func warnRDS3YearNoUpfront() error {
 		return nil
 	}
 
-	services := determineServicesToProcess(toolCfg)
+	services, err := determineServicesToProcess(toolCfg)
+	if err != nil {
+		return err
+	}
 	hasRDS := toolCfg.AllServices || containsService(services, common.ServiceRDS)
 
 	if hasRDS {

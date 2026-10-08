@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -161,16 +162,9 @@ var toolCfg = Config{}
 
 // validateFlags is now defined in validators.go
 
-// parseServices converts service names to ServiceType. The legacy
-// "savingsplans" / "sp" aliases fan out to all four per-plan-type SP slugs so
-// existing CLI scripts that pass --services savingsplans keep covering every
-// plan type. Specific slugs (savingsplans-compute, etc.) are also accepted for
-// targeted runs.
-//
-// Duplicates are silently dropped via a `seen` set so combinations like
-// `--services savingsplans,savingsplans-compute` don't double-process Compute
-// SP through both the fan-out path and the explicit-slug path.
-func parseServices(serviceNames []string) []common.ServiceType {
+// Legacy Savings Plans aliases fan out to every plan type for existing CLI scripts.
+// Deduplication prevents overlapping aliases from processing a service twice.
+func parseServices(serviceNames []string) ([]common.ServiceType, error) {
 	var result []common.ServiceType
 	seen := make(map[common.ServiceType]struct{})
 	add := func(service common.ServiceType) {
@@ -215,11 +209,17 @@ func parseServices(serviceNames []string) []common.ServiceType {
 		if service, ok := serviceMap[key]; ok {
 			add(service)
 		} else {
-			log.Printf("Warning: Unknown service '%s', skipping", name)
+			validNames := make([]string, 0, len(serviceMap)+3)
+			validNames = append(validNames, "savingsplans", "savings-plans", "sp")
+			for supported := range serviceMap {
+				validNames = append(validNames, supported)
+			}
+			sort.Strings(validNames)
+			return nil, fmt.Errorf("unknown service %q; valid services: %s", name, strings.Join(validNames, ", "))
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 // getAllServices returns all supported services.

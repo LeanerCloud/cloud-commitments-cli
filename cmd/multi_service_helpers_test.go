@@ -614,7 +614,8 @@ func TestDetermineServicesToProcess_AllServices(t *testing.T) {
 		AllServices: true,
 	}
 
-	result := determineServicesToProcess(cfg)
+	result, err := determineServicesToProcess(cfg)
+	assert.NoError(t, err)
 
 	// Should contain all supported services
 	assert.Contains(t, result, common.ServiceRDS)
@@ -631,7 +632,8 @@ func TestDetermineServicesToProcess_SpecificServices(t *testing.T) {
 		Services:    []string{"rds", "elasticache"},
 	}
 
-	result := determineServicesToProcess(cfg)
+	result, err := determineServicesToProcess(cfg)
+	assert.NoError(t, err)
 
 	assert.Equal(t, 2, len(result))
 	assert.Contains(t, result, common.ServiceRDS)
@@ -843,4 +845,15 @@ func TestPopulateAccountNamesLogic(t *testing.T) {
 		assert.Equal(t, "Staging", recs[2].AccountName)
 		mockOrg.AssertExpectations(t)
 	})
+}
+
+func TestDetermineServicesToProcess_DefaultAndInvalid(t *testing.T) {
+	for _, services := range [][]string{nil, {}} {
+		result, err := determineServicesToProcess(Config{Services: services})
+		assert.NoError(t, err)
+		assert.Equal(t, []common.ServiceType{common.ServiceRDS}, result)
+	}
+	result, err := determineServicesToProcess(Config{Services: []string{"rds", "elasticahe"}})
+	assert.ErrorContains(t, err, "elasticahe")
+	assert.Nil(t, result)
 }

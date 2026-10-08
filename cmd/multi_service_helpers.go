@@ -145,15 +145,15 @@ func applyCommonCoverage(recs []common.Recommendation, coverage float64) []commo
 }
 
 // determineServicesToProcess returns the list of services to process based on flags.
-func determineServicesToProcess(cfg Config) []common.ServiceType {
+func determineServicesToProcess(cfg Config) ([]common.ServiceType, error) {
 	if cfg.AllServices {
-		return getAllServices()
+		return getAllServices(), nil
 	}
 	if len(cfg.Services) > 0 {
 		return parseServices(cfg.Services)
 	}
 	// Default to RDS only for backward compatibility
-	return []common.ServiceType{common.ServiceRDS}
+	return []common.ServiceType{common.ServiceRDS}, nil
 }
 
 // printRunMode prints the current run mode (dry run or purchase).
