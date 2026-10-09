@@ -481,22 +481,28 @@ func purchaseAuditStatus(result common.PurchaseResult) string {
 
 // purchaseSingleRec executes or dry-runs a single purchase and returns the result + audit status.
 func purchaseSingleRec(ctx context.Context, awsCfg aws.Config, rec common.Recommendation, index int, isDryRun bool, cfg Config) (purchaseResult common.PurchaseResult, auditStatus string) {
-	AppLogger.Printf("  [%d] %s %s %s (count=%d)\n", index, rec.Service, rec.Region, rec.ResourceType, rec.Count)
+	label := purchaseRegionLabel(rec, rec.Region)
+	AppLogger.Printf("  [%d] %s %s %s (count=%d)\n", index, rec.Service, label, rec.ResourceType, rec.Count)
 	if isDryRun {
-		result := createDryRunResult(rec, rec.Region, index, cfg)
+		result := createDryRunResult(rec, label, index, cfg)
 		AppLogger.Printf("    [dry-run] %s\n", result.CommitmentID)
 		return result, "skipped"
 	}
 
+	clientRegion, err := clientRegionFor(rec.Service, rec.Region)
+	if err != nil {
+		AppLogger.Printf("    ❌ %v\n", err)
+		return common.PurchaseResult{Recommendation: rec, Success: false, Error: err, Timestamp: time.Now()}, "error"
+	}
 	regionalCfg := awsCfg.Copy()
-	regionalCfg.Region = rec.Region
+	regionalCfg.Region = clientRegion
 	serviceClient := createServiceClient(rec.Service, regionalCfg)
 	if serviceClient == nil {
 		AppLogger.Printf("    ⚠️  No service client for %s\n", rec.Service)
 		return common.PurchaseResult{Success: false}, "error"
 	}
 
-	result := executePurchase(ctx, rec, rec.Region, index, serviceClient, cfg)
+	result := executePurchase(ctx, rec, label, index, serviceClient, cfg)
 	status := purchaseAuditStatus(result)
 	if result.Success {
 		AppLogger.Printf("    ✅ %s\n", result.CommitmentID)
@@ -698,8 +704,13 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 // Extracted out of runToolFromCSV to keep it under the project's gocyclo
 // budget.
 func processCSVRegionPurchases(ctx context.Context, awsCfg aws.Config, service common.ServiceType, region string, recs []common.Recommendation, isDryRun bool, cfg Config, runID string) (processedRecs []common.Recommendation, results []common.PurchaseResult, ok bool) {
+	clientRegion, err := clientRegionFor(service, region)
+	if err != nil {
+		AppLogger.Printf("  ❌ Cannot purchase %d %s recommendation(s) from the CSV: %v\n", len(recs), getServiceDisplayName(service), err)
+		return nil, nil, false
+	}
 	regionalCfg := awsCfg.Copy()
-	regionalCfg.Region = region
+	regionalCfg.Region = clientRegion
 	serviceClient := createServiceClient(service, regionalCfg)
 
 	if serviceClient == nil {
@@ -852,17 +863,18 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 		}
 
 		rec := recs[j]
+		label := purchaseRegionLabel(rec, region)
 		AppLogger.Printf("    [%d/%d] Processing: %s %s\n", j+1, len(recs), rec.Service, rec.ResourceType)
 		AppLogger.Printf("    💳 Purchasing %d instances\n", rec.Count)
 
 		var result common.PurchaseResult
 		var status string
 		if isDryRun {
-			result = createDryRunResult(rec, region, j+1, cfg)
+			result = createDryRunResult(rec, label, j+1, cfg)
 			status = "skipped"
 		} else {
 			// Execute actual purchase
-			result = executePurchase(ctx, rec, region, j+1, serviceClient, cfg)
+			result = executePurchase(ctx, rec, label, j+1, serviceClient, cfg)
 			status = purchaseAuditStatus(result)
 
 			// Add delay between purchases to avoid rate limiting
