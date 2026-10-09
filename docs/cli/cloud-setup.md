@@ -138,17 +138,40 @@ The Service Account needs the following roles:
 |------|---------|
 | `roles/compute.viewer` | Read Compute Engine resources and commitment operations |
 | `projects/PROJECT_ID/roles/cudlyCommitmentPurchaser` | Purchase commitments with only `compute.commitments.create` |
+| `projects/PROJECT_ID/roles/cudlyRecommendationReader` | List Compute commitment recommendations with only `recommender.usageCommitmentRecommendations.list` |
 
 The setup operator needs `iam.roles.get`, `iam.roles.create`,
 `resourcemanager.projects.getIamPolicy`, and `resourcemanager.projects.setIamPolicy`
 for this step. These setup permissions are not granted to the Service Account.
-An existing custom role must have exactly the purchase permission and be enabled;
-the wizard refuses incompatible roles rather than changing them. It also refuses
+An existing custom role must have exactly its one permission and be enabled (not
+disabled and not soft-deleted); the wizard refuses incompatible roles rather
+than changing them. It also refuses
 to widen an existing conditional-only grant for this Service Account.
 
 Rerunning the wizard does not remove broad grants from older installations.
-Recommendation access requires additional Recommender permissions; neither
-role above provides them.
+
+#### Recommendation access
+
+Compute Engine commitment recommendations are read from the project-scoped
+resource `projects/PROJECT_ID/locations/REGION/recommenders/google.compute.commitment.UsageCommitmentRecommender`.
+That list call needs `recommender.usageCommitmentRecommendations.list` on the
+project, which the wizard grants through `cudlyRecommendationReader`. The
+Recommender API (`recommender.googleapis.com`) must be enabled in the Service
+Account's project; the wizard prints this prerequisite but does not enable it.
+
+Scope notes:
+
+- Project scope: the grant above is a project binding. Nothing is granted on a
+  billing account, folder or organization, because the pinned client never
+  queries those parents. Billing-account roles such as `roles/billing.viewer`
+  are not needed for this call.
+- Other services: the GCP provider also queries Cloud SQL and Memorystore
+  recommenders (`google.cloudsql.instance.PerformanceRecommender`,
+  `google.memorystore.redis.PerformanceRecommender`). The wizard provisions
+  nothing for them; those calls return a permission error, which is reported
+  as a warning for that service while other services continue.
+
+Rerunning the wizard does not remove broad grants from older installations.
 
 ### Migrating legacy Compute Admin grants
 
