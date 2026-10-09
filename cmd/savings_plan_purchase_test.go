@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"io"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -315,4 +317,87 @@ func TestProcessPurchaseLoop_DryRunReportsPreconditionFailureOnCSVShapedRows(t *
 	results = processPurchaseLoop(context.Background(), []common.Recommendation{csvEC2}, "us-east-1", true, nil, cfg, "run-2")
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Success)
+}
+
+func TestCSVRoundTrip_SavingsPlanAndEC2DetailsSurviveWriteThenRead(t *testing.T) {
+	compute := parserShapedSP()
+	compute.Details = &common.SavingsPlanDetails{PlanType: "Compute", HourlyCommitment: 0.123456}
+	ec2sp := validEC2InstanceSP()
+	ec2sp.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 12, InstanceFamily: "m5", Region: "eu-west-1", OfferingID: "off-1"}
+	ec2 := validEC2Rec()
+	ec2.Details = &common.ComputeDetails{InstanceType: "m5.large", Platform: "Linux/UNIX", Tenancy: "dedicated", Scope: "zonal"}
+	rds := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.r6g.large", Count: 2,
+		Details: &common.DatabaseDetails{Engine: "Aurora MySQL", AZConfig: "multi-az", InstanceClass: "db.r6g.large"}}
+
+	in := []common.Recommendation{compute, ec2sp, ec2, rds}
+	var results []common.PurchaseResult
+	for _, r := range in {
+		results = append(results, common.PurchaseResult{Recommendation: r, Success: true, Timestamp: time.Now()})
+	}
+	path := filepath.Join(t.TempDir(), "report.csv")
+	require.NoError(t, writeMultiServiceCSVReport(results, path))
+
+	out, err := loadRecommendationsFromCSV(path)
+	require.NoError(t, err)
+	require.Len(t, out, len(in))
+
+	byService := map[common.ServiceType]common.Recommendation{}
+	for _, r := range out {
+		byService[r.Service] = r
+	}
+	assert.Equal(t, compute.Details, byService[compute.Service].Details)
+	assert.Equal(t, ec2sp.Details, byService[ec2sp.Service].Details)
+	assert.Equal(t, ec2.Details, byService[ec2.Service].Details)
+	assert.Equal(t, rds.Details, byService[rds.Service].Details)
+	for _, r := range out {
+		assert.NoError(t, validatePurchasePreconditions(r, r.Region), "%s", r.Service)
+	}
+}
+
+func TestCSVWriter_AppendsDetailColumnsWithoutReorderingExistingOnes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "report.csv")
+	require.NoError(t, writeMultiServiceCSVReport([]common.PurchaseResult{{Recommendation: parserShapedSP(), Timestamp: time.Now()}}, path))
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	require.NoError(t, err)
+	header := rows[0]
+	n := len(header) - len(csvDetailColumns)
+	assert.Equal(t, csvDetailColumns, header[n:])
+	assert.Equal(t, "Service", header[0])
+	assert.Equal(t, "ProjectedCoverage", header[n-1])
+	for _, row := range rows {
+		assert.Len(t, row, len(header))
+	}
+}
+
+func TestCSVReader_MalformedHourlyCommitmentRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "in.csv")
+	content := "Service,Region,Count,PlanType,HourlyCommitment\nsavings-plans-compute,,1,Compute,abc\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	_, err := loadRecommendationsFromCSV(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HourlyCommitment")
+}
+
+func TestProcessCSVRegionPurchases_SavingsPlanRowFromWrittenCSV(t *testing.T) {
+	awsCfg, stub := stubAWSConfig(t)
+	cfg := Config{AuditLog: filepath.Join(t.TempDir(), "audit.jsonl")}
+	path := filepath.Join(t.TempDir(), "report.csv")
+	sp := parserShapedSP()
+	require.NoError(t, writeMultiServiceCSVReport([]common.PurchaseResult{{Recommendation: sp, Timestamp: time.Now()}}, path))
+	recs, err := loadRecommendationsFromCSV(path)
+	require.NoError(t, err)
+	require.Len(t, recs, 1)
+	require.Empty(t, recs[0].Region)
+	require.Empty(t, recs[0].Provider)
+
+	_, results, ok := processCSVRegionPurchases(context.Background(), awsCfg, recs[0].Service, recs[0].Region, recs, false, cfg, "run-1")
+
+	require.True(t, ok)
+	require.Len(t, results, 1)
+	require.Error(t, results[0].Error)
+	assert.NotContains(t, results[0].Error.Error(), "Details", "details must reach the client")
+	assert.Contains(t, stub.paths(), "/DescribeSavingsPlansOfferings")
 }
