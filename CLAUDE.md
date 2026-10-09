@@ -151,23 +151,34 @@ prompt verbatim.
 
 Merge only at the reviewed SHA, and only when all of these cover it:
 
-- An independent adversarial review of the full PR diff on Opus 5.5
-  (exact model `claude-opus-5-5`; never Fable, a floating alias, or a
-  cross-provider substitute) names the SHA.
+- An independent adversarial review of the full PR diff by an available
+  capable model, including Codex, names the exact current head SHA.
 - All actionable findings from any reviewer (independent review,
   CodeRabbit, CI) are resolved. CodeRabbit is optional when
   exact-revision local verification plus a thorough independent review
-  cover the SHA; otherwise run the loop above. CI is green on the SHA.
-- Local verification exercises the real affected scenario on macOS
-  (Linux via CI; Windows out of scope). Label fixture- or mock-based
-  evidence as such; it does not count as real-scenario verification.
+  cover the SHA; otherwise run the loop above. CI is freshly green on
+  the SHA, mergeability is clean, and the reviewed head is unchanged.
+- For runtime changes, local verification exercises the actual affected
+  user path and data shape on macOS (Linux via CI; Windows out of scope).
+  Realistic fixtures, mocks, recorded responses, or local integration may
+  satisfy this gate.
+  Label the evidence honestly and record real-account coverage gaps.
+  For runtime changes, require regression fail-before/pass-after evidence
+  where applicable, a fresh build, and relevant tests.
+  For non-runtime changes, run checks relevant to the changed artifact.
 - The verdict, the reviewed SHA and the local verification evidence are
   recorded on the PR itself.
 
-Merge normally; never bypass failing or required checks (no
-`gh pr merge --admin`, no `--no-verify`). Verification never authorizes
-real purchases, deploys or the CLI's `--yes`. Any new commit or rebase
-restarts the gate; a missing reviewer or verification blocks the PR.
+If CodeRabbit is blocked only by quota or throttling, the remaining gates
+still permit a normal merge. Record `CR waived: quota, adversarial review + local verification + green CI`
+on the PR and track a retrospective review. Resolve all available
+CodeRabbit actionable findings.
+
+Merge normally with branch protections and coordination; never bypass
+failing or required checks (no `gh pr merge --admin`, no `--no-verify`).
+Verification never authorizes real purchases, deploys or the CLI's `--yes`.
+Any new commit or rebase restarts the gate; a missing reviewer or
+verification blocks the PR.
 
 ## PR labeling — mirror closing-issue labels (MANDATORY)
 
