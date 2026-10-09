@@ -48,7 +48,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Prerequisites
 
-- Go 1.26.6 or later (the floor set by the `go` directive in `go.mod`)
+- Go 1.26.9 or later (the floor set by the `go` directive in `go.mod`)
 - Git
 
 ### Getting Started
@@ -85,7 +85,7 @@ from a copy of the committed `go.work` and append your active worktrees:
 // go.work.local -- gitignored, developer-local
 // Keep this `go` line at or above the modules' own directive, otherwise the
 // workspace is rejected. Copy it from the committed go.work.
-go 1.26.6
+go 1.26.9
 
 use (
     .
