@@ -26,7 +26,7 @@ func TestGCPStepGrantRole(t *testing.T) {
 		runGCPIAMFixture(t, scenario)
 		return
 	}
-	for _, scenario := range []string{"create", "empty", "reuse", "extra-permission", "deleted", "disabled", "wrong-name", "bad-created", "forbidden", "write-error", "skip", "conditional-other", "conditional-member", "already-unconditional", "existing-admin", "coordinator", "coordinator-error", "coordinator-conflict", "coordinator-second-write"} {
+	for _, scenario := range []string{"create", "empty", "reuse", "extra-permission", "deleted", "disabled", "wrong-name", "bad-created", "forbidden", "write-error", "skip", "conditional-other", "conditional-member", "already-unconditional", "existing-admin", "coordinator", "coordinator-error", "coordinator-conflict", "coordinator-second-write", "reader-create", "reader-extra-permission", "reader-deleted", "reader-wrong-name"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -43,8 +43,19 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 	const roleName = "projects/fixture-project/roles/cudlyCommitmentPurchaser"
 	const member = "serviceAccount:cudly-service-account@fixture-project.iam.gserviceaccount.com"
 	role := &iam.Role{Name: roleName, Stage: "GA", IncludedPermissions: []string{"compute.commitments.create"}}
+	const readerRoleName = "projects/fixture-project/roles/cudlyRecommendationReader"
+	reader := &iam.Role{Name: readerRoleName, Stage: "GA", IncludedPermissions: []string{"recommender.usageCommitmentRecommendations.list"}}
 	wantError := ""
 	switch scenario {
+	case "reader-extra-permission":
+		reader.IncludedPermissions = append(reader.IncludedPermissions, "recommender.usageCommitmentRecommendations.get")
+		wantError = "unsafe custom role"
+	case "reader-deleted":
+		reader.Deleted = true
+		wantError = "unsafe custom role"
+	case "reader-wrong-name":
+		reader.Name = "projects/fixture-project/roles/other"
+		wantError = "unsafe custom role"
 	case "extra-permission", "bad-created":
 		role.IncludedPermissions = append(role.IncludedPermissions, "compute.instances.delete")
 		wantError = "unsafe custom role"
@@ -79,7 +90,7 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 	}
 	var writes []*crm.SetIamPolicyRequest
 	var creates []*iam.CreateRoleRequest
-	var roleReads, keyCalls int
+	var roleReads, readerReads, keyCalls int
 	var mu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -88,6 +99,13 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 		switch {
 		case r.URL.Path == "/token":
 			_, _ = io.WriteString(w, `{"access_token":"fixture","token_type":"Bearer","expires_in":3600}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/roles/cudlyRecommendationReader"):
+			readerReads++
+			if scenario == "reader-create" {
+				http.Error(w, `{"error":{"code":404,"message":"missing"}}`, http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(reader)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/roles/cudlyCommitmentPurchaser"):
 			roleReads++
 			switch scenario {
@@ -104,6 +122,10 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 			creates = append(creates, &request)
 			if scenario == "coordinator-conflict" {
 				http.Error(w, "conflict", http.StatusConflict)
+				return
+			}
+			if request.RoleId == "cudlyRecommendationReader" {
+				_ = json.NewEncoder(w).Encode(reader)
 				return
 			}
 			_ = json.NewEncoder(w).Encode(role)
@@ -191,7 +213,7 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 	require.Zero(t, keyCalls, "role setup must never mint a key or call unexpected endpoints")
 	wantCreates := 0
 	switch scenario {
-	case "create", "empty", "bad-created", "coordinator", "coordinator-conflict":
+	case "create", "empty", "bad-created", "coordinator", "coordinator-conflict", "reader-create":
 		wantCreates = 1
 	}
 	require.Len(t, creates, wantCreates)
@@ -201,9 +223,17 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 		return
 	}
 	require.Equal(t, 1, roleReads)
+	if strings.HasPrefix(scenario, "reader-") || wantError == "" || scenario == "write-error" || scenario == "coordinator" {
+		require.Equal(t, 1, readerReads, "reader role must be ensured before any setIamPolicy write")
+	}
 	for _, create := range creates {
-		require.Equal(t, "cudlyCommitmentPurchaser", create.RoleId)
 		require.Empty(t, create.Role.Name)
+		if scenario == "reader-create" {
+			require.Equal(t, "cudlyRecommendationReader", create.RoleId)
+			require.Equal(t, []string{"recommender.usageCommitmentRecommendations.list"}, create.Role.IncludedPermissions)
+			continue
+		}
+		require.Equal(t, "cudlyCommitmentPurchaser", create.RoleId)
 		require.Equal(t, []string{"compute.commitments.create"}, create.Role.IncludedPermissions)
 	}
 	if scenario == "coordinator-second-write" {
@@ -220,9 +250,9 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 		require.Len(t, writes, 1)
 		return
 	}
-	wantWrites := 2
+	wantWrites := 3
 	if scenario == "already-unconditional" {
-		wantWrites = 1
+		wantWrites = 2
 	}
 	require.Len(t, writes, wantWrites)
 	granted := map[string]bool{}
@@ -235,7 +265,7 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 			}
 		}
 	}
-	expected := map[string]bool{"roles/compute.viewer": true, roleName: true}
+	expected := map[string]bool{"roles/compute.viewer": true, roleName: true, readerRoleName: true}
 	if scenario == "existing-admin" {
 		expected["roles/compute.admin"] = true
 	}

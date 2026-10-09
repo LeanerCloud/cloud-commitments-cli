@@ -780,9 +780,21 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 	return saEmail, nil
 }
 
-const gcpPurchaserRoleID = "cudlyCommitmentPurchaser"
+// gcpCustomRole is a single-permission custom role the wizard provisions.
+type gcpCustomRole struct {
+	id         string
+	title      string
+	permission string
+}
 
-func ensureGCPPurchaserRole(ctx context.Context, projectID string) (string, error) {
+var (
+	gcpPurchaserRole = gcpCustomRole{id: "cudlyCommitmentPurchaser", title: "CUDly Commitment Purchaser", permission: "compute.commitments.create"}
+	// gcpRecommendationReaderRole covers the project-scoped
+	// google.compute.commitment.UsageCommitmentRecommender list call.
+	gcpRecommendationReaderRole = gcpCustomRole{id: "cudlyRecommendationReader", title: "CUDly Recommendation Reader", permission: "recommender.usageCommitmentRecommendations.list"}
+)
+
+func ensureGCPCustomRole(ctx context.Context, projectID string, spec gcpCustomRole) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, gcpSDKCallTimeout)
 	defer cancel()
 	opt, err := newGCPAPIOption(ctx)
@@ -794,21 +806,21 @@ func ensureGCPPurchaserRole(ctx context.Context, projectID string) (string, erro
 		return "", fmt.Errorf("failed to create IAM client: %w", err)
 	}
 	parent := "projects/" + projectID
-	name := parent + "/roles/" + gcpPurchaserRoleID
+	name := parent + "/roles/" + spec.id
+	want := []string{spec.permission}
 	role, err := svc.Projects.Roles.Get(name).Context(ctx).Do()
 	var apiErr *googleapi.Error
 	if errors.As(err, &apiErr) && apiErr.Code == 404 {
 		role, err = svc.Projects.Roles.Create(parent, &iamv1.CreateRoleRequest{
-			RoleId: gcpPurchaserRoleID,
-			Role: &iamv1.Role{Title: "CUDly Commitment Purchaser", Stage: "GA",
-				IncludedPermissions: []string{"compute.commitments.create"}},
+			RoleId: spec.id,
+			Role:   &iamv1.Role{Title: spec.title, Stage: "GA", IncludedPermissions: want},
 		}).Context(ctx).Do()
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to provision custom role %s; review the role and setup permissions before retrying: %w", name, err)
 	}
-	if role.Name != name || role.Deleted || role.Stage == "DISABLED" || !slices.Equal(role.IncludedPermissions, []string{"compute.commitments.create"}) {
-		return "", fmt.Errorf("unsafe custom role %s: expected an enabled role containing only compute.commitments.create; review it before retrying", name)
+	if role.Name != name || role.Deleted || role.Stage == "DISABLED" || !slices.Equal(role.IncludedPermissions, want) {
+		return "", fmt.Errorf("unsafe custom role %s: expected an enabled role containing only %s; review it before retrying", name, spec.permission)
 	}
 	return name, nil
 }
@@ -821,7 +833,9 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	fmt.Println("-----------------------")
 	fmt.Println("Grant the required roles to the service account.")
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? (creates or validates %s with compute.commitments.create, then grants it and roles/compute.viewer to %s on project %s via SDK) ", gcpPurchaserRoleID, saEmail, projectID)
+	fmt.Println("Prerequisite: enable recommender.googleapis.com in the service account's project (this step does not enable it).")
+	fmt.Printf("[R]un, [S]kip? (creates or validates %s with %s and %s with %s, then grants both and roles/compute.viewer to %s on project %s via SDK) ",
+		gcpPurchaserRole.id, gcpPurchaserRole.permission, gcpRecommendationReaderRole.id, gcpRecommendationReaderRole.permission, saEmail, projectID)
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
@@ -829,11 +843,15 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
 	case "r", "run", "":
-		role, roleErr := ensureGCPPurchaserRole(ctx, projectID)
-		if roleErr != nil {
-			return roleErr
+		grants := []string{"roles/compute.viewer"}
+		for _, spec := range []gcpCustomRole{gcpPurchaserRole, gcpRecommendationReaderRole} {
+			role, roleErr := ensureGCPCustomRole(ctx, projectID, spec)
+			if roleErr != nil {
+				return roleErr
+			}
+			grants = append(grants, role)
 		}
-		for _, grant := range []string{"roles/compute.viewer", role} {
+		for _, grant := range grants {
 			if grantErr := grantGCPIAMRole(ctx, projectID, member, grant); grantErr != nil {
 				return grantErr
 			}
