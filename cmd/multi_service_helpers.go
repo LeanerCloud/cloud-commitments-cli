@@ -254,15 +254,21 @@ func executePurchase(ctx context.Context, rec common.Recommendation, region stri
 
 // determineRegionsForService determines which regions to process for a given service.
 func determineRegionsForService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, service common.ServiceType, configuredRegions []string) ([]string, error) {
+	// Savings Plans are account-level, not regional - only query once, even
+	// when --regions lists several. The recommendation call returns the same
+	// account-wide set for every region, so honoring --regions here repeats
+	// each Savings Plan once per listed region and, now that Savings Plan
+	// purchases work, would buy it that many times. EC2Instance plans are
+	// still narrowed to the requested regions by the region filters on
+	// Details.Region.
+	if common.IsSavingsPlan(service) {
+		AppLogger.Printf("🌍 Fetching account-level Savings Plans recommendations...\n")
+		return []string{spAPIRegion}, nil // Single query for account-level data
+	}
+
 	// If regions are explicitly configured, use those
 	if len(configuredRegions) > 0 {
 		return configuredRegions, nil
-	}
-
-	// Savings Plans are account-level, not regional - only query once
-	if common.IsSavingsPlan(service) {
-		AppLogger.Printf("🌍 Fetching account-level Savings Plans recommendations...\n")
-		return []string{"us-east-1"}, nil // Single query for account-level data
 	}
 
 	// Default to all AWS regions for other services
