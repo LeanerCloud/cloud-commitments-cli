@@ -761,3 +761,69 @@ func TestCheckDuplicates_HonorsIdempotencyWindow(t *testing.T) {
 		t.Errorf("adjustRecsForDuplicates (CSV path) kept %d instance(s), err=%v; want 0", CalculateTotalInstances(got), err)
 	}
 }
+
+// TestValidateNumericFlagsRejectNonFinite drives the real flag set through
+// rootCmd.ParseFlags (cobra/pflag parse "NaN" and "Inf" as floats) and then
+// the validators. Nothing here calls runTool, so no AWS client is built.
+func TestValidateNumericFlagsRejectNonFinite(t *testing.T) {
+	saved := toolCfg
+	reset := func() {
+		toolCfg = Config{}
+		for _, name := range []string{"coverage", "target-coverage", "min-pool-size", "min-savings-pct"} {
+			f := rootCmd.Flags().Lookup(name)
+			if f == nil {
+				t.Fatalf("flag %q missing", name)
+			}
+			_ = f.Value.Set(f.DefValue)
+			f.Changed = false
+		}
+	}
+	t.Cleanup(func() { reset(); toolCfg = saved })
+
+	tests := []struct {
+		name     string
+		args     []string
+		parseErr bool
+		wantErr  string
+	}{
+		{name: "target NaN", args: []string{"--target-coverage", "NaN"}, wantErr: "target-coverage must be a finite number, got: NaN"},
+		{name: "target nan lowercase", args: []string{"--target-coverage", "nan"}, wantErr: "target-coverage must be a finite number, got: NaN"},
+		{name: "target +Inf", args: []string{"--target-coverage", "+Inf"}, wantErr: "target-coverage must be a finite number, got: +Inf"},
+		{name: "target -Inf", args: []string{"--target-coverage", "-Inf"}, wantErr: "target-coverage must be a finite number, got: -Inf"},
+		{name: "coverage NaN", args: []string{"--coverage", "NaN"}, wantErr: "coverage must be a finite number, got: NaN"},
+		{name: "coverage Inf", args: []string{"--coverage", "Inf"}, wantErr: "coverage must be a finite number, got: +Inf"},
+		{name: "min-pool-size NaN", args: []string{"--min-pool-size", "NaN"}, wantErr: "min-pool-size must be a finite number, got: NaN"},
+		{name: "min-savings-pct NaN", args: []string{"--min-savings-pct", "NaN"}, wantErr: "min-savings-pct must be a finite number, got: NaN"},
+		{name: "min-savings-pct Inf", args: []string{"--min-savings-pct", "Inf"}, wantErr: "min-savings-pct must be a finite number, got: +Inf"},
+		{name: "overflow rejected by the flag parser", args: []string{"--target-coverage", "1e999"}, parseErr: true},
+		{name: "explicit target 0 stays valid", args: []string{"--target-coverage", "0"}},
+		{name: "valid values pass", args: []string{"--target-coverage", "95", "--coverage", "50", "--min-pool-size", "2", "--min-savings-pct", "5"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reset()
+			toolCfg.CoverageLookbackDays = 30
+			err := rootCmd.ParseFlags(tt.args)
+			if tt.parseErr {
+				if err == nil {
+					t.Fatal("expected a flag parse error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseFlags: %v", err)
+			}
+			toolCfg.CoverageLookbackDays = 30
+			err = validateNumericRanges(rootCmd)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}

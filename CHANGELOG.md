@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject NaN and infinite values for `--coverage`, `--target-coverage`,
+  `--min-pool-size` and `--min-savings-pct` before any API call. NaN used to
+  pass validation and silently switch `--target-coverage` runs to
+  `--coverage` sizing (#2136).
+
 ### Changed
 
 - Split the CLI out of the CUDly monorepo into its own module,
