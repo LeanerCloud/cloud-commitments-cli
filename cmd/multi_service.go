@@ -483,6 +483,10 @@ func purchaseAuditStatus(result common.PurchaseResult) string {
 func purchaseSingleRec(ctx context.Context, awsCfg aws.Config, rec common.Recommendation, index int, isDryRun bool, cfg Config) (purchaseResult common.PurchaseResult, auditStatus string) {
 	label := purchaseRegionLabel(rec, rec.Region)
 	AppLogger.Printf("  [%d] %s %s %s (count=%d)\n", index, rec.Service, label, rec.ResourceType, rec.Count)
+	if err := validatePurchasePreconditions(rec, rec.Region); err != nil {
+		AppLogger.Printf("    ❌ cannot purchase: %v\n", err)
+		return preconditionFailure(rec, err, isDryRun), "error"
+	}
 	if isDryRun {
 		result := createDryRunResult(rec, label, index, cfg)
 		AppLogger.Printf("    [dry-run] %s\n", result.CommitmentID)
@@ -869,7 +873,10 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 
 		var result common.PurchaseResult
 		var status string
-		if isDryRun {
+		if err := validatePurchasePreconditions(rec, region); err != nil {
+			result = preconditionFailure(rec, err, isDryRun)
+			status = "error"
+		} else if isDryRun {
 			result = createDryRunResult(rec, label, j+1, cfg)
 			status = "skipped"
 		} else {

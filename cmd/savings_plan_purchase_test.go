@@ -232,3 +232,87 @@ func TestPurchaseRegionLabel(t *testing.T) {
 	assert.Equal(t, "global", purchaseRegionLabel(parserShapedSP(), ""))
 	assert.Equal(t, "us-west-2", purchaseRegionLabel(common.Recommendation{Service: common.ServiceRDS}, "us-west-2"))
 }
+
+func validEC2Rec() common.Recommendation {
+	return common.Recommendation{
+		Provider: common.ProviderAWS, Service: common.ServiceEC2, Region: "us-east-1", ResourceType: "m5.large", Count: 1,
+		Details: &common.ComputeDetails{InstanceType: "m5.large", Platform: "Linux/UNIX", Tenancy: "default", Scope: "regional"},
+	}
+}
+
+func validEC2InstanceSP() common.Recommendation {
+	rec := parserShapedSP()
+	rec.Service = common.ServiceSavingsPlansEC2Instance
+	rec.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1.5, InstanceFamily: "m5", Region: "eu-west-1"}
+	return rec
+}
+
+func TestValidatePurchasePreconditions(t *testing.T) {
+	mut := func(base common.Recommendation, f func(*common.Recommendation)) common.Recommendation {
+		f(&base)
+		return base
+	}
+	ok := map[string]common.Recommendation{
+		"compute sp":      parserShapedSP(),
+		"ec2 instance sp": validEC2InstanceSP(),
+		"ec2":             validEC2Rec(),
+		"rds":             {Service: common.ServiceRDS, Region: "us-east-1"},
+	}
+	for name, rec := range ok {
+		assert.NoError(t, validatePurchasePreconditions(rec, rec.Region), name)
+	}
+	bad := map[string]common.Recommendation{
+		"sp nil details":   mut(parserShapedSP(), func(r *common.Recommendation) { r.Details = nil }),
+		"sp wrong details": mut(parserShapedSP(), func(r *common.Recommendation) { r.Details = &common.ComputeDetails{} }),
+		"sp no plan type":  mut(parserShapedSP(), func(r *common.Recommendation) { r.Details = &common.SavingsPlanDetails{HourlyCommitment: 1} }),
+		"sp zero commit": mut(parserShapedSP(), func(r *common.Recommendation) {
+			r.Details = &common.SavingsPlanDetails{PlanType: "Compute", OfferingID: "o-1"}
+		}),
+		"ec2 instance sp no region": mut(validEC2InstanceSP(), func(r *common.Recommendation) {
+			r.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1, InstanceFamily: "m5"}
+		}),
+		"sp all":        mut(parserShapedSP(), func(r *common.Recommendation) { r.Service = common.ServiceSavingsPlansAll }),
+		"ec2 nil":       mut(validEC2Rec(), func(r *common.Recommendation) { r.Details = nil }),
+		"ec2 tenancy":   mut(validEC2Rec(), func(r *common.Recommendation) { r.Details.(*common.ComputeDetails).Tenancy = "" }),
+		"ec2 scope":     mut(validEC2Rec(), func(r *common.Recommendation) { r.Details.(*common.ComputeDetails).Scope = "" }),
+		"ec2 platform":  mut(validEC2Rec(), func(r *common.Recommendation) { r.Details.(*common.ComputeDetails).Platform = "" }),
+		"rds no region": {Service: common.ServiceRDS},
+	}
+	for name, rec := range bad {
+		assert.Error(t, validatePurchasePreconditions(rec, rec.Region), name)
+	}
+}
+
+func TestPurchaseSingleRec_DryRunReportsPreconditionFailure(t *testing.T) {
+	cfg := Config{AuditLog: filepath.Join(t.TempDir(), "audit.jsonl")}
+	broken := parserShapedSP()
+	broken.Details = nil
+
+	result, status := purchaseSingleRec(context.Background(), aws.Config{}, broken, 1, true, cfg)
+	assert.False(t, result.Success)
+	require.Error(t, result.Error)
+	assert.Equal(t, "error", status)
+
+	result, status = purchaseSingleRec(context.Background(), aws.Config{}, parserShapedSP(), 1, true, cfg)
+	assert.True(t, result.Success)
+	assert.Equal(t, "skipped", status)
+	assert.Contains(t, result.CommitmentID, "global")
+}
+
+func TestProcessPurchaseLoop_DryRunReportsPreconditionFailureOnCSVShapedRows(t *testing.T) {
+	cfg := Config{AuditLog: filepath.Join(t.TempDir(), "audit.jsonl")}
+	noDetailsSP := common.Recommendation{Service: common.ServiceSavingsPlansCompute, Count: 1}
+	csvEC2 := validEC2Rec()
+	csvEC2.Details = &common.ComputeDetails{InstanceType: "m5.large", Platform: "Linux/UNIX"} // loader leaves Tenancy/Scope blank
+	okSP := parserShapedSP()
+
+	results := processPurchaseLoop(context.Background(), []common.Recommendation{noDetailsSP, okSP}, "", true, nil, cfg, "run-1")
+	require.Len(t, results, 2)
+	assert.False(t, results[0].Success)
+	assert.True(t, results[1].Success)
+	assert.Contains(t, results[1].CommitmentID, "global")
+
+	results = processPurchaseLoop(context.Background(), []common.Recommendation{csvEC2}, "us-east-1", true, nil, cfg, "run-2")
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Success)
+}

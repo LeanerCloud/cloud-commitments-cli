@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/services/savingsplans"
@@ -83,4 +84,52 @@ func purchaseRegionLabel(rec common.Recommendation, groupRegion string) string {
 		return d.Region
 	}
 	return spGlobalLabel
+}
+
+// validatePurchasePreconditions reports why rec cannot be purchased, using the
+// same requirements the purchase path enforces, so a dry run predicts what a
+// real run will do instead of reporting every row as a success. It checks only
+// what the library would reject for a missing or malformed field; it does not
+// call any API. region is the one the client will be built from: the
+// recommendation's own on the main path, the CSV group's on the CSV path.
+func validatePurchasePreconditions(rec common.Recommendation, region string) error {
+	if _, err := clientRegionFor(rec.Service, region); err != nil {
+		return err
+	}
+	switch {
+	case common.IsSavingsPlan(rec.Service):
+		return validateSavingsPlanPreconditions(rec)
+	case rec.Service == common.ServiceEC2:
+		d, ok := rec.Details.(*common.ComputeDetails)
+		if !ok || d == nil {
+			return fmt.Errorf("EC2 recommendation for %s has no compute details (platform, tenancy, scope)", rec.ResourceType)
+		}
+		if d.Platform == "" || d.Tenancy == "" || d.Scope == "" {
+			return fmt.Errorf("EC2 recommendation for %s is missing platform, tenancy or scope (got %q, %q, %q)", rec.ResourceType, d.Platform, d.Tenancy, d.Scope)
+		}
+	}
+	return nil
+}
+
+func validateSavingsPlanPreconditions(rec common.Recommendation) error {
+	d, ok := rec.Details.(*common.SavingsPlanDetails)
+	if !ok || d == nil {
+		return fmt.Errorf("%s recommendation has no Savings Plan details (plan type, hourly commitment)", rec.Service)
+	}
+	if d.PlanType == "" {
+		return fmt.Errorf("%s recommendation is missing the plan type", rec.Service)
+	}
+	if d.HourlyCommitment <= 0 {
+		return fmt.Errorf("%s recommendation has no positive hourly commitment (got %v)", rec.Service, d.HourlyCommitment)
+	}
+	if rec.Service == common.ServiceSavingsPlansEC2Instance && d.Region == "" {
+		return fmt.Errorf("EC2 Instance Savings Plan needs a region to pick the offering")
+	}
+	return nil
+}
+
+// preconditionFailure builds the failed result recorded for a row that cannot
+// be purchased.
+func preconditionFailure(rec common.Recommendation, err error, isDryRun bool) common.PurchaseResult {
+	return common.PurchaseResult{Recommendation: rec, Success: false, Error: err, DryRun: isDryRun, Timestamp: time.Now()}
 }
