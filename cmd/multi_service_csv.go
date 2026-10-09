@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -217,7 +218,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 	// every row, which adds noise without information; the underlying fields
 	// stay on the Recommendation struct for internal use (SP no-signal
 	// guard, etc.).
-	header := []string{
+	baseHeader := []string{
 		"Service", "Region", "ResourceType", "Family", "Engine", "Deployment",
 		"Instances", "CoveredInstances",
 		"Count", "NormalizedUnits", "RecommendedCount",
@@ -227,7 +228,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 		"ExistingCoverage", "ProjectedCoverage",
 	}
 	// Appended, never reordered: existing readers look columns up by name.
-	header = append(header, csvDetailColumns...)
+	header := slices.Concat(baseHeader, csvDetailColumns)
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
@@ -251,7 +252,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			errStr = r.Error.Error()
 		}
 
-		row := []string{
+		baseRow := []string{
 			string(rec.Service),
 			rec.Region,
 			rec.ResourceType,
@@ -277,7 +278,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			formatExistingCoverage(rec),
 			formatPercentOrBlank(rec.ProjectedCoverage),
 		}
-		row = append(row, detailCells(rec)...)
+		row := slices.Concat(baseRow, detailCells(rec))
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
@@ -326,7 +327,7 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 	if totalNU > 0 {
 		nuCell = fmt.Sprintf("%g", totalNU)
 	}
-	row := []string{
+	totals := []string{
 		"TOTAL", "", "", "", "", "", // Service through Deployment
 		"", "", // Instances, CoveredInstances
 		fmt.Sprintf("%d", totalCount), nuCell, "", // Count, NormalizedUnits, RecommendedCount
@@ -335,7 +336,7 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 		"", "", "", "", // CommitmentID, Success, Error, Timestamp
 		"", "", // ExistingCoverage, ProjectedCoverage
 	}
-	return append(row, make([]string, len(csvDetailColumns))...) // detail columns do not aggregate
+	return slices.Concat(totals, make([]string, len(csvDetailColumns))) // detail columns do not aggregate
 }
 
 // formatIntOrBlank renders an int as its decimal string when non-zero, ""

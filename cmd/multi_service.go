@@ -576,7 +576,8 @@ func prepareCSVPurchaseRun(ctx context.Context, cfg Config, csvModeCoverage floa
 	}
 	AppLogger.Printf("✅ Loaded %d recommendations from CSV\n", len(recs))
 
-	if err = rejectDuplicateSavingsPlanRows(recs); err != nil {
+	err = rejectDuplicateSavingsPlanRows(recs)
+	if err != nil {
 		return nil, aws.Config{}, "", err
 	}
 

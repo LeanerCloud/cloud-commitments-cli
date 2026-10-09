@@ -330,7 +330,7 @@ func TestCSVRoundTrip_SavingsPlanAndEC2DetailsSurviveWriteThenRead(t *testing.T)
 		Details: &common.DatabaseDetails{Engine: "Aurora MySQL", AZConfig: "multi-az", InstanceClass: "db.r6g.large"}}
 
 	in := []common.Recommendation{compute, ec2sp, ec2, rds}
-	var results []common.PurchaseResult
+	results := make([]common.PurchaseResult, 0, len(in))
 	for _, r := range in {
 		results = append(results, common.PurchaseResult{Recommendation: r, Success: true, Timestamp: time.Now()})
 	}
