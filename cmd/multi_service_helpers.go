@@ -284,6 +284,9 @@ func determineRegionsForService(ctx context.Context, awsCfg aws.Config, recClien
 
 // handleRegionDiscoveryError handles errors during region discovery by falling back to auto-discovery.
 func handleRegionDiscoveryError(ctx context.Context, recClient provider.RecommendationsClient, service common.ServiceType, originalErr error) ([]string, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	AppLogger.Printf("❌ Failed to get AWS regions: %v\n", originalErr)
 	AppLogger.Printf("🔍 Falling back to auto-discovery...\n")
 
@@ -302,47 +305,54 @@ type engineVersionData struct {
 }
 
 // fetchEngineVersionData queries running instances and major engine versions for validation.
-func fetchEngineVersionData(ctx context.Context, cfg Config) engineVersionData {
-	data := engineVersionData{
-		instanceVersions: make(map[string][]InstanceEngineVersion),
-		versionInfo:      make(map[string]MajorEngineVersionInfo),
+// A canceled or expired ctx is terminal and returned as an error; any other
+// query failure is a warning and leaves that map empty.
+func fetchEngineVersionData(ctx context.Context, cfg Config) (engineVersionData, error) {
+	instanceVersions, err := queryInstanceVersions(ctx, cfg)
+	if err != nil {
+		return engineVersionData{}, err
 	}
-
-	// Query running instances for engine version validation
-	data.instanceVersions = queryInstanceVersions(ctx, cfg)
-
-	// Query major engine versions for extended support detection
-	data.versionInfo = queryMajorVersions(ctx, cfg)
-
-	return data
+	versionInfo, err := queryMajorVersions(ctx, cfg)
+	if err != nil {
+		return engineVersionData{}, err
+	}
+	return engineVersionData{instanceVersions: instanceVersions, versionInfo: versionInfo}, nil
 }
 
 // queryInstanceVersions queries running instances for engine version validation.
-func queryInstanceVersions(ctx context.Context, cfg Config) map[string][]InstanceEngineVersion {
+func queryInstanceVersions(ctx context.Context, cfg Config) (map[string][]InstanceEngineVersion, error) {
 	AppLogger.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...\n")
 	instanceVersions, err := queryRunningInstanceEngineVersions(ctx, cfg)
+	// Checked on ctx, not on err: a canceled run can return partial data
+	// with a nil error, and that is not a completed query.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		AppLogger.Printf("⚠️  Warning: Failed to query running instances for engine version validation: %v\n", err)
 		AppLogger.Printf("   Continuing without engine version filtering\n")
-		return make(map[string][]InstanceEngineVersion)
+		return make(map[string][]InstanceEngineVersion), nil
 	}
 
 	AppLogger.Printf("✅ Found %d instance types with version information across all regions\n", len(instanceVersions))
-	return instanceVersions
+	return instanceVersions, nil
 }
 
 // queryMajorVersions queries major engine versions for extended support detection.
-func queryMajorVersions(ctx context.Context, cfg Config) map[string]MajorEngineVersionInfo {
+func queryMajorVersions(ctx context.Context, cfg Config) (map[string]MajorEngineVersionInfo, error) {
 	AppLogger.Printf("🔍 Querying AWS RDS major engine versions for extended support information...\n")
 	versionInfo, err := queryMajorEngineVersions(ctx, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		AppLogger.Printf("⚠️  Warning: Failed to query major engine versions: %v\n", err)
 		AppLogger.Printf("   Continuing without extended support detection\n")
-		return make(map[string]MajorEngineVersionInfo)
+		return make(map[string]MajorEngineVersionInfo), nil
 	}
 
 	AppLogger.Printf("✅ Found support information for %d major engine versions\n", len(versionInfo))
-	return versionInfo
+	return versionInfo, nil
 }
 
 // regionRecommendations holds the processed recommendations for a single region.
@@ -490,6 +500,10 @@ func fetchRecommendationsForRegion(
 		}
 		return recs
 	}
+	if ctx.Err() != nil {
+		// Interrupted, not a provider failure: the caller stops on ctx.Err().
+		return nil
+	}
 	if err != nil {
 		AppLogger.Printf("  ❌ Failed to fetch recommendations: %v\n", err)
 		return nil
@@ -619,6 +633,11 @@ func checkDuplicates(
 	duplicateChecker := NewDuplicateChecker(toolCfg.IdempotencyWindowHours)
 	adjustedRecs, dedupedOut, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
 	if err != nil {
+		if ctx.Err() != nil {
+			// Interrupted: terminal in dry and real runs alike, never
+			// "continue with un-deduplicated counts". The caller stops on ctx.Err().
+			return nil
+		}
 		if !isDryRun {
 			AppLogger.Printf("  ❌ Refusing to purchase %d instance(s): could not check for existing RIs (%v). Dropping these recommendations rather than risking a duplicate purchase.\n", CalculateTotalInstances(filteredRecs), err)
 			drops.Add(dropDuplicateCheckFailed, len(filteredRecs))
@@ -730,10 +749,16 @@ func fetchAllRecs(
 
 		regions, err := determineRegionsForService(ctx, awsCfg, recClient, service, cfg.Regions)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, drops
+			}
 			log.Printf("❌ Failed to determine regions for %s: %v", getServiceDisplayName(service), err)
 			continue
 		}
 		for i, region := range regions {
+			if ctx.Err() != nil {
+				return nil, drops // partial data from an interrupted fetch is not a result
+			}
 			recs := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg, coverageMap, drops)
 			all = append(all, recs...)
 		}

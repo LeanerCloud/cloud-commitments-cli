@@ -494,7 +494,7 @@ rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,All Upfront,123456789012
 		err error
 	)
 	out := captureAppOutput(t, func() {
-		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: maxInstances})
+		got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: maxInstances})
 	})
 	require.NoError(t, err)
 
@@ -546,7 +546,7 @@ rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
 		err error
 	)
 	out := captureAppOutput(t, func() {
-		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: maxInstances, MinCount: minCount})
+		got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: maxInstances, MinCount: minCount})
 	})
 	require.NoError(t, err)
 
@@ -580,7 +580,7 @@ rds,us-east-1,db.t3.medium,postgres,6,100.00,1yr,All Upfront,123456789012
 		err error
 	)
 	out := captureAppOutput(t, func() {
-		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MinCount: minCount})
+		got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MinCount: minCount})
 	})
 	require.NoError(t, err)
 
@@ -697,7 +697,7 @@ rds,us-east-1,db.rich.large,postgres,6,500.00,1yr,All Upfront,123456789012
 		err error
 	)
 	out := captureAppOutput(t, func() {
-		got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: maxInstances})
+		got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: maxInstances})
 	})
 	require.NoError(t, err)
 
@@ -743,7 +743,7 @@ rds,us-east-1,db.aaa.large,postgres,6,1yr,All Upfront,123456789012
 
 		var err error
 		captureAppOutput(t, func() {
-			_, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 6})
+			_, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: 6})
 		})
 
 		require.Error(t, err, "a binding cap with nothing to rank on must refuse, not pick by name")
@@ -762,7 +762,7 @@ rds,us-east-1,db.t3.small,postgres,6,,1yr,All Upfront,123456789012
 
 		var err error
 		captureAppOutput(t, func() {
-			_, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 10})
+			_, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: 10})
 		})
 
 		require.Error(t, err)
@@ -783,7 +783,7 @@ rds,us-east-1,db.aaa.large,postgres,6,1yr,All Upfront,123456789012
 			err error
 		)
 		captureAppOutput(t, func() {
-			got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 12})
+			got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: 12})
 		})
 
 		require.NoError(t, err)
@@ -801,7 +801,7 @@ rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,All Upfront,123456789012
 			err error
 		)
 		captureAppOutput(t, func() {
-			got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 6})
+			got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: 6})
 		})
 
 		require.NoError(t, err)
@@ -885,7 +885,7 @@ func TestCSVCapOrderIsIndependentOfFileOrder(t *testing.T) {
 			err error
 		)
 		captureAppOutput(t, func() {
-			got, err = filterAndAdjustRecommendations(recs, 100.0, Config{MaxInstances: 6})
+			got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: 6})
 		})
 		require.NoError(t, err)
 

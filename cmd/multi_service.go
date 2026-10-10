@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
 	"sync/atomic"
 	"time"
 
@@ -60,6 +58,9 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 	regions := cfg.Regions
 	if len(regions) == 0 {
 		allRegions, err := getAllAWSRegions(ctx, awsCfg)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if err != nil {
 			return nil, coverageFetchFailure(cfg, fmt.Errorf("could not list AWS regions for coverage fetch: %w", err))
 		}
@@ -67,6 +68,9 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 	}
 	AppLogger.Printf("\n🔎 Fetching existing-RI coverage from Cost Explorer per-account across %d regions (lookback %d days)...\n", len(regions), lookbackDays)
 	cov, err := adapter.GetRICoverageMap(ctx, lookbackDays, regions)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, coverageFetchFailure(cfg, fmt.Errorf("could not fetch existing-RI coverage: %w", err))
 	}
@@ -89,17 +93,34 @@ func coverageFetchFailure(cfg Config, err error) error {
 // shutdownRequested is set to true when SIGINT is received during a purchase run.
 var shutdownRequested atomic.Bool
 
+// interruptNotice is printed once when the run is interrupted.
+const interruptNotice = "interrupt received: stopping after the in-flight purchase, if any; Ctrl-\\ force-quits and may lose its audit record"
+
 // registerShutdownSignalHandler arms shutdownRequested for the duration of a
 // purchase run and returns the cleanup func the caller must defer (e.g.
-// `defer registerShutdownSignalHandler()()`). Shared by both purchase entry
-// points -- runToolMultiService and runToolFromCSV -- so an in-flight run on
-// either path can be stopped cleanly between purchases with Ctrl-C.
-func registerShutdownSignalHandler() func() {
+// `defer registerShutdownSignalHandler(ctx)()`). ctx is the invocation context
+// that SIGINT cancels (see runTool): when it is canceled the flag is set and
+// the notice is printed once. Shared by both purchase entry points --
+// runToolMultiService and runToolFromCSV -- so an in-flight run on either
+// path can be stopped cleanly between purchases with Ctrl-C.
+func registerShutdownSignalHandler(ctx context.Context) func() {
 	shutdownRequested.Store(false)
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
-	go func() { <-sigCh; shutdownRequested.Store(true) }()
-	return func() { signal.Stop(sigCh) }
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			log.Print(interruptNotice)
+			shutdownRequested.Store(true)
+		case <-done:
+		}
+	}()
+	return func() { close(done) }
+}
+
+// stopRequested reports whether the run was interrupted: SIGINT cancels the
+// invocation context and sets shutdownRequested.
+func stopRequested(ctx context.Context) bool {
+	return shutdownRequested.Load() || ctx.Err() != nil
 }
 
 // effectiveDryRun reports whether the run must stay in dry-run mode. A run is
@@ -132,7 +153,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	isDryRun := effectiveDryRun(cfg)
 
 	// Register SIGINT handler so a running purchase loop can be interrupted cleanly.
-	defer registerShutdownSignalHandler()()
+	defer registerShutdownSignalHandler(ctx)()
 
 	// Verify the audit log and its immediate parents before making cloud API calls.
 	if err := CheckAuditLogWritable(cfg.AuditLog); err != nil {
@@ -153,7 +174,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	if adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter); ok && cfg.RecLookbackPeriod != "" {
 		adapter.SetRecLookbackPeriod(cfg.RecLookbackPeriod)
 	}
-	engineData := fetchEngineVersionData(ctx, cfg)
+	engineData := mustFetchEngineVersionData(ctx, cfg)
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
 	// the user already owns. On a dry run, a failure logs a warning and
@@ -170,6 +191,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	// Phase 1: collect all recommendations without purchasing.
 	AppLogger.Printf("\n📥 Fetching recommendations from all services...\n")
 	allRecs, drops := fetchAllRecs(ctx, awsCfg, recClient, accountCache, servicesToProcess, engineData, cfg, coverageMap)
+	exitIfInterrupted(ctx, "fetching recommendations")
 
 	// Phase 2: score, enforce the run-wide instance cap, and display.
 	scoredResult := scoreLimitAndDisplay(allRecs, cfg, drops)
@@ -183,6 +205,25 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	runPurchaseAndReport(ctx, awsCfg, scoredResult, isDryRun, cfg, drops)
 }
 
+// mustFetchEngineVersionData is fetchEngineVersionData for the main pipeline:
+// an interrupt during the lifecycle queries ends the run, since sizing and
+// offering purchases on missing lifecycle data would be wrong.
+func mustFetchEngineVersionData(ctx context.Context, cfg Config) engineVersionData {
+	data, err := fetchEngineVersionData(ctx, cfg)
+	if err != nil {
+		log.Fatalf("Interrupted while querying engine versions (%v); nothing was purchased", err)
+	}
+	return data
+}
+
+// exitIfInterrupted ends the run when the invocation was canceled during a
+// pre-purchase phase. Nothing has been bought at that point.
+func exitIfInterrupted(ctx context.Context, phase string) {
+	if ctx.Err() != nil {
+		log.Fatalf("Interrupted while %s; nothing was purchased", phase)
+	}
+}
+
 // runPurchaseAndReport handles the confirm, execute, and report phases of
 // the multi-service pipeline. It is a separate function to keep
 // runToolMultiService within the cyclomatic-complexity limit.
@@ -194,10 +235,19 @@ func runPurchaseAndReport(ctx context.Context, awsCfg aws.Config, scoredResult s
 		return
 	}
 
-	allResults := executePurchasePipeline(ctx, awsCfg, scoredResult.Passed, isDryRun, runID, cfg)
+	executeAndReport(ctx, awsCfg, scoredResult.Passed, isDryRun, runID, cfg, drops)
+}
 
-	// Produce summary outputs.
-	writeReportAndSummary(scoredResult.Passed, allResults, isDryRun, cfg, drops)
+// executeAndReport runs the purchase pipeline and produces the report and
+// summary for whatever ran, interrupted or not. Split from
+// runPurchaseAndReport so the post-confirmation half is testable without a
+// terminal.
+func executeAndReport(ctx context.Context, awsCfg aws.Config, passed []common.Recommendation, isDryRun bool, runID string, cfg Config, drops *common.DropSummary) {
+	allResults := executePurchasePipeline(ctx, awsCfg, passed, isDryRun, runID, cfg)
+	writeReportAndSummary(passed, allResults, isDryRun, cfg, drops)
+	if stopRequested(ctx) {
+		printInterruptedSummary(len(allResults), len(passed), allResults, isDryRun)
+	}
 }
 
 // confirmPurchaseRun asks for confirmation once against the full
@@ -439,15 +489,19 @@ func executePurchasePipeline(ctx context.Context, awsCfg aws.Config, recs []comm
 	results := make([]common.PurchaseResult, 0, len(recs))
 	for i := range recs {
 		rec := recs[i]
-		if shutdownRequested.Load() {
+		if stopRequested(ctx) {
 			log.Printf("Shutdown requested — skipping %d remaining recommendations", len(recs)-i)
 			break
 		}
-		result, status := purchaseSingleRec(ctx, awsCfg, rec, i+1, isDryRun, cfg)
+		// The purchase runs on a context that survives Ctrl-C: canceling the
+		// request mid-flight can leave AWS having created the commitment
+		// while the CLI records a failure, and a re-run then buys it again.
+		// The per-call SDK timeouts still bound it.
+		result, status := purchaseSingleRec(context.WithoutCancel(ctx), awsCfg, rec, i+1, isDryRun, cfg)
 		results = append(results, result)
 		writePurchaseAuditRecord(runID, rec, result, status, isDryRun, cfg.AuditLog)
-		if !isDryRun && i < len(recs)-1 && os.Getenv("DISABLE_PURCHASE_DELAY") != "true" {
-			time.Sleep(PurchaseDelaySeconds * time.Second)
+		if !isDryRun && i < len(recs)-1 {
+			waitBetweenPurchases(ctx)
 		}
 	}
 	return results
@@ -581,7 +635,7 @@ func prepareCSVPurchaseRun(ctx context.Context, cfg Config, csvModeCoverage floa
 		return nil, aws.Config{}, "", err
 	}
 
-	recs, err = filterAndAdjustRecommendations(recs, csvModeCoverage, cfg)
+	recs, err = filterAndAdjustRecommendations(ctx, recs, csvModeCoverage, cfg)
 	if err != nil {
 		return nil, aws.Config{}, "", err
 	}
@@ -614,7 +668,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 	// (runToolMultiService). Before #1610 this path had no SIGINT handling
 	// at all: runToolMultiService registers it only on the non-CSV branch,
 	// in code unreachable from CSV mode (the CSV branch returns first).
-	defer registerShutdownSignalHandler()()
+	defer registerShutdownSignalHandler(ctx)()
 
 	csvModeCoverage := determineCSVCoverage(cfg)
 
@@ -644,7 +698,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 	allAdjustedRecs := make([]common.Recommendation, 0)
 
 	for service, regionRecs := range recsByServiceRegion {
-		if shutdownRequested.Load() {
+		if stopRequested(ctx) {
 			log.Printf("Shutdown requested; stopping before %s", getServiceDisplayName(service))
 			break
 		}
@@ -658,7 +712,7 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 
 		serviceRecs := make([]common.Recommendation, 0)
 		for region, recs := range regionRecs {
-			if shutdownRequested.Load() {
+			if stopRequested(ctx) {
 				log.Printf("Shutdown requested; skipping remaining regions for %s", getServiceDisplayName(service))
 				break
 			}
@@ -697,6 +751,9 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 	// Print final summary using the post-dedup slice so counts match what was
 	// actually processed, not the pre-dedup input passed into the outer loop.
 	printMultiServiceSummary(allAdjustedRecs, allResults, serviceStats, isDryRun)
+	if stopRequested(ctx) {
+		printInterruptedSummary(len(allResults), len(recs), allResults, isDryRun)
+	}
 	return nil
 }
 
@@ -756,6 +813,10 @@ func checkDuplicatesForCSVRegion(ctx context.Context, recs []common.Recommendati
 	if err == nil {
 		return adjustedRecs, true
 	}
+	if ctx.Err() != nil {
+		// Interrupted: terminal in dry and real runs; runToolFromCSV stops on ctx.Err().
+		return nil, false
+	}
 	if !isDryRun {
 		AppLogger.Printf("  ❌ Refusing to purchase %s/%s: could not check for existing RIs (%v). Skipping this region rather than risking a duplicate purchase.\n", getServiceDisplayName(service), region, err)
 		return nil, false
@@ -770,10 +831,13 @@ func checkDuplicatesForCSVRegion(ctx context.Context, recs []common.Recommendati
 //
 // It returns an error when the cap cannot be enforced honestly; see
 // requireRankingSignal.
-func filterAndAdjustRecommendations(recs []common.Recommendation, csvModeCoverage float64, cfg Config) ([]common.Recommendation, error) {
+func filterAndAdjustRecommendations(ctx context.Context, recs []common.Recommendation, csvModeCoverage float64, cfg Config) ([]common.Recommendation, error) {
 	// Query running instances for engine version validation
 	log.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...")
-	instanceVersions, err := queryRunningInstanceEngineVersions(context.Background(), cfg)
+	instanceVersions, err := queryRunningInstanceEngineVersions(ctx, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Failed to query running instances for engine version validation: %v", err)
 		log.Printf("   Continuing without engine version filtering")
@@ -784,7 +848,10 @@ func filterAndAdjustRecommendations(recs []common.Recommendation, csvModeCoverag
 
 	// Query major engine versions for extended support detection
 	log.Printf("🔍 Querying AWS RDS major engine versions for extended support information...")
-	versionInfo, err := queryMajorEngineVersions(context.Background(), cfg)
+	versionInfo, err := queryMajorEngineVersions(ctx, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Failed to query major engine versions: %v", err)
 		log.Printf("   Continuing without extended support detection")
@@ -862,7 +929,7 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 	results := make([]common.PurchaseResult, 0, len(recs))
 
 	for j := range recs {
-		if shutdownRequested.Load() {
+		if stopRequested(ctx) {
 			log.Printf("Shutdown requested; skipping %d remaining recommendation(s) in %s", len(recs)-j, region)
 			break
 		}
@@ -874,6 +941,7 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 
 		var result common.PurchaseResult
 		var status string
+		attempted := false
 		if err := validatePurchasePreconditions(rec, region); err != nil {
 			result = preconditionFailure(rec, err, isDryRun)
 			status = "error"
@@ -881,16 +949,16 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 			result = createDryRunResult(rec, label, j+1, cfg)
 			status = "skipped"
 		} else {
-			// Execute actual purchase
-			result = executePurchase(ctx, rec, label, j+1, serviceClient, cfg)
+			// Execute actual purchase.
+			attempted = true
+			// Detached from Ctrl-C for the same reason as in
+			// executePurchasePipeline.
+			result = executePurchase(context.WithoutCancel(ctx), rec, label, j+1, serviceClient, cfg)
 			status = purchaseAuditStatus(result)
-
-			// Add delay between purchases to avoid rate limiting
-			if j < len(recs)-1 && os.Getenv("DISABLE_PURCHASE_DELAY") != "true" {
-				time.Sleep(PurchaseDelaySeconds * time.Second)
-			}
 		}
 
+		// Audit first, then the rate-limit delay: a Ctrl-C during the delay
+		// must not lose the record of a purchase that already completed.
 		writePurchaseAuditRecord(runID, rec, result, status, isDryRun, cfg.AuditLog)
 		results = append(results, result)
 
@@ -902,6 +970,11 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 				errMsg = result.Error.Error()
 			}
 			AppLogger.Printf("    ❌ Failed: %s\n", errMsg)
+		}
+
+		// Rate-limit delay between real purchases; returns at once on Ctrl-C.
+		if attempted && j < len(recs)-1 {
+			waitBetweenPurchases(ctx)
 		}
 	}
 
