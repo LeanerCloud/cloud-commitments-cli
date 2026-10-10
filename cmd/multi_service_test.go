@@ -1604,7 +1604,7 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 			// Suppress logger
 			// Logger output disabled for testing
 
-			result, err := filterAndAdjustRecommendations(tt.recommendations, tt.coverage, toolCfg)
+			result, err := filterAndAdjustRecommendations(context.Background(), tt.recommendations, tt.coverage, toolCfg)
 			require.NoError(t, err)
 
 			// Verify result is within expected range

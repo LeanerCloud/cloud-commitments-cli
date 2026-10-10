@@ -58,6 +58,9 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 	regions := cfg.Regions
 	if len(regions) == 0 {
 		allRegions, err := getAllAWSRegions(ctx, awsCfg)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		if err != nil {
 			return nil, coverageFetchFailure(cfg, fmt.Errorf("could not list AWS regions for coverage fetch: %w", err))
 		}
@@ -65,6 +68,9 @@ func fetchExistingCoverage(ctx context.Context, awsCfg aws.Config, recClient pro
 	}
 	AppLogger.Printf("\n🔎 Fetching existing-RI coverage from Cost Explorer per-account across %d regions (lookback %d days)...\n", len(regions), lookbackDays)
 	cov, err := adapter.GetRICoverageMap(ctx, lookbackDays, regions)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, coverageFetchFailure(cfg, fmt.Errorf("could not fetch existing-RI coverage: %w", err))
 	}
@@ -168,7 +174,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	if adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter); ok && cfg.RecLookbackPeriod != "" {
 		adapter.SetRecLookbackPeriod(cfg.RecLookbackPeriod)
 	}
-	engineData := fetchEngineVersionData(ctx, cfg)
+	engineData := mustFetchEngineVersionData(ctx, cfg)
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
 	// the user already owns. On a dry run, a failure logs a warning and
@@ -185,6 +191,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	// Phase 1: collect all recommendations without purchasing.
 	AppLogger.Printf("\n📥 Fetching recommendations from all services...\n")
 	allRecs, drops := fetchAllRecs(ctx, awsCfg, recClient, accountCache, servicesToProcess, engineData, cfg, coverageMap)
+	exitIfInterrupted(ctx, "fetching recommendations")
 
 	// Phase 2: score, enforce the run-wide instance cap, and display.
 	scoredResult := scoreLimitAndDisplay(allRecs, cfg, drops)
@@ -196,6 +203,25 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 
 	// Phases 3-4: confirm, purchase, and produce summary outputs.
 	runPurchaseAndReport(ctx, awsCfg, scoredResult, isDryRun, cfg, drops)
+}
+
+// mustFetchEngineVersionData is fetchEngineVersionData for the main pipeline:
+// an interrupt during the lifecycle queries ends the run, since sizing and
+// offering purchases on missing lifecycle data would be wrong.
+func mustFetchEngineVersionData(ctx context.Context, cfg Config) engineVersionData {
+	data, err := fetchEngineVersionData(ctx, cfg)
+	if err != nil {
+		log.Fatalf("Interrupted while querying engine versions (%v); nothing was purchased", err)
+	}
+	return data
+}
+
+// exitIfInterrupted ends the run when the invocation was canceled during a
+// pre-purchase phase. Nothing has been bought at that point.
+func exitIfInterrupted(ctx context.Context, phase string) {
+	if ctx.Err() != nil {
+		log.Fatalf("Interrupted while %s; nothing was purchased", phase)
+	}
 }
 
 // runPurchaseAndReport handles the confirm, execute, and report phases of
@@ -609,7 +635,7 @@ func prepareCSVPurchaseRun(ctx context.Context, cfg Config, csvModeCoverage floa
 		return nil, aws.Config{}, "", err
 	}
 
-	recs, err = filterAndAdjustRecommendations(recs, csvModeCoverage, cfg)
+	recs, err = filterAndAdjustRecommendations(ctx, recs, csvModeCoverage, cfg)
 	if err != nil {
 		return nil, aws.Config{}, "", err
 	}
@@ -787,6 +813,10 @@ func checkDuplicatesForCSVRegion(ctx context.Context, recs []common.Recommendati
 	if err == nil {
 		return adjustedRecs, true
 	}
+	if ctx.Err() != nil {
+		// Interrupted: terminal in dry and real runs; runToolFromCSV stops on ctx.Err().
+		return nil, false
+	}
 	if !isDryRun {
 		AppLogger.Printf("  ❌ Refusing to purchase %s/%s: could not check for existing RIs (%v). Skipping this region rather than risking a duplicate purchase.\n", getServiceDisplayName(service), region, err)
 		return nil, false
@@ -801,10 +831,13 @@ func checkDuplicatesForCSVRegion(ctx context.Context, recs []common.Recommendati
 //
 // It returns an error when the cap cannot be enforced honestly; see
 // requireRankingSignal.
-func filterAndAdjustRecommendations(recs []common.Recommendation, csvModeCoverage float64, cfg Config) ([]common.Recommendation, error) {
+func filterAndAdjustRecommendations(ctx context.Context, recs []common.Recommendation, csvModeCoverage float64, cfg Config) ([]common.Recommendation, error) {
 	// Query running instances for engine version validation
 	log.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...")
-	instanceVersions, err := queryRunningInstanceEngineVersions(context.Background(), cfg)
+	instanceVersions, err := queryRunningInstanceEngineVersions(ctx, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Failed to query running instances for engine version validation: %v", err)
 		log.Printf("   Continuing without engine version filtering")
@@ -815,7 +848,10 @@ func filterAndAdjustRecommendations(recs []common.Recommendation, csvModeCoverag
 
 	// Query major engine versions for extended support detection
 	log.Printf("🔍 Querying AWS RDS major engine versions for extended support information...")
-	versionInfo, err := queryMajorEngineVersions(context.Background(), cfg)
+	versionInfo, err := queryMajorEngineVersions(ctx, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		log.Printf("⚠️  Warning: Failed to query major engine versions: %v", err)
 		log.Printf("   Continuing without extended support detection")
