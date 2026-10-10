@@ -1278,7 +1278,7 @@ func TestProcessPurchaseLoopPurchaseFailure(t *testing.T) {
 		Error:          fmt.Errorf("API error: quota exceeded"),
 		Timestamp:      time.Now(),
 	}
-	mockClient.On("PurchaseCommitment", ctx, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(failureResult, nil)
+	mockClient.On("PurchaseCommitment", mock.Anything, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(failureResult, nil)
 
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
@@ -1326,7 +1326,7 @@ func TestProcessServicePurchasesUserCancellation(t *testing.T) {
 		CommitmentID:   "cache-purchase-123",
 		Timestamp:      time.Now(),
 	}
-	mockClient.On("PurchaseCommitment", ctx, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
+	mockClient.On("PurchaseCommitment", mock.Anything, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
 
 	t.Setenv("DISABLE_PURCHASE_DELAY", "true")
 
@@ -1398,7 +1398,7 @@ func TestExecutePurchaseWithEmptyPurchaseID(t *testing.T) {
 		Error:          nil,
 		Timestamp:      time.Now(),
 	}
-	mockClient.On("PurchaseCommitment", ctx, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(expectedResult, nil)
+	mockClient.On("PurchaseCommitment", mock.Anything, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(expectedResult, nil)
 
 	// Logger output disabled for testing
 
@@ -1472,7 +1472,7 @@ func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
 			Error:          nil,
 			Timestamp:      time.Now(),
 		}
-		mockClient.On("PurchaseCommitment", ctx, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
+		mockClient.On("PurchaseCommitment", mock.Anything, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
 	}
 
 	// Logger output disabled for testing
@@ -1518,7 +1518,7 @@ func TestProcessPurchaseLoopWithConfirmation(t *testing.T) {
 		Error:          nil,
 		Timestamp:      time.Now(),
 	}
-	mockClient.On("PurchaseCommitment", ctx, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
+	mockClient.On("PurchaseCommitment", mock.Anything, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
 
 	// Logger output disabled for testing
 
@@ -1984,7 +1984,7 @@ func TestProcessPurchaseLoop_WritesAuditRecordForRealPurchase(t *testing.T) {
 			result.Recommendation = recs[0]
 
 			mockClient := &MockServiceClient{}
-			mockClient.On("PurchaseCommitment", ctx, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
+			mockClient.On("PurchaseCommitment", mock.Anything, recs[0], mock.MatchedBy(func(o common.PurchaseOptions) bool { return o.Source == common.PurchaseSourceCLI })).Return(result, nil)
 
 			processPurchaseLoop(ctx, recs, "us-east-1", false /* isDryRun */, mockClient, toolCfg, "test-run-id")
 

@@ -340,7 +340,7 @@ func TestExecutePurchase(t *testing.T) {
 		Timestamp:      time.Now(),
 	}
 	var capturedOpts common.PurchaseOptions
-	mockClient.On("PurchaseCommitment", ctx, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool {
+	mockClient.On("PurchaseCommitment", mock.Anything, rec, mock.MatchedBy(func(o common.PurchaseOptions) bool {
 		capturedOpts = o
 		return o.Source == common.PurchaseSourceCLI
 	})).Return(expectedResult, nil)
