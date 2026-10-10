@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/insurance"
@@ -112,6 +113,9 @@ func runArchera(t *testing.T, env map[string]string, args ...string) (stdout, st
 		t.Setenv(k, v)
 	}
 	resetHelpFlags()
+	savedLocal := time.Local
+	time.Local = time.FixedZone("archera-test", 5*3600+1800)
+	t.Cleanup(func() { time.Local = savedLocal })
 	archeraOpts.OrgID, archeraOpts.PlanID, archeraOpts.Format = "", "", "table"
 	var out, errb bytes.Buffer
 	rootCmd.SetOut(&out)
@@ -170,10 +174,39 @@ func TestArcheraComparisonBadFormat(t *testing.T) {
 
 var archeraFetchedRE = regexp.MustCompile(`(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)`)
 
+// assertArcheraFetchedUTC proves the printed fetch time is the current instant
+// in UTC. runArchera shifts time.Local, so a local-zone time mislabelled "Z"
+// would be hours off.
+func assertArcheraFetchedUTC(t *testing.T, got string) {
+	t.Helper()
+	stamp := archeraFetchedRE.FindString(got)
+	require.NotEmpty(t, stamp)
+	require.True(t, strings.HasSuffix(stamp, "Z"))
+	parsed, err := time.Parse("2006-01-02T15:04:05Z", stamp)
+	require.NoError(t, err)
+	assert.WithinDuration(t, time.Now().UTC(), parsed, 2*time.Minute)
+}
+
+// assertArcheraNoControlChars fails if any control character survives, in raw
+// form or as a JSON escape. The fixture injects ESC and C1 characters into the
+// vendor string fields.
+func assertArcheraNoControlChars(t *testing.T, out string) {
+	t.Helper()
+	for _, r := range out {
+		if r != '\n' && unicode.IsControl(r) {
+			t.Fatalf("control character %U in output", r)
+		}
+	}
+	for _, esc := range []string{`\u001b`, `\u0085`, `\u009b`} {
+		assert.NotContains(t, out, esc)
+	}
+}
+
 // checkArcheraGolden compares output with testdata/<name> after masking the
 // wall-clock fetch time. ARCHERA_UPDATE_GOLDEN=1 rewrites the file.
 func checkArcheraGolden(t *testing.T, name, got string) {
 	t.Helper()
+	assertArcheraFetchedUTC(t, got)
 	got = archeraFetchedRE.ReplaceAllString(got, "<fetched>")
 	path := filepath.Join("testdata", name)
 	if os.Getenv("ARCHERA_UPDATE_GOLDEN") == "1" {
@@ -200,7 +233,7 @@ func TestArcheraComparisonTable(t *testing.T) {
 	assert.Contains(t, out, "never a bindable insurance quote")
 	assert.Contains(t, out, "103.1234567890123456789", "long decimal kept exact, not float64")
 	assert.NotContains(t, strings.ToLower(out), "insured quote")
-	assert.NotContains(t, out, "\x1b")
+	assertArcheraNoControlChars(t, out)
 	assert.Contains(t, out, common.ArcheraNonGatingDisclosure)
 	assert.Contains(t, out, common.ArcheraSponsorshipDisclosure)
 	assert.NotContains(t, out, common.ArcheraSignupURL)
@@ -218,6 +251,7 @@ func TestArcheraComparisonJSON(t *testing.T) {
 	assert.False(t, dec.More())
 	assert.NotContains(t, doc, "disclosures")
 	assert.NotContains(t, out, archeraTestKey)
+	assertArcheraNoControlChars(t, out)
 	checkArcheraGolden(t, "archera_json.golden", out)
 }
 
@@ -312,4 +346,40 @@ func TestArcheraNoKeyFlagAndStructsRedacted(t *testing.T) {
 	_, _, err := runArchera(t, fullEnv())
 	require.NoError(t, err)
 	check("after")
+}
+
+// TestArcheraDTOSanitizesEveryVendorString builds the comparison directly, so
+// fields the decoder would reject (enums, UUIDs, terms) still carry control
+// characters into the DTO.
+func TestArcheraDTOSanitizesEveryVendorString(t *testing.T) {
+	dirty := func(s string) string { return s + "\x1b[31m\u0085\u009b" }
+	str := func(s string) *string { v := dirty(s); return &v }
+	pay := insurance.PaymentOption(dirty("no_upfront"))
+	entry := func(id string) insurance.OfferEntry {
+		return insurance.OfferEntry{
+			OfferID: dirty(id), CommitmentType: dirty("type" + id), Provider: common.ProviderType(dirty("aws")),
+			ContractTerm: str("term"), PaymentOption: &pay, Region: str("region"), GuaranteedDisplayName: str("name"),
+			LeaseMenuItemID: str("lease"),
+		}
+	}
+	c := &insurance.Comparison{
+		PlanID:   dirty("plan"),
+		Currency: str("usd"),
+		Hypotheticals: []insurance.Hypothetical{{
+			ContractTerm: str("hterm"), PaymentOption: pay,
+			LineItems: []insurance.HypotheticalLineItem{{
+				LineItemID: dirty("li"), ActualTerm: str("aterm"), ActualPaymentOption: &pay,
+				ActualCommitmentType: str("atype"), Reason: insurance.TermReason(dirty("exact_match")),
+			}},
+		}},
+		Rows: []insurance.ComparisonRow{{LineItemID: dirty("row"), Current: entry("c"), Candidates: []insurance.OfferEntry{entry("k")}}},
+	}
+	var buf bytes.Buffer
+	dto := buildArcheraDTO(c)
+	require.NoError(t, renderArcheraJSON(&buf, dto))
+	assertArcheraNoControlChars(t, buf.String())
+	buf.Reset()
+	require.NoError(t, renderArcheraTable(&buf, dto))
+	assertArcheraNoControlChars(t, buf.String())
+	assert.Equal(t, "plan[31m", dto.PlanID)
 }

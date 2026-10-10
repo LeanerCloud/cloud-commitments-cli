@@ -182,7 +182,7 @@ func archeraOffer(e insurance.OfferEntry) archeraOfferDTO {
 	support := insurance.AssessProductSupport(e.Provider, e.CommitmentType)
 	ps := archeraProductSupportDTO{Status: string(support.Status)}
 	if support.Status == insurance.ProductSupportSupported {
-		ps.Source, ps.Evidence = archeraSanitize(support.Source), archeraSanitize(support.Evidence)
+		ps.Source, ps.Evidence = support.Source, support.Evidence
 	}
 	return archeraOfferDTO{
 		IsCurrent:        e.IsCurrent,

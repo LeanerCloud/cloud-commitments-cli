@@ -39,10 +39,10 @@
       "delta_upfront_cost": "210",
       "line_items": [
         {
-          "line_item_id": "60000000-0000-4000-8000-0000000000b1",
+          "line_item_id": "60000000-0000-4000-8000-0000000000b1[31m",
           "actual_term": "six_month_gris",
           "actual_payment_option": "partial_upfront",
-          "actual_commitment_type": "aws/AmazonEC2",
+          "actual_commitment_type": "aws/AmazonEC2[31m",
           "reason": "fallback_closest_shorter"
         }
       ]
@@ -77,13 +77,13 @@
   ],
   "rows": [
     {
-      "line_item_id": "70000000-0000-4000-8000-0000000000c1",
+      "line_item_id": "70000000-0000-4000-8000-0000000000c1[31m",
       "current": {
         "is_current": true,
-        "offer_id": "30000000-0000-4000-8000-000000000001",
+        "offer_id": "30000000-0000-4000-8000-000000000001[31m",
         "commitment_type": "aws/AmazonEC2",
         "provider": "aws",
-        "region": "us-east-1",
+        "region": "us-east-1[31m",
         "contract_term": null,
         "payment_option": null,
         "lease_attached": false,
@@ -119,11 +119,11 @@
           "offer_id": "40000000-0000-4000-8000-000000000002",
           "commitment_type": "aws/savingsplan/Compute",
           "provider": "aws",
-          "region": "eu-west-1",
+          "region": "eu-west-1[31m",
           "contract_term": "one_year_gris",
           "payment_option": "no_upfront",
           "lease_attached": true,
-          "archera_offer_name": "Name Four",
+          "archera_offer_name": "Name[31mFourNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
           "discount_rate": "0.41",
           "breakeven_days": "41",
           "totals": {
@@ -152,7 +152,7 @@
         {
           "is_current": false,
           "offer_id": "50000000-0000-4000-8000-000000000003",
-          "commitment_type": "aws/Unlisted",
+          "commitment_type": "aws/Unlisted[31m",
           "provider": "aws",
           "region": "ap-south-1",
           "contract_term": "six_month_gris",
