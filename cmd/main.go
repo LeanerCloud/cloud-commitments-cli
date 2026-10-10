@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"regexp"
 	"sort"
 	"strings"
@@ -379,8 +381,20 @@ func sanitizeAccountName(accountName string) string {
 }
 
 func runTool(cmd *cobra.Command, args []string) {
-	ctx := context.Background()
+	ctx, stop := invocationContext()
+	defer stop()
 
 	// Always use the multi-service implementation
 	runToolMultiService(ctx, toolCfg)
+}
+
+// invocationContext returns the context for one CLI invocation, canceled by
+// SIGINT. stop is for the caller to defer, never to call on the first signal:
+// stopping NotifyContext restores the default handler, so a second Ctrl-C
+// would kill the process mid-purchase. Keeping SIGINT registered until the
+// run returns absorbs further Ctrl-Cs; the wait is bounded by the per-call SDK
+// timeouts and the pre-purchase phases exit at once (see
+// registerShutdownSignalHandler for the operator notice).
+func invocationContext() (ctx context.Context, stop context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt)
 }

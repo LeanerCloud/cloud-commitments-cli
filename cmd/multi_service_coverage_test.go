@@ -730,7 +730,7 @@ func TestFilterAndAdjustRecommendations_ZeroCoverage(t *testing.T) {
 	toolCfg.MaxInstances = 0
 	toolCfg.OverrideCount = 0
 
-	result, err := filterAndAdjustRecommendations(recommendations, 0.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(context.Background(), recommendations, 0.0, toolCfg)
 	require.NoError(t, err)
 
 	// 0% coverage should return empty
@@ -757,7 +757,7 @@ func TestFilterAndAdjustRecommendations_WithEngineVersionFiltering(t *testing.T)
 	toolCfg.OverrideCount = 0
 	toolCfg.IncludeExtendedSupport = false
 
-	result, err := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(context.Background(), recommendations, 100.0, toolCfg)
 	require.NoError(t, err)
 
 	// Should return recommendations (engine version filtering is done inside the function)
@@ -779,7 +779,7 @@ func TestFilterAndAdjustRecommendations_MaxInstancesApplied(t *testing.T) {
 	toolCfg.MaxInstances = 15
 	toolCfg.OverrideCount = 0
 
-	result, err := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(context.Background(), recommendations, 100.0, toolCfg)
 	require.NoError(t, err)
 
 	// Total instances should not exceed maxInstances
@@ -802,7 +802,7 @@ func TestFilterAndAdjustRecommendations_OverrideCountApplied(t *testing.T) {
 	toolCfg.MaxInstances = 0
 	toolCfg.OverrideCount = 5
 
-	result, err := filterAndAdjustRecommendations(recommendations, 100.0, toolCfg)
+	result, err := filterAndAdjustRecommendations(context.Background(), recommendations, 100.0, toolCfg)
 	require.NoError(t, err)
 
 	// All recommendations should have count = OverrideCount

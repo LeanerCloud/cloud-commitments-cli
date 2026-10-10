@@ -142,8 +142,8 @@ func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions 
 	}
 
 	wg.Wait()
-	if err = ctx.Err(); err != nil {
-		return nil, nil, err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, nil, ctxErr
 	}
 	return instanceVersions, failedRegions, nil
 }

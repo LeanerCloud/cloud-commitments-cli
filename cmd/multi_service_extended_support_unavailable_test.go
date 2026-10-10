@@ -381,7 +381,7 @@ func TestFilterAndAdjustRecommendations_ExtendedSupportDataUnavailable(t *testin
 		stub := newRDSStub("us-east-1")
 		stub.failEngines["mysql"] = true
 		stub.serveEnv(t)
-		got, err := filterAndAdjustRecommendations([]common.Recommendation{rdsRec("us-east-1")}, 100, Config{})
+		got, err := filterAndAdjustRecommendations(context.Background(), []common.Recommendation{rdsRec("us-east-1")}, 100, Config{})
 		require.Error(t, err)
 		assert.Empty(t, got)
 		stub.requireStubReachedNoPurchase(t)
@@ -390,7 +390,7 @@ func TestFilterAndAdjustRecommendations_ExtendedSupportDataUnavailable(t *testin
 		stub := newRDSStub("us-east-1", "eu-west-1")
 		stub.failRegions["eu-west-1"] = true
 		stub.serveEnv(t)
-		got, err := filterAndAdjustRecommendations([]common.Recommendation{rdsRec("eu-west-1")}, 100, Config{})
+		got, err := filterAndAdjustRecommendations(context.Background(), []common.Recommendation{rdsRec("eu-west-1")}, 100, Config{})
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "eu-west-1")
 		assert.Empty(t, got)
@@ -399,14 +399,14 @@ func TestFilterAndAdjustRecommendations_ExtendedSupportDataUnavailable(t *testin
 		stub := newRDSStub("us-east-1", "eu-west-1")
 		stub.failRegions["eu-west-1"] = true
 		stub.serveEnv(t)
-		got, err := filterAndAdjustRecommendations([]common.Recommendation{rdsRec("us-east-1")}, 100, Config{})
+		got, err := filterAndAdjustRecommendations(context.Background(), []common.Recommendation{rdsRec("us-east-1")}, 100, Config{})
 		require.NoError(t, err)
 		assert.Len(t, got, 1)
 	})
 	t.Run("genuinely empty inventory proceeds", func(t *testing.T) {
 		stub := newRDSStub("us-east-1")
 		stub.serveEnv(t)
-		got, err := filterAndAdjustRecommendations([]common.Recommendation{rdsRec("us-east-1")}, 100, Config{})
+		got, err := filterAndAdjustRecommendations(context.Background(), []common.Recommendation{rdsRec("us-east-1")}, 100, Config{})
 		require.NoError(t, err)
 		assert.Len(t, got, 1)
 	})
@@ -414,7 +414,7 @@ func TestFilterAndAdjustRecommendations_ExtendedSupportDataUnavailable(t *testin
 		stub := newRDSStub("us-east-1")
 		stub.failRegionsEC = true
 		stub.serveEnv(t)
-		got, err := filterAndAdjustRecommendations([]common.Recommendation{rdsRec("us-east-1")}, 100, Config{IncludeExtendedSupport: true})
+		got, err := filterAndAdjustRecommendations(context.Background(), []common.Recommendation{rdsRec("us-east-1")}, 100, Config{IncludeExtendedSupport: true})
 		require.NoError(t, err)
 		assert.Len(t, got, 1)
 		assert.Zero(t, stub.total())

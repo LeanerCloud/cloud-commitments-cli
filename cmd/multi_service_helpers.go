@@ -286,6 +286,9 @@ func determineRegionsForService(ctx context.Context, awsCfg aws.Config, recClien
 
 // handleRegionDiscoveryError handles errors during region discovery by falling back to auto-discovery.
 func handleRegionDiscoveryError(ctx context.Context, recClient provider.RecommendationsClient, service common.ServiceType, originalErr error) ([]string, error) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	AppLogger.Printf("❌ Failed to get AWS regions: %v\n", originalErr)
 	AppLogger.Printf("🔍 Falling back to auto-discovery...\n")
 
@@ -365,6 +368,9 @@ func queryInstanceVersions(ctx context.Context, cfg Config) (instances map[strin
 func queryMajorVersions(ctx context.Context, cfg Config) (map[string]MajorEngineVersionInfo, error) {
 	AppLogger.Printf("🔍 Querying AWS RDS major engine versions for extended support information...\n")
 	versionInfo, err := queryMajorEngineVersions(ctx, cfg)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -557,6 +563,10 @@ func fetchRecommendationsForRegion(
 		}
 		return recs
 	}
+	if ctx.Err() != nil {
+		// Interrupted, not a provider failure: the caller stops on ctx.Err().
+		return nil
+	}
 	if err != nil {
 		AppLogger.Printf("  ❌ Failed to fetch recommendations: %v\n", err)
 		return nil
@@ -686,6 +696,11 @@ func checkDuplicates(
 	duplicateChecker := NewDuplicateChecker(toolCfg.IdempotencyWindowHours)
 	adjustedRecs, dedupedOut, err := duplicateChecker.AdjustRecommendationsForExistingRIs(ctx, filteredRecs, serviceClient)
 	if err != nil {
+		if ctx.Err() != nil {
+			// Interrupted: terminal in dry and real runs alike, never
+			// "continue with un-deduplicated counts". The caller stops on ctx.Err().
+			return nil
+		}
 		if !isDryRun {
 			AppLogger.Printf("  ❌ Refusing to purchase %d instance(s): could not check for existing RIs (%v). Dropping these recommendations rather than risking a duplicate purchase.\n", CalculateTotalInstances(filteredRecs), err)
 			drops.Add(dropDuplicateCheckFailed, len(filteredRecs))
@@ -800,10 +815,16 @@ func fetchAllRecs(
 
 		regions, err := determineRegionsForService(ctx, awsCfg, recClient, service, cfg.Regions)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, drops, nil
+			}
 			log.Printf("❌ Failed to determine regions for %s: %v", getServiceDisplayName(service), err)
 			continue
 		}
 		for i, region := range regions {
+			if ctx.Err() != nil {
+				return nil, drops, nil // partial data from an interrupted fetch is not a result
+			}
 			recs, err := fetchAndFilterRegionRecs(ctx, awsCfg, recClient, accountCache, service, region, i+1, len(regions), engineData, cfg, coverageMap, drops)
 			if err != nil {
 				return nil, nil, err
