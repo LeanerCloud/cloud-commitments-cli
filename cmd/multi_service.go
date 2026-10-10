@@ -153,7 +153,8 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	if adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter); ok && cfg.RecLookbackPeriod != "" {
 		adapter.SetRecLookbackPeriod(cfg.RecLookbackPeriod)
 	}
-	engineData := fetchEngineVersionData(ctx, cfg)
+	engineData, err := engineVersionFetcher(ctx, cfg, extendedSupportCheckNeeded(cfg, servicesToProcess))
+	exitOnExclusionError(err)
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
 	// the user already owns. On a dry run, a failure logs a warning and
@@ -169,7 +170,8 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 
 	// Phase 1: collect all recommendations without purchasing.
 	AppLogger.Printf("\n📥 Fetching recommendations from all services...\n")
-	allRecs, drops := fetchAllRecs(ctx, awsCfg, recClient, accountCache, servicesToProcess, engineData, cfg, coverageMap)
+	allRecs, drops, err := fetchAllRecs(ctx, awsCfg, recClient, accountCache, servicesToProcess, engineData, cfg, coverageMap)
+	exitOnExclusionError(err)
 
 	// Phase 2: score, enforce the run-wide instance cap, and display.
 	scoredResult := scoreLimitAndDisplay(allRecs, cfg, drops)
@@ -771,32 +773,18 @@ func checkDuplicatesForCSVRegion(ctx context.Context, recs []common.Recommendati
 // It returns an error when the cap cannot be enforced honestly; see
 // requireRankingSignal.
 func filterAndAdjustRecommendations(recs []common.Recommendation, csvModeCoverage float64, cfg Config) ([]common.Recommendation, error) {
-	// Query running instances for engine version validation
-	log.Printf("🔍 Querying running RDS instances across all regions to validate engine versions...")
-	instanceVersions, err := queryRunningInstanceEngineVersions(context.Background(), cfg)
+	engineData, err := engineVersionFetcher(context.Background(), cfg, !cfg.IncludeExtendedSupport && hasDatabaseRecs(recs))
 	if err != nil {
-		log.Printf("⚠️  Warning: Failed to query running instances for engine version validation: %v", err)
-		log.Printf("   Continuing without engine version filtering")
-		instanceVersions = make(map[string][]InstanceEngineVersion)
-	} else {
-		log.Printf("✅ Found %d instance types with version information across all regions", len(instanceVersions))
+		return nil, err
 	}
-
-	// Query major engine versions for extended support detection
-	log.Printf("🔍 Querying AWS RDS major engine versions for extended support information...")
-	versionInfo, err := queryMajorEngineVersions(context.Background(), cfg)
-	if err != nil {
-		log.Printf("⚠️  Warning: Failed to query major engine versions: %v", err)
-		log.Printf("   Continuing without extended support detection")
-		versionInfo = make(map[string]MajorEngineVersionInfo)
-	} else {
-		log.Printf("✅ Found support information for %d major engine versions", len(versionInfo))
+	if err := requireRegionInventory(recs, cfg, engineData); err != nil {
+		return nil, err
 	}
 
 	// Apply filters (empty currentRegion since we're processing from CSV, not iterating regions).
 	// Drop tracking is skipped on the CSV path (nil drops).
 	originalCount := len(recs)
-	recs = applyFilters(recs, &cfg, instanceVersions, versionInfo, "", nil)
+	recs = applyFilters(recs, &cfg, engineData.instanceVersions, engineData.versionInfo, "", nil)
 	if len(recs) < originalCount {
 		AppLogger.Printf("🔍 After filters: %d recs (filtered out %d)\n", len(recs), originalCount-len(recs))
 	}
@@ -906,4 +894,23 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 	}
 
 	return results
+}
+
+// hasDatabaseRecs reports whether any recommendation is one the extended-support
+// exclusion applies to (the same *common.DatabaseDetails test the adjuster uses).
+func hasDatabaseRecs(recs []common.Recommendation) bool {
+	for i := range recs {
+		if d, ok := recs[i].Details.(*common.DatabaseDetails); ok && d != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// exitOnExclusionError aborts the run before any purchase when the
+// extended-support exclusion cannot be applied (issue #2147).
+func exitOnExclusionError(err error) {
+	if err != nil {
+		log.Fatalf("Cannot apply extended-support exclusion: %v", err)
+	}
 }

@@ -235,7 +235,7 @@ func (p *completenessProxy) operation(host, op string, call int) (int, string, s
 		return 200, "application/x-amz-json-1.1", `{"Recommendations":[{"RecommendationDetails":[` + details[p.details] + `]}]}`
 	}
 	if host == "ec2.us-east-1.amazonaws.com" && op == "DescribeRegions" {
-		if p.regions == "fallback" && call == 2 {
+		if p.regions == "fallback" && call == 1 {
 			return 400, "text/xml", `<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>fixture denied region discovery</Message></Error></Errors></Response>`
 		}
 		return 200, "text/xml", `<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><regionInfo><item><regionName>us-east-1</regionName></item></regionInfo></DescribeRegionsResponse>`
@@ -265,9 +265,10 @@ func (p *completenessProxy) assertRequests(t *testing.T) {
 		}
 	}
 	require.Equal(t, ceCalls, p.requests["AWSInsightsIndexService.GetReservationPurchaseRecommendation"], "operations=%v", p.requests)
-	wantRegions := 2
+	// --include-extended-support skips the RDS exclusion queries, so only region discovery lists regions.
+	wantRegions := 1
 	if p.regions == "explicit" {
-		wantRegions = 1
+		wantRegions = 0
 	}
 	require.Equal(t, wantRegions, p.requests["DescribeRegions"], "region calls")
 	t.Logf("actual root command, config loader, SDK and CSV; synthetic operations=%v", p.requests)
@@ -346,11 +347,11 @@ func (p *completenessProxy) assertSPRequests(t *testing.T) {
 			rows = 0
 		}
 	}
-	operations := map[string]int{"DescribeRegions": 1, "DescribeDBInstances": 1, "DescribeDBMajorEngineVersions": 4, "AWSInsightsIndexService.GetSavingsPlansPurchaseRecommendation": len(expected)}
+	operations := map[string]int{"AWSInsightsIndexService.GetSavingsPlansPurchaseRecommendation": len(expected)}
 	if rows > 0 {
 		operations["DescribeSavingsPlans"] = rows
 	}
 	require.Equal(t, operations, p.requests, "unexpected read or purchase")
-	require.Equal(t, []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}, p.engines, "ancillary RDS engine reads")
+	require.Empty(t, p.engines, "--include-extended-support must skip the RDS lifecycle reads")
 	t.Logf("actual root command, SP SDK and CSV; synthetic operations=%v", p.requests)
 }

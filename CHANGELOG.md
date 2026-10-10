@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Stop silently disabling the extended-support exclusion when AWS queries
+  fail. A failed engine lifecycle query or region listing now aborts the run
+  before any purchase; an RDS recommendation in a region whose instance
+  inventory could not be read aborts it too, while other regions proceed with
+  a warning. The queries are skipped entirely under `--include-extended-support`
+  or when no RDS recommendations are in scope (#2147).
 - Reject NaN and infinite values for `--coverage`, `--target-coverage`,
   `--min-pool-size` and `--min-savings-pct` before any API call. NaN used to
   pass validation and silently switch `--target-coverage` runs to

@@ -76,9 +76,10 @@ func TestQueryMajorEngineVersionsWithClient_Success(t *testing.T) {
 		"lifecycle data must be carried through from the API response")
 }
 
-// TestQueryMajorEngineVersionsWithClient_EngineErrorContinues asserts the
-// warn-and-continue contract: one engine failing must not drop the results
-// of the others, and the overall call still succeeds.
+// TestQueryMajorEngineVersionsWithClient_EngineErrorContinues asserts that one
+// engine failing does not stop the remaining engine queries, but the overall
+// call fails: missing lifecycle data must not silently disable the
+// extended-support exclusion (#2147).
 func TestQueryMajorEngineVersionsWithClient_EngineErrorContinues(t *testing.T) {
 	stub := &engineKeyedRDSMajorVersionsStub{
 		versionsByEngine: map[string][]rdstypes.DBMajorEngineVersion{
@@ -90,14 +91,13 @@ func TestQueryMajorEngineVersionsWithClient_EngineErrorContinues(t *testing.T) {
 	}
 
 	result, err := queryMajorEngineVersionsWithClient(context.Background(), stub)
-	require.NoError(t, err, "per-engine API failures are warn-and-continue")
+	require.Error(t, err, "an unavailable engine lifecycle query must fail the call")
+	assert.Nil(t, result)
 
 	assert.ElementsMatch(t,
 		[]string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"},
 		stub.enginesQueried,
 		"a failing engine must not stop the remaining engine queries")
-	require.Len(t, result, 1)
-	assert.Equal(t, "15", result["postgres:15"].MajorEngineVersion)
 }
 
 // TestQueryMajorEngineVersions_ProfileSelection asserts validation-profile

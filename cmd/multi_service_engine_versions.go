@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"runtime"
@@ -41,15 +42,20 @@ type MajorEngineVersionInfo struct {
 }
 
 // queryRunningInstanceEngineVersions queries all running RDS instances and returns their engine versions.
-func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (map[string][]InstanceEngineVersion, error) {
+//
+// The returned failedRegions maps each region whose inventory could not be read
+// completely to the cause; the instance map still holds whatever was read. A
+// non-nil error means the inventory is unusable as a whole (config, region
+// listing or canceled context).
+func queryRunningInstanceEngineVersions(ctx context.Context, cfg Config) (instances map[string][]InstanceEngineVersion, failedRegions map[string]error, err error) {
 	awsCfg, err := loadValidationAWSConfig(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	regions, err := getAWSRegions(ctx, awsCfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	return queryRDSInstancesInRegions(ctx, awsCfg, regions)
@@ -100,8 +106,12 @@ type RDSMajorVersionsClient interface {
 }
 
 // queryRDSInstancesInRegions queries RDS instances in all regions concurrently.
-func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (map[string][]InstanceEngineVersion, error) {
-	instanceVersions := make(map[string][]InstanceEngineVersion)
+// A region that fails (API error on any page, or a worker panic) is reported in
+// failedRegions rather than silently treated as an empty inventory. A canceled
+// ctx is returned as the error.
+func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions []ec2types.Region) (instanceVersions map[string][]InstanceEngineVersion, failedRegions map[string]error, err error) {
+	instanceVersions = make(map[string][]InstanceEngineVersion)
+	failedRegions = make(map[string]error)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -118,18 +128,29 @@ func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions 
 					buf := make([]byte, 4096)
 					n := runtime.Stack(buf, false)
 					log.Printf("ERROR: panic in region worker (region=%s): %v\n%s", regionName, r, buf[:n])
+					mu.Lock()
+					failedRegions[regionName] = fmt.Errorf("panic in region worker: %v", r)
+					mu.Unlock()
 				}
 			}()
-			queryRDSInstancesInRegion(ctx, awsCfg, regionName, instanceVersions, &mu)
+			if regionErr := queryRDSInstancesInRegion(ctx, awsCfg, regionName, instanceVersions, &mu); regionErr != nil {
+				mu.Lock()
+				failedRegions[regionName] = regionErr
+				mu.Unlock()
+			}
 		}(aws.ToString(region.RegionName))
 	}
 
 	wg.Wait()
-	return instanceVersions, nil
+	if err = ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	return instanceVersions, failedRegions, nil
 }
 
-// queryRDSInstancesInRegion queries RDS instances in a single region.
-func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) {
+// queryRDSInstancesInRegion queries RDS instances in a single region and
+// returns the first page error, leaving whatever earlier pages merged in place.
+func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) error {
 	regionCfg := awsCfg.Copy()
 	regionCfg.Region = regionName
 	rdsClient := awsrds.NewFromConfig(regionCfg)
@@ -138,8 +159,7 @@ func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionNam
 	for {
 		localVersions, nextMarker, err := queryRDSInstancesPage(ctx, rdsClient, marker, regionName)
 		if err != nil {
-			log.Printf("⚠️  Warning: Failed to describe RDS instances in %s: %v", regionName, err)
-			break
+			return fmt.Errorf("failed to describe RDS instances in %s: %w", regionName, err)
 		}
 
 		// Merge into shared map with mutex protection
@@ -150,7 +170,7 @@ func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionNam
 		mu.Unlock()
 
 		if nextMarker == nil {
-			break
+			return nil
 		}
 		marker = nextMarker
 	}
@@ -216,6 +236,7 @@ func queryMajorEngineVersionsWithClient(ctx context.Context, rdsClient RDSMajorV
 
 	// Query all engine types we care about
 	engines := []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}
+	var engineErrs []error
 
 	for _, engine := range engines {
 		if err := ctx.Err(); err != nil {
@@ -227,12 +248,18 @@ func queryMajorEngineVersionsWithClient(ctx context.Context, rdsClient RDSMajorV
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
-			log.Printf("Warning: Failed to describe major engine versions for %s: %v", engine, err)
+			// Lifecycle data for an engine is required to tell whether its
+			// instances are on extended support; keep trying the remaining
+			// engines so the error reports every unavailable one (issue #2147).
+			engineErrs = append(engineErrs, fmt.Errorf("major engine versions for %s: %w", engine, err))
 		}
 	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if len(engineErrs) > 0 {
+		return nil, errors.Join(engineErrs...)
 	}
 	return versionInfo, nil
 }
