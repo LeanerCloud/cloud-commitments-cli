@@ -1459,8 +1459,8 @@ func TestProcessPurchaseLoopActualPurchase(t *testing.T) {
 	toolCfg.Coverage = 80.0
 
 	recs := []common.Recommendation{
-		{Service: common.ServiceEC2, ResourceType: "t3.small", Count: 1, SourceRecommendation: "EC2 Test 1", EstimatedSavings: 100},
-		{Service: common.ServiceEC2, ResourceType: "t3.medium", Count: 2, SourceRecommendation: "EC2 Test 2", EstimatedSavings: 200},
+		{Service: common.ServiceEC2, ResourceType: "t3.small", Count: 1, SourceRecommendation: "EC2 Test 1", EstimatedSavings: 100, Details: &common.ComputeDetails{InstanceType: "t3.small", Platform: "Linux/UNIX", Tenancy: "default", Scope: "regional"}},
+		{Service: common.ServiceEC2, ResourceType: "t3.medium", Count: 2, SourceRecommendation: "EC2 Test 2", EstimatedSavings: 200, Details: &common.ComputeDetails{InstanceType: "t3.medium", Platform: "Linux/UNIX", Tenancy: "default", Scope: "regional"}},
 	}
 
 	mockClient := &MockServiceClient{}

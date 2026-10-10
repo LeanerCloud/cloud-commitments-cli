@@ -8,6 +8,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,36 +124,13 @@ func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendati
 		return rec, err
 	}
 
-	// Reconstruct the service Details from the Engine/Deployment columns. The
-	// purchase path needs them: RDS findOfferingID rejects a rec with nil
-	// Details ("invalid service details for RDS"), and RI offerings are keyed
-	// by engine and Multi-AZ. This mirrors the writer side (extractEngine /
-	// extractDeployment emit DatabaseDetails / CacheDetails / ComputeDetails),
-	// so a CSV the tool wrote round-trips losslessly. Engine is stored in Cost
-	// Explorer format ("Aurora MySQL"); findOfferingID normalizes it. Guarded
-	// on a non-empty Engine so minimal CSVs and Savings Plans rows (no Engine
-	// column) keep their previous nil-Details behavior.
-	if engine := getCSVField(record, colIdx, "Engine"); engine != "" {
-		deployment := getCSVField(record, colIdx, "Deployment")
-		switch rec.Service {
-		case common.ServiceRDS, common.ServiceRelationalDB:
-			rec.Details = &common.DatabaseDetails{
-				Engine:        engine,
-				AZConfig:      deployment,
-				InstanceClass: rec.ResourceType,
-			}
-		case common.ServiceElastiCache, common.ServiceCache:
-			rec.Details = &common.CacheDetails{
-				Engine:   engine,
-				NodeType: rec.ResourceType,
-			}
-		case common.ServiceEC2, common.ServiceCompute:
-			rec.Details = &common.ComputeDetails{
-				InstanceType: rec.ResourceType,
-				Platform:     engine,
-			}
-		}
+	// Details come from the Engine/Deployment columns and the appended detail
+	// columns (see csvDetails).
+	details, err := csvDetails(rec, record, colIdx)
+	if err != nil {
+		return rec, err
 	}
+	rec.Details = details
 
 	return rec, nil
 }
@@ -240,7 +218,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 	// every row, which adds noise without information; the underlying fields
 	// stay on the Recommendation struct for internal use (SP no-signal
 	// guard, etc.).
-	header := []string{
+	baseHeader := []string{
 		"Service", "Region", "ResourceType", "Family", "Engine", "Deployment",
 		"Instances", "CoveredInstances",
 		"Count", "NormalizedUnits", "RecommendedCount",
@@ -249,6 +227,8 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 		"CommitmentID", "Success", "Error", "Timestamp",
 		"ExistingCoverage", "ProjectedCoverage",
 	}
+	// Appended, never reordered: existing readers look columns up by name.
+	header := slices.Concat(baseHeader, csvDetailColumns)
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
@@ -272,7 +252,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			errStr = r.Error.Error()
 		}
 
-		row := []string{
+		baseRow := []string{
 			string(rec.Service),
 			rec.Region,
 			rec.ResourceType,
@@ -298,6 +278,7 @@ func writeMultiServiceCSVReport(results []common.PurchaseResult, filepath string
 			formatExistingCoverage(rec),
 			formatPercentOrBlank(rec.ProjectedCoverage),
 		}
+		row := slices.Concat(baseRow, detailCells(rec))
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
@@ -346,7 +327,7 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 	if totalNU > 0 {
 		nuCell = fmt.Sprintf("%g", totalNU)
 	}
-	return []string{
+	totals := []string{
 		"TOTAL", "", "", "", "", "", // Service through Deployment
 		"", "", // Instances, CoveredInstances
 		fmt.Sprintf("%d", totalCount), nuCell, "", // Count, NormalizedUnits, RecommendedCount
@@ -355,6 +336,7 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 		"", "", "", "", // CommitmentID, Success, Error, Timestamp
 		"", "", // ExistingCoverage, ProjectedCoverage
 	}
+	return slices.Concat(totals, make([]string, len(csvDetailColumns))) // detail columns do not aggregate
 }
 
 // formatIntOrBlank renders an int as its decimal string when non-zero, ""
