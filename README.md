@@ -46,7 +46,7 @@ make build
 
 `make build` creates `./cudly` from `./cmd`. The build does not deploy or configure a cloud account.
 
-Read the [CLI reference](docs/cli/README.md) for commands. See the guides for [cloud setup](docs/cli/cloud-setup.md), [filtering](docs/cli/filtering.md), and [purchase safety](docs/cli/purchase-safety.md).
+Read the [CLI reference](docs/cli/README.md) for commands. See the guides for [cloud setup](docs/cli/cloud-setup.md), [filtering](docs/cli/filtering.md), and [purchase safety](docs/cli/purchase-safety.md). `archera-comparison` is an optional, default-off, read-only Archera plan comparison: see [Archera comparison](docs/cli/archera-comparison.md).
 
 ## Common workflows
 
