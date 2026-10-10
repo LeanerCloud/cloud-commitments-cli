@@ -1,0 +1,190 @@
+{
+  "title": "Archera commitment plan comparison (read-only)",
+  "plan_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "fetched_at": "<fetched>",
+  "currency": null,
+  "premium_included": true,
+  "monthly_basis": "730-hour monthly rate",
+  "upfront_basis": "one-time",
+  "plan_wide_note": "This comparison covers the whole Archera plan. It is not mapped onto CUDly recommendation rows or recommendation CSV output.",
+  "caveat": "A plan comparison is a hypothetical rollup, never a bindable insurance quote, and never a purchase. An insured target of 100% is a requested target subject to Archera underwriting allowances, not a guarantee. The API exposes no per-line product support or allowance verdict, so product support and allowance are shown as unknown unless Archera's documentation says otherwise.",
+  "current_totals": {
+    "monthly_rate_730h": {
+      "commitment_cost_total": "101",
+      "cloud_provider_cost": "102",
+      "premium": "103.1234567890123456789",
+      "gross_savings": "104",
+      "net_savings": "105",
+      "covered_on_demand_cost": "106"
+    },
+    "upfront_cost_one_time": "107"
+  },
+  "hypothetical_totals": [
+    {
+      "contract_term": "one_year_gris",
+      "payment_option": "no_upfront",
+      "totals": {
+        "monthly_rate_730h": {
+          "commitment_cost_total": "201",
+          "cloud_provider_cost": "202",
+          "premium": "203",
+          "gross_savings": "204",
+          "net_savings": "205",
+          "covered_on_demand_cost": "206"
+        },
+        "upfront_cost_one_time": "207"
+      },
+      "delta_monthly_net_savings": "208",
+      "delta_monthly_commitment_cost": "209",
+      "delta_upfront_cost": "210",
+      "line_items": [
+        {
+          "line_item_id": "60000000-0000-4000-8000-0000000000b1[31m",
+          "actual_term": "six_month_gris",
+          "actual_payment_option": "partial_upfront",
+          "actual_commitment_type": "aws/AmazonEC2[31m",
+          "reason": "fallback_closest_shorter"
+        }
+      ]
+    },
+    {
+      "contract_term": null,
+      "payment_option": "all_upfront",
+      "totals": {
+        "monthly_rate_730h": {
+          "commitment_cost_total": "601",
+          "cloud_provider_cost": "602",
+          "premium": "603",
+          "gross_savings": "604",
+          "net_savings": "605",
+          "covered_on_demand_cost": "606"
+        },
+        "upfront_cost_one_time": "607"
+      },
+      "delta_monthly_net_savings": "608",
+      "delta_monthly_commitment_cost": "609",
+      "delta_upfront_cost": "610",
+      "line_items": [
+        {
+          "line_item_id": "60000000-0000-4000-8000-0000000000b2",
+          "actual_term": null,
+          "actual_payment_option": null,
+          "actual_commitment_type": null,
+          "reason": "no_alternative"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "line_item_id": "70000000-0000-4000-8000-0000000000c1[31m",
+      "current": {
+        "is_current": true,
+        "offer_id": "30000000-0000-4000-8000-000000000001[31m",
+        "commitment_type": "aws/AmazonEC2",
+        "provider": "aws",
+        "region": "us-east-1[31m",
+        "contract_term": null,
+        "payment_option": null,
+        "lease_attached": false,
+        "archera_offer_name": null,
+        "discount_rate": "0.31",
+        "breakeven_days": "31",
+        "totals": {
+          "monthly_rate_730h": {
+            "commitment_cost_total": "301",
+            "cloud_provider_cost": "302",
+            "premium": "303",
+            "gross_savings": "304",
+            "net_savings": "305",
+            "covered_on_demand_cost": "306"
+          },
+          "upfront_cost_one_time": "307"
+        },
+        "delta_vs_current": {
+          "monthly_net_savings": "308",
+          "upfront_cost": "309",
+          "discount_rate": "0.32",
+          "breakeven_days": "32"
+        },
+        "archera_product_support": {
+          "status": "supported",
+          "source": "https://docs.archera.ai/help-center/getting-started/supported-reservable-services",
+          "evidence": "AWS Reserved Instances table, service \"EC2\": Guaranteed terms \"30 day, 1 year\". Mapping of API type \"aws/AmazonEC2\" to page service \"EC2\" is inferred from the schema example; not stated by Archera."
+        }
+      },
+      "candidates": [
+        {
+          "is_current": false,
+          "offer_id": "40000000-0000-4000-8000-000000000002",
+          "commitment_type": "aws/savingsplan/Compute",
+          "provider": "aws",
+          "region": "eu-west-1[31m",
+          "contract_term": "one_year_gris",
+          "payment_option": "no_upfront",
+          "lease_attached": true,
+          "archera_offer_name": "Name[31mFourNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN",
+          "discount_rate": "0.41",
+          "breakeven_days": "41",
+          "totals": {
+            "monthly_rate_730h": {
+              "commitment_cost_total": "401",
+              "cloud_provider_cost": "402",
+              "premium": "403",
+              "gross_savings": "404",
+              "net_savings": "405",
+              "covered_on_demand_cost": "406"
+            },
+            "upfront_cost_one_time": "407"
+          },
+          "delta_vs_current": {
+            "monthly_net_savings": "408",
+            "upfront_cost": "409",
+            "discount_rate": "0.42",
+            "breakeven_days": "42"
+          },
+          "archera_product_support": {
+            "status": "supported",
+            "source": "https://docs.archera.ai/help-center/getting-started/supported-reservable-services",
+            "evidence": "AWS Savings Plans table, \"Compute Savings Plan\": Guaranteed terms \"30 day, 1 year\". Mapping of API type \"aws/savingsplan/Compute\" to page service \"Compute Savings Plan\" is inferred from the schema example; not stated by Archera."
+          }
+        },
+        {
+          "is_current": false,
+          "offer_id": "50000000-0000-4000-8000-000000000003",
+          "commitment_type": "aws/Unlisted[31m",
+          "provider": "aws",
+          "region": "ap-south-1",
+          "contract_term": "six_month_gris",
+          "payment_option": "all_upfront",
+          "lease_attached": false,
+          "archera_offer_name": null,
+          "discount_rate": "0.51",
+          "breakeven_days": null,
+          "totals": {
+            "monthly_rate_730h": {
+              "commitment_cost_total": "501",
+              "cloud_provider_cost": "502",
+              "premium": "503",
+              "gross_savings": "504",
+              "net_savings": null,
+              "covered_on_demand_cost": "506"
+            },
+            "upfront_cost_one_time": "507"
+          },
+          "delta_vs_current": {
+            "monthly_net_savings": "508",
+            "upfront_cost": "509",
+            "discount_rate": "0.52",
+            "breakeven_days": null
+          },
+          "archera_product_support": {
+            "status": "unknown"
+          }
+        }
+      ]
+    }
+  ],
+  "non_gating_disclosure": "This is entirely optional. CUDly's purchase and management features work fully without Archera.",
+  "sponsorship_disclosure": "For full disclosure, Archera sponsors CUDly's Open Source development from a fraction of their insurance premiums."
+}

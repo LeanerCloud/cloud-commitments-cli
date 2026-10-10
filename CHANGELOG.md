@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `archera-comparison` command: a read-only, default-off comparison of an
+  Archera commitment plan (table or JSON). See `docs/cli/archera-comparison.md`
+  (#2156).
+
 ### Fixed
 
 - Ctrl-C now cancels the whole invocation instead of only setting a flag that
