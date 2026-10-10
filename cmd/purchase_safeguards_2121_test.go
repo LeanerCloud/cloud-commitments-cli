@@ -173,7 +173,7 @@ func TestExecutePurchase_PreservesExplicitZeroVsAbsentCost_2121(t *testing.T) {
 	t.Run("explicit zero upfront cost stays a non-nil zero", func(t *testing.T) {
 		zero := 0.0
 		mockClient := &MockServiceClient{}
-		mockClient.On("PurchaseCommitment", ctx, rec, mock.Anything).
+		mockClient.On("PurchaseCommitment", mock.Anything, rec, mock.Anything).
 			Return(common.PurchaseResult{Recommendation: rec, Success: true, Cost: &zero}, nil)
 		result := executePurchase(ctx, rec, rec.Region, 1, mockClient, toolCfg)
 		require.True(t, result.Success)
@@ -185,7 +185,7 @@ func TestExecutePurchase_PreservesExplicitZeroVsAbsentCost_2121(t *testing.T) {
 	})
 	t.Run("absent upfront cost stays nil", func(t *testing.T) {
 		mockClient := &MockServiceClient{}
-		mockClient.On("PurchaseCommitment", ctx, rec, mock.Anything).
+		mockClient.On("PurchaseCommitment", mock.Anything, rec, mock.Anything).
 			Return(common.PurchaseResult{Recommendation: rec, Success: true, Cost: nil}, nil)
 		result := executePurchase(ctx, rec, rec.Region, 1, mockClient, toolCfg)
 		require.True(t, result.Success)
