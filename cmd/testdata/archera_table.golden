@@ -1,0 +1,38 @@
+Archera commitment plan comparison (read-only)
+Plan: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb   Fetched: <fetched>
+Totals include the Archera premium. The API reports no currency, so amounts are unlabelled.
+This comparison covers the whole Archera plan. It is not mapped onto CUDly recommendation rows or recommendation CSV output.
+A plan comparison is a hypothetical rollup, never a bindable insurance quote, and never a purchase. An insured target of 100% is a requested target subject to Archera underwriting allowances, not a guarantee. The API exposes no per-line product support or allowance verdict, so product support and allowance are shown as unknown unless Archera's documentation says otherwise.
+
+Current totals: commitment cost 101, cloud provider cost 102, premium 103.1234567890123456789, gross savings 104, net savings 105, covered on-demand 106 (730-hour monthly rate); upfront 107 (one-time)
+
+Hypothetical 1: term one_year_gris, payment no_upfront
+  totals: commitment cost 201, cloud provider cost 202, premium 203, gross savings 204, net savings 205, covered on-demand 206 (730-hour monthly rate); upfront 207 (one-time)
+  delta vs current: monthly net savings 208, monthly commitment cost 209, upfront 210
+  line item 60000000-0000-4000-8000-0000000000b1: term six_month_gris, payment partial_upfront, type aws/AmazonEC2, reason fallback_closest_shorter
+
+Hypothetical 2: term unknown, payment all_upfront
+  totals: commitment cost 601, cloud provider cost 602, premium 603, gross savings 604, net savings 605, covered on-demand 606 (730-hour monthly rate); upfront 607 (one-time)
+  delta vs current: monthly net savings 608, monthly commitment cost 609, upfront 610
+  line item 60000000-0000-4000-8000-0000000000b2: term unknown, payment unknown, type unknown, reason no_alternative
+
+Line item 70000000-0000-4000-8000-0000000000c1
+  current offer 30000000-0000-4000-8000-000000000001: aws aws/AmazonEC2, region us-east-1, term unknown, payment unknown
+    discount rate 0.31 (0-1 basis), breakeven days 31
+    commitment cost 301, cloud provider cost 302, premium 303, gross savings 304, net savings 305, covered on-demand 306 (730-hour monthly rate); upfront 307 (one-time)
+    delta vs current: monthly net savings 308, upfront 309, discount rate 0.32, breakeven days 32
+    Archera product support: supported (https://docs.archera.ai/help-center/getting-started/supported-reservable-services; AWS Reserved Instances table, service "EC2": Guaranteed terms "30 day, 1 year". Mapping of API type "aws/AmazonEC2" to page service "EC2" is inferred from the schema example; not stated by Archera.)
+  candidate offer 40000000-0000-4000-8000-000000000002: aws aws/savingsplan/Compute, region eu-west-1, term one_year_gris, payment no_upfront, lease attached
+    Archera offer name: Name Four
+    discount rate 0.41 (0-1 basis), breakeven days 41
+    commitment cost 401, cloud provider cost 402, premium 403, gross savings 404, net savings 405, covered on-demand 406 (730-hour monthly rate); upfront 407 (one-time)
+    delta vs current: monthly net savings 408, upfront 409, discount rate 0.42, breakeven days 42
+    Archera product support: supported (https://docs.archera.ai/help-center/getting-started/supported-reservable-services; AWS Savings Plans table, "Compute Savings Plan": Guaranteed terms "30 day, 1 year". Mapping of API type "aws/savingsplan/Compute" to page service "Compute Savings Plan" is inferred from the schema example; not stated by Archera.)
+  candidate offer 50000000-0000-4000-8000-000000000003: aws aws/Unlisted, region ap-south-1, term six_month_gris, payment all_upfront
+    discount rate 0.51 (0-1 basis), breakeven days unknown
+    commitment cost 501, cloud provider cost 502, premium 503, gross savings 504, net savings unknown, covered on-demand 506 (730-hour monthly rate); upfront 507 (one-time)
+    delta vs current: monthly net savings 508, upfront 509, discount rate 0.52, breakeven days unknown
+    Archera product support: unknown
+
+This is entirely optional. CUDly's purchase and management features work fully without Archera.
+For full disclosure, Archera sponsors CUDly's Open Source development from a fraction of their insurance premiums.

@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -27,56 +30,19 @@ const (
 	archeraTestPlan = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 )
 
-// Synthetic fixtures shaped like the documented commitment-plans schema.
-const archeraFinancialsFixture = `{
-	"commitment_cost": {"total": 110, "breakdown": {"cloud_provider_cost": {"total": 100}, "archera_premium": 10.125}},
-	"commitment_savings": {"net": null, "gross": 4.5},
-	"covered_ondemand_cost": 104.5
-}`
-
-func archeraOfferFixture(isCurrent bool, offerType, lease, term, payment, name string) string {
-	return fmt.Sprintf(`{
-		"is_current": %t,
-		"offer_id": "11111111-1111-4111-8111-111111111111",
-		"offer_org_id": "public",
-		"offer": {"provider": "aws", "type": %q, "region": "us-east-1", "guaranteed_display_name": %s},
-		"lease_menu_item_id": %s,
-		"selected_amount": 3,
-		"commitment_type": %q,
-		"contract_term": %s,
-		"payment_option": %s,
-		"discount_rate": 0.3,
-		"breakeven_days": null,
-		"commitment_upfront_cost": 1200,
-		"commitment_financials_monthly_rate": %s,
-		"delta_vs_current": {"monthly_net_savings": 0, "upfront_cost": 0, "discount_rate": 0, "breakeven_days": null}
-	}`, isCurrent, offerType, name, lease, offerType, term, payment, archeraFinancialsFixture)
-}
-
+// archeraComparisonFixture is a synthetic document shaped like the documented
+// commitment-plans schema. Every money field carries a distinct value: the
+// hundreds digit is the block (1 current totals, 2 and 6 hypotheticals, 3
+// current offer, 4 and 5 candidates) and the units digit is the field (1 cost
+// total, 2 cloud cost, 3 premium, 4 gross, 5 net, 6 covered on-demand, 7
+// upfront, 8 and 9 deltas), so a swapped field mapping changes the output. The
+// current-totals premium is a long decimal that float64 cannot hold exactly.
 func archeraComparisonFixture() string {
-	return `{
-		"current_totals": {"commitment_financials_monthly_rate": ` + archeraFinancialsFixture + `, "commitment_upfront_cost": 1200},
-		"hypothetical_totals": [{
-			"contract_term": null,
-			"payment_option": "no_upfront",
-			"commitment_financials_monthly_rate": {},
-			"commitment_upfront_cost": 0,
-			"delta_vs_current": {"monthly_net_savings": 7.25, "monthly_commitment_cost": -1, "upfront_cost": -1200},
-			"line_items": [{
-				"line_item_id": "22222222-2222-4222-8222-222222222222",
-				"actual_term": "one_year_gris", "actual_payment_option": "no_upfront",
-				"actual_commitment_type": "aws/AmazonEC2",
-				"actual_term_reason": "fallback_closest_shorter"
-			}]
-		}],
-		"data": [{
-			"line_item_id": "22222222-2222-4222-8222-222222222222",
-			"current": ` + archeraOfferFixture(true, "aws/AmazonEC2", "null", "null", "null", "null") + `,
-			"candidates": [` +
-		archeraOfferFixture(false, "aws/AmazonEC2", `"33333333-3333-4333-8333-333333333333"`, `"one_year_gris"`, `"no_upfront"`, `"Offer\u001b[31m RED"`) + `,` +
-		archeraOfferFixture(false, "aws/SomethingNew", "null", `"one_year_gris"`, `"no_upfront"`, "null") + `]
-		}]
-	}`
+	b, err := os.ReadFile("testdata/archera_comparison.json")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 type archeraRecorder struct {
@@ -202,6 +168,22 @@ func TestArcheraComparisonBadFormat(t *testing.T) {
 	require.ErrorContains(t, err, "--format")
 }
 
+var archeraFetchedRE = regexp.MustCompile(`(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)`)
+
+// checkArcheraGolden compares output with testdata/<name> after masking the
+// wall-clock fetch time. ARCHERA_UPDATE_GOLDEN=1 rewrites the file.
+func checkArcheraGolden(t *testing.T, name, got string) {
+	t.Helper()
+	got = archeraFetchedRE.ReplaceAllString(got, "<fetched>")
+	path := filepath.Join("testdata", name)
+	if os.Getenv("ARCHERA_UPDATE_GOLDEN") == "1" {
+		require.NoError(t, os.WriteFile(path, []byte(got), 0o600))
+	}
+	want, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, string(want), got)
+}
+
 func TestArcheraComparisonTable(t *testing.T) {
 	rec := setupArchera(t, okHandler)
 	out, errOut, err := runArchera(t, fullEnv())
@@ -214,24 +196,14 @@ func TestArcheraComparisonTable(t *testing.T) {
 	assert.Empty(t, req.URL.RawQuery)
 	assert.Equal(t, archeraTestKey, req.Header.Get("x-api-key"))
 
-	assert.Contains(t, out, archeraTitle)
+	checkArcheraGolden(t, "archera_table.golden", out)
+	assert.Contains(t, out, "never a bindable insurance quote")
+	assert.Contains(t, out, "103.1234567890123456789", "long decimal kept exact, not float64")
 	assert.NotContains(t, strings.ToLower(out), "insured quote")
-	assert.Contains(t, out, "premium 10.125", "premium kept exact")
-	assert.Contains(t, out, "net savings unknown", "null money is unknown, not 0")
-	assert.Contains(t, out, "730-hour monthly rate")
-	assert.Contains(t, out, "one-time")
-	assert.Contains(t, out, "The API reports no currency")
-	assert.Contains(t, out, "reason fallback_closest_shorter")
-	assert.Contains(t, out, "lease attached")
-	assert.Contains(t, out, "Archera offer name: Offer[31m RED", "control characters stripped, text kept")
 	assert.NotContains(t, out, "\x1b")
-	assert.Contains(t, out, "Archera product support: supported (")
-	assert.Contains(t, out, "Archera product support: unknown")
-	assert.Contains(t, out, "discount rate 0.3 (0-1 basis)")
 	assert.Contains(t, out, common.ArcheraNonGatingDisclosure)
 	assert.Contains(t, out, common.ArcheraSponsorshipDisclosure)
 	assert.NotContains(t, out, common.ArcheraSignupURL)
-	assert.Contains(t, out, "not mapped onto CUDly recommendation rows")
 	assert.NotContains(t, out+errOut, archeraTestKey)
 }
 
@@ -240,30 +212,13 @@ func TestArcheraComparisonJSON(t *testing.T) {
 	out, errOut, err := runArchera(t, fullEnv(), "--format", "json")
 	require.NoError(t, err)
 	assert.Empty(t, errOut)
-	var doc map[string]any
 	dec := json.NewDecoder(strings.NewReader(out))
+	var doc map[string]any
 	require.NoError(t, dec.Decode(&doc), "stdout must be exactly one JSON document")
 	assert.False(t, dec.More())
-	assert.Nil(t, doc["currency"])
-	assert.Equal(t, true, doc["premium_included"])
-	assert.Equal(t, common.ArcheraNonGatingDisclosure, doc["non_gating_disclosure"])
-	assert.Equal(t, common.ArcheraSponsorshipDisclosure, doc["sponsorship_disclosure"])
 	assert.NotContains(t, doc, "disclosures")
-	assert.NotContains(t, out, "\x1b")
-	assert.NotContains(t, out, `\u001b`)
 	assert.NotContains(t, out, archeraTestKey)
-
-	cur := doc["current_totals"].(map[string]any)["monthly_rate_730h"].(map[string]any)
-	assert.Equal(t, "10.125", cur["premium"])
-	assert.Nil(t, cur["net_savings"])
-	rows := doc["rows"].([]any)
-	cand := rows[0].(map[string]any)["candidates"].([]any)
-	support := cand[0].(map[string]any)["archera_product_support"].(map[string]any)
-	assert.Equal(t, "supported", support["status"])
-	assert.NotEmpty(t, support["source"])
-	unknown := cand[1].(map[string]any)["archera_product_support"].(map[string]any)
-	assert.Equal(t, "unknown", unknown["status"])
-	assert.NotContains(t, unknown, "source")
+	checkArcheraGolden(t, "archera_json.golden", out)
 }
 
 func TestArcheraMoneyExact(t *testing.T) {
@@ -292,9 +247,9 @@ func TestArcheraVendorErrorsAndRedaction(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{"401", 401, nil, `{"detail":"nope"}`, "HTTP 401"},
-		{"403 echoing key", 403, nil, `{"detail":"bad key ` + archeraTestKey + `"}`, "HTTP 403"},
-		{"429", 429, map[string]string{"Retry-After": "30"}, `{"detail":"slow down"}`, "retry after 30s"},
+		{"401", 401, nil, `{"message":"nope"}`, "HTTP 401"},
+		{"403 echoing key", 403, nil, `{"message":"bad key ` + archeraTestKey + `"}`, "bad key [redacted]"},
+		{"429", 429, map[string]string{"Retry-After": "30"}, `{"message":"slow down"}`, "retry after 30s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -338,8 +293,9 @@ func TestArcheraRedirectNotFollowed(t *testing.T) {
 }
 
 func TestArcheraNoKeyFlagAndStructsRedacted(t *testing.T) {
-	for _, name := range []string{"api-key", "key", "token", "secret", "archera-api-key"} {
-		assert.Nil(t, archeraComparisonCmd.Flags().Lookup(name), name)
+	usages := strings.ToLower(archeraComparisonCmd.Flags().FlagUsages())
+	for _, bad := range []string{"key", "token", "secret", "password"} {
+		assert.NotContains(t, usages, bad, "a flag looks like a credential flag")
 	}
 	check := func(label string) {
 		comparison, err := insurance.DecodeComparison(strings.NewReader(archeraComparisonFixture()), archeraTestOrg, archeraTestPlan, time.Unix(0, 0))
