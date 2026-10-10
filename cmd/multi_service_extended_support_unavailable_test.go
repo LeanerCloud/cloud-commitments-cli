@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,8 +24,8 @@ import (
 )
 
 // Regression tests for #2147: unavailable RDS inventory or lifecycle data must
-// not silently disable the extended-support exclusion. Nothing here reaches
-// AWS: every request is answered by an in-process stub.
+// not silently disable the extended-support exclusion. Requests are answered by
+// an in-process stub (AWS_ENDPOINT_URL or an injected transport).
 
 // rdsAPIStub answers the three query-protocol calls the exclusion data needs.
 // Behavior is selected by the fields; every request is recorded.
@@ -58,35 +59,47 @@ func (s *rdsAPIStub) total() int {
 	return len(s.actions)
 }
 
+const (
+	xmlContentType  = "text/xml"
+	jsonContentType = "application/x-amz-json-1.1"
+)
+
 const rdsStubDenied = `<ErrorResponse><Error><Type>Sender</Type><Code>AccessDenied</Code><Message>denied by stub</Message></Error><RequestId>r</RequestId></ErrorResponse>`
 
-func (s *rdsAPIStub) respond(authz, body string) (int, string) {
+func (s *rdsAPIStub) respond(authz, target, body string) (int, string, string) {
 	form, _ := url.ParseQuery(body)
 	action := form.Get("Action")
 	region := ""
 	if parts := strings.Split(authz, "/"); len(parts) > 2 {
 		region = parts[2]
 	}
+	if target != "" {
+		action = strings.TrimPrefix(target, "AWSInsightsIndexService.")
+	}
 	s.mu.Lock()
 	s.actions = append(s.actions, action)
 	s.mu.Unlock()
 
 	switch action {
+	case "GetReservationCoverage":
+		return http.StatusOK, jsonContentType, `{"CoveragesByTime":[]}`
+	case "GetReservationPurchaseRecommendation":
+		return http.StatusOK, jsonContentType, `{"Recommendations":[{"RecommendationDetails":[{"RecommendedNumberOfInstancesToPurchase":"2","EstimatedMonthlySavingsAmount":"10","EstimatedMonthlyOnDemandCost":"30","InstanceDetails":{"RDSInstanceDetails":{"InstanceType":"db.t3.medium","Region":"us-east-1","DeploymentOption":"Single-AZ","DatabaseEngine":"MySQL"}}}]}]}`
 	case "DescribeRegions":
 		if s.failRegionsEC {
-			return http.StatusForbidden, rdsStubDenied
+			return http.StatusForbidden, xmlContentType, rdsStubDenied
 		}
 		var items strings.Builder
 		for _, r := range s.regionList {
 			fmt.Fprintf(&items, "<item><regionName>%s</regionName></item>", r)
 		}
-		return http.StatusOK, `<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><regionInfo>` + items.String() + `</regionInfo></DescribeRegionsResponse>`
+		return http.StatusOK, xmlContentType, `<DescribeRegionsResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><regionInfo>` + items.String() + `</regionInfo></DescribeRegionsResponse>`
 	case "DescribeDBInstances":
 		if s.panicRegions[region] {
 			panic("stub panic in " + region)
 		}
 		if s.failRegions[region] || (s.failPage2[region] && form.Get("Marker") != "") {
-			return http.StatusForbidden, rdsStubDenied
+			return http.StatusForbidden, xmlContentType, rdsStubDenied
 		}
 		marker := ""
 		if s.failPage2[region] {
@@ -96,23 +109,23 @@ func (s *rdsAPIStub) respond(authz, body string) (int, string) {
 		if class := s.instances[region]; class != "" {
 			inst = fmt.Sprintf("<DBInstance><DBInstanceClass>%s</DBInstanceClass><Engine>mysql</Engine><EngineVersion>5.7.44</EngineVersion></DBInstance>", class)
 		}
-		return http.StatusOK, `<DescribeDBInstancesResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><DescribeDBInstancesResult><DBInstances>` + inst + `</DBInstances>` + marker + `</DescribeDBInstancesResult></DescribeDBInstancesResponse>`
+		return http.StatusOK, xmlContentType, `<DescribeDBInstancesResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><DescribeDBInstancesResult><DBInstances>` + inst + `</DBInstances>` + marker + `</DescribeDBInstancesResult></DescribeDBInstancesResponse>`
 	case "DescribeDBMajorEngineVersions":
 		if s.failEngines[form.Get("Engine")] {
-			return http.StatusForbidden, rdsStubDenied
+			return http.StatusForbidden, xmlContentType, rdsStubDenied
 		}
-		return http.StatusOK, `<DescribeDBMajorEngineVersionsResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><DescribeDBMajorEngineVersionsResult><DBMajorEngineVersions/></DescribeDBMajorEngineVersionsResult></DescribeDBMajorEngineVersionsResponse>`
+		return http.StatusOK, xmlContentType, `<DescribeDBMajorEngineVersionsResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><DescribeDBMajorEngineVersionsResult><DBMajorEngineVersions/></DescribeDBMajorEngineVersionsResult></DescribeDBMajorEngineVersionsResponse>`
 	}
-	return http.StatusBadRequest, rdsStubDenied
+	return http.StatusBadRequest, xmlContentType, rdsStubDenied
 }
 
 // RoundTrip lets tests hand the stub to an aws.Config directly.
 func (s *rdsAPIStub) RoundTrip(r *http.Request) (*http.Response, error) {
 	b, _ := io.ReadAll(r.Body)
-	status, body := s.respond(r.Header.Get("Authorization"), string(b))
+	status, contentType, body := s.respond(r.Header.Get("Authorization"), r.Header.Get("X-Amz-Target"), string(b))
 	return &http.Response{
 		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"text/xml"}},
+		Header:     http.Header{"Content-Type": []string{contentType}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    r,
 	}, nil
@@ -135,8 +148,8 @@ func (s *rdsAPIStub) serveEnv(t *testing.T) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
-		status, body := s.respond(r.Header.Get("Authorization"), string(b))
-		w.Header().Set("Content-Type", "text/xml")
+		status, contentType, body := s.respond(r.Header.Get("Authorization"), r.Header.Get("X-Amz-Target"), string(b))
+		w.Header().Set("Content-Type", contentType)
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
 	}))
@@ -154,6 +167,7 @@ func (s *rdsAPIStub) serveEnv(t *testing.T) {
 	t.Setenv("AWS_SESSION_TOKEN", "")
 	t.Setenv("AWS_MAX_ATTEMPTS", "1")
 	t.Setenv("AWS_ENDPOINT_URL", srv.URL)
+	t.Setenv("AWS_ENDPOINT_URL_COST_EXPLORER", srv.URL)
 }
 
 // requireStubReached fails the test when the seam fell through to somewhere
@@ -423,7 +437,7 @@ func TestFilterAndAdjustRecommendations_ExtendedSupportDataUnavailable(t *testin
 
 func TestFetchAllRecs_RDSRecInFailedRegionAborts(t *testing.T) {
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg := newRDSStub("us-east-1").awsConfig() // injected stub transport: no outbound connection
 	saved := saveGlobalVars()
 	defer saved.restore()
 	toolCfg.Coverage = 100
@@ -442,4 +456,57 @@ func TestFetchAllRecs_RDSRecInFailedRegionAborts(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "eu-west-1")
+}
+
+// The main pipeline wiring (runToolMultiService) is exercised in a re-exec'd
+// child: the child runs the real command with the real engine-version fetcher
+// against this process's stub endpoint, and exits through log.Fatalf.
+func TestRunToolMultiService_ExtendedSupportExclusionWiring(t *testing.T) {
+	if os.Getenv("CUDLY_EXCL_CHILD") == "1" {
+		engineVersionFetcher = fetchEngineVersionData
+		rootCmd.SetArgs(strings.Fields(os.Getenv("CUDLY_EXCL_ARGS")))
+		require.NoError(t, rootCmd.Execute())
+		return
+	}
+
+	const denyHint = "Cannot apply extended-support exclusion"
+	tests := []struct {
+		name      string
+		setup     func(*rdsAPIStub)
+		args      string
+		wantExit1 bool
+		wantRDS   bool // exclusion queries expected
+	}{
+		{"purchase run, engine lifecycle denied", func(s *rdsAPIStub) { s.failEngines["mysql"] = true }, "--purchase", true, true},
+		{"dry run, engine lifecycle denied", func(s *rdsAPIStub) { s.failEngines["mysql"] = true }, "", true, true},
+		{"dry run, rec in a region whose inventory is denied", func(s *rdsAPIStub) { s.failRegions["us-east-1"] = true }, "", true, true},
+		{"opt-in skips every exclusion query", func(s *rdsAPIStub) { s.failEngines["mysql"], s.failRegions["us-east-1"] = true, true }, "--include-extended-support", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stub := newRDSStub("us-east-1")
+			tt.setup(stub)
+			stub.serveEnv(t)
+			dir := t.TempDir()
+			args := "--services rds --term 1 --coverage 100 --regions us-east-1 --output " + filepath.Join(dir, "out.csv") +
+				" --audit-log " + filepath.Join(dir, "audit.jsonl") + " " + tt.args
+			child := exec.Command(os.Args[0], "-test.run=^TestRunToolMultiService_ExtendedSupportExclusionWiring$")
+			child.Env = append(os.Environ(), "CUDLY_EXCL_CHILD=1", "CUDLY_EXCL_ARGS="+args, "AWS_REGION=us-east-1")
+			out, err := child.CombinedOutput()
+
+			assert.Positive(t, stub.total(), "child must have reached the stub:\n%s", out)
+			assert.Zero(t, stub.count("Purchase"), "no purchase call may be made")
+			if tt.wantExit1 {
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, err, &exitErr, "output:\n%s", out)
+				assert.Equal(t, 1, exitErr.ExitCode())
+				assert.Contains(t, string(out), denyHint)
+				assert.Contains(t, string(out), "--include-extended-support")
+				return
+			}
+			require.NoError(t, err, "output:\n%s", out)
+			assert.Zero(t, stub.count("DescribeDBInstances"))
+			assert.Zero(t, stub.count("DescribeDBMajorEngineVersions"))
+		})
+	}
 }

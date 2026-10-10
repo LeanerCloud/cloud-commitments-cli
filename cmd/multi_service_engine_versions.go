@@ -244,7 +244,7 @@ func queryMajorEngineVersionsWithClient(ctx context.Context, rdsClient RDSMajorV
 		}
 		if err := fetchMajorEngineVersionsForEngine(ctx, rdsClient, engine, versionInfo); err != nil {
 			// Canceled caller context is terminal (issue #1325); check ctx.Err(),
-			// not the wrapped API error, so SDK-internal timeouts stay warnings.
+			// not the wrapped API error, so SDK-internal timeouts are reported as engine failures.
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
