@@ -818,7 +818,7 @@ func TestQueryMajorEngineVersions_ErrorHandling(t *testing.T) {
 			// We expect an error in test environment (no real AWS creds)
 			// The important thing is that the function doesn't panic
 			if err != nil {
-				assert.Contains(t, err.Error(), "failed to load AWS config")
+				assert.Regexp(t, "failed to load AWS config|major engine versions for", err.Error())
 			}
 		})
 	}
@@ -863,7 +863,7 @@ func TestQueryRunningInstanceEngineVersions_ErrorHandling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// This will likely fail in test environment without real AWS credentials
 			// but it validates the function signature and basic logic paths
-			_, err := queryRunningInstanceEngineVersions(ctx, tt.cfg)
+			_, _, err := queryRunningInstanceEngineVersions(ctx, tt.cfg)
 			// We expect an error in test environment (no real AWS creds)
 			// The important thing is that the function doesn't panic
 			if err != nil {

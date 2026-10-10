@@ -32,7 +32,7 @@ func expiredCtx(t *testing.T) context.Context {
 func TestFetchEngineVersionData_CancellationAndDeadlineAreTerminal(t *testing.T) {
 	captureAppLog(t)
 	for name, ctx := range map[string]context.Context{"canceled": canceledCtx(), "deadline": expiredCtx(t)} {
-		_, err := fetchEngineVersionData(ctx, Config{})
+		_, err := fetchEngineVersionData(ctx, Config{}, true)
 		require.Error(t, err, name)
 		assert.ErrorIs(t, err, ctx.Err(), name)
 	}
@@ -105,7 +105,7 @@ func TestFetchAllRecs_InterruptStopsFanOutAndDiscardsPartialData(t *testing.T) {
 		Run(func(mock.Arguments) { cancel() }). // Ctrl-C after the first region answered
 		Return([]common.Recommendation{rec}, nil).Once()
 
-	recs, _ := fetchAllRecs(ctx, aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+	recs, _, _ := fetchAllRecs(ctx, aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
 
 	assert.Empty(t, recs, "partial data from an interrupted fetch is not a result")
 	client.AssertNumberOfCalls(t, "GetRecommendations", 1) // later regions are never queried
@@ -121,7 +121,7 @@ func TestFetchAllRecs_ActiveContextProviderErrorStaysRecoverable(t *testing.T) {
 	client.On("GetRecommendations", mock.Anything, mock.MatchedBy(func(p *common.RecommendationParams) bool { return p.Region == "us-west-2" })).
 		Return([]common.Recommendation{rec}, nil).Once()
 
-	recs, _ := fetchAllRecs(context.Background(), aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+	recs, _, _ := fetchAllRecs(context.Background(), aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
 
 	assert.Len(t, recs, 1, "a provider error with an active context only loses that region")
 	assert.Contains(t, out.String(), "Failed to fetch recommendations")
@@ -168,7 +168,7 @@ func TestFetchAllRecs_InterruptDuringLastRegionDiscardsItsData(t *testing.T) {
 		Run(func(mock.Arguments) { cancel() }).
 		Return([]common.Recommendation{rec}, nil).Once()
 
-	recs, _ := fetchAllRecs(ctx, aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+	recs, _, _ := fetchAllRecs(ctx, aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
 
 	assert.Empty(t, recs)
 }

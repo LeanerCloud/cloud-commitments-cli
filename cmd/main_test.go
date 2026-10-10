@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,11 @@ import (
 // AuditLog, which takes precedence within that test.
 func TestMain(m *testing.M) {
 	toolCfg.AuditLog = filepath.Join(os.TempDir(), fmt.Sprintf("cudly-test-audit-%d.jsonl", os.Getpid()))
+	// Keep tests off AWS: the real fetcher is exercised explicitly against a
+	// local stub (useRealEngineVersionFetcher).
+	engineVersionFetcher = func(context.Context, Config, bool) (engineVersionData, error) {
+		return engineVersionData{}, nil
+	}
 	code := m.Run()
 	_ = os.Remove(toolCfg.AuditLog)
 	os.Exit(code)

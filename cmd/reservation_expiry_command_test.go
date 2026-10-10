@@ -272,9 +272,8 @@ func (p *completenessProxy) assertReservationExpiryRequests(t *testing.T) {
 		"ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationPurchaseRecommendation": 1,
 		"ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage":               12,
 		"organizations.us-east-1.amazonaws.com/AWSOrganizationsV20161128.DescribeAccount":         s.rows,
-		"ec2.us-east-1.amazonaws.com/DescribeRegions":                                             1, "ec2.us-east-1.amazonaws.com/DescribeInstanceTypes": 1,
-		"ec2.us-east-1.amazonaws.com/DescribeReservedInstances": 2,
-		"rds.us-east-1.amazonaws.com/DescribeDBInstances":       1, "rds.us-east-1.amazonaws.com/DescribeDBMajorEngineVersions": 4,
+		"ec2.us-east-1.amazonaws.com/DescribeInstanceTypes":                                       1,
+		"ec2.us-east-1.amazonaws.com/DescribeReservedInstances":                                   2,
 	}
 	require.Equal(t, want, p.requests, "no other operation, including purchases, is permitted")
 	wantCoverage := make([]string, 0, 12)
@@ -284,6 +283,6 @@ func (p *completenessProxy) assertReservationExpiryRequests(t *testing.T) {
 	}
 	require.ElementsMatch(t, wantCoverage, p.expiryCoverage)
 	require.ElementsMatch(t, []string{"111111111111", "222222222222", "333333333333"}[:s.rows], p.expiryAccounts)
-	require.ElementsMatch(t, []string{"mysql", "postgres", "aurora-mysql", "aurora-postgresql"}, p.engines)
+	require.Empty(t, p.engines, "--include-extended-support must skip the RDS lifecycle reads")
 	t.Logf("actual root command, SDK and CSV; synthetic expiry operations=%v coverage=%v accounts=%v", p.requests, p.expiryCoverage, p.expiryAccounts)
 }

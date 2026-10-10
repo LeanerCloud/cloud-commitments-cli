@@ -92,7 +92,7 @@ func TestMaxInstancesCapsWholeRunAcrossServicesAndRegions(t *testing.T) {
 	t.Cleanup(func() { mockClient.AssertExpectations(t) })
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	allRecs, drops := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
+	allRecs, drops, _ := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
 		maxInstancesFixtureServices, engineVersionData{}, toolCfg, nil)
 
 	pairs := len(maxInstancesFixtureServices) * len(maxInstancesFixtureRegions)
@@ -172,7 +172,7 @@ func TestMaxInstancesKeepsHighestSavingsNotFirstFetched(t *testing.T) {
 	t.Cleanup(func() { mockClient.AssertExpectations(t) })
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	allRecs, drops := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
+	allRecs, drops, _ := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
 		maxInstancesFixtureServices, engineVersionData{}, toolCfg, nil)
 	require.Len(t, allRecs, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 
@@ -241,7 +241,7 @@ func TestMaxInstancesNeverPurchasesBelowMinCount(t *testing.T) {
 	t.Cleanup(func() { mockClient.AssertExpectations(t) })
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	allRecs, drops := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
+	allRecs, drops, _ := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
 		maxInstancesFixtureServices, engineVersionData{}, toolCfg, nil)
 	require.Len(t, allRecs, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 
@@ -327,7 +327,7 @@ func TestMaxInstancesNotAppliedWhenUnset(t *testing.T) {
 	t.Cleanup(func() { mockClient.AssertExpectations(t) })
 
 	accountCache := NewAccountAliasCache(awsCfg)
-	allRecs, drops := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
+	allRecs, drops, _ := fetchAllRecs(ctx, awsCfg, mockClient, accountCache,
 		maxInstancesFixtureServices, engineVersionData{}, toolCfg, nil)
 
 	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops)

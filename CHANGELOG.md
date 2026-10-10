@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Stop silently disabling the extended-support exclusion when AWS queries
+  fail. A failed engine lifecycle query or region listing now aborts the run
+  before any purchase; an RDS recommendation in a region whose instance
+  inventory could not be read aborts it too, while other regions proceed with
+  a warning. The queries are skipped entirely under `--include-extended-support`
+  or when no RDS recommendations are in scope (#2147).
 - Ctrl-C now cancels the whole invocation instead of only setting a flag that
   was polled between purchases. The engine-version lifecycle queries, region
   discovery, recommendation fetch, coverage fetch and duplicate checks treat a
