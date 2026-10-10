@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/recommendations"
@@ -47,9 +48,14 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CSV header: %w", err)
 	}
+	if err = validateCSVUTF8(header); err != nil {
+		return nil, fmt.Errorf("CSV header: %w", err)
+	}
 
-	// Build column index map
-	colIdx := buildColumnIndexMap(header)
+	colIdx, err := buildColumnIndexMap(header)
+	if err != nil {
+		return nil, err
+	}
 
 	// Parse all records
 	parsed, err := parseCSVRecords(reader, colIdx)
@@ -60,13 +66,36 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	return parsed, nil
 }
 
-// buildColumnIndexMap creates a map from column names to indices.
-func buildColumnIndexMap(header []string) map[string]int {
+// Minimal CSVs require these columns; service-specific columns stay optional.
+var requiredCSVColumns = []string{"Service", "Region", "ResourceType", "Count"}
+
+func validateCSVUTF8(fields []string) error {
+	for i, field := range fields {
+		if !utf8.ValidString(field) {
+			return fmt.Errorf("column %d: invalid UTF-8 encoding", i+1)
+		}
+	}
+	return nil
+}
+
+func buildColumnIndexMap(header []string) (map[string]int, error) {
+	if len(header) > 0 {
+		header[0] = strings.TrimPrefix(header[0], "\ufeff")
+	}
 	colIdx := make(map[string]int)
 	for i, col := range header {
 		colIdx[col] = i
 	}
-	return colIdx
+	var missing []string
+	for _, req := range requiredCSVColumns {
+		if _, ok := colIdx[req]; !ok {
+			missing = append(missing, req)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("CSV header missing required columns: %s", strings.Join(missing, ", "))
+	}
+	return colIdx, nil
 }
 
 // parseCSVRecords reads and parses all CSV records.
@@ -80,6 +109,10 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to read CSV record: %w", err)
+		}
+		if err = validateCSVUTF8(record); err != nil {
+			line, _ := reader.FieldPos(0)
+			return nil, fmt.Errorf("CSV line %d: %w", line, err)
 		}
 
 		// Skip the trailing TOTAL summary row that writeMultiServiceCSVReport
@@ -165,9 +198,7 @@ func getCSVField(record []string, colIdx map[string]int, fieldName string) strin
 	return ""
 }
 
-// parseCSVCount parses the required Count field as a whole non-negative
-// integer. It drives purchase quantities, so a blank, missing, fractional or
-// otherwise malformed cell is an error rather than a truncated or zero value.
+// Savings Plans exports use Count=1, preserving positive-count round trips.
 func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	const fieldName = "Count"
 	idx, ok := colIdx[fieldName]
@@ -180,17 +211,16 @@ func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	}
 	n, err := strconv.Atoi(value)
 	if err != nil {
-		return fmt.Errorf("column %d %q: invalid integer %q: %w", idx+1, fieldName, value, err)
+		return fmt.Errorf("column %d %q: invalid integer: %w", idx+1, fieldName, err)
 	}
-	if n < 0 {
-		return fmt.Errorf("column %d %q: must not be negative, got %d", idx+1, fieldName, n)
+	if n < 1 {
+		return fmt.Errorf("column %d %q: must be at least 1, got %d", idx+1, fieldName, n)
 	}
 	*target = n
 	return nil
 }
 
-// parseCSVFloat parses a finite float field from a CSV record. A blank or
-// absent cell leaves target untouched (see requireRankingSignal).
+// Blank savings stay absent-as-zero for requireRankingSignal.
 func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, target *float64) error {
 	value := strings.TrimSpace(getCSVField(record, colIdx, fieldName))
 	if value == "" {
@@ -199,10 +229,13 @@ func parseCSVFloat(record []string, colIdx map[string]int, fieldName string, tar
 	col := colIdx[fieldName] + 1
 	f, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return fmt.Errorf("column %d %q: invalid number %q: %w", col, fieldName, value, err)
+		return fmt.Errorf("column %d %q: invalid number: %w", col, fieldName, err)
 	}
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return fmt.Errorf("column %d %q: invalid number %q: must be finite", col, fieldName, value)
+	}
+	if f < 0 {
+		return fmt.Errorf("column %d %q: must not be negative, got %g", col, fieldName, f)
 	}
 	*target = f
 	return nil

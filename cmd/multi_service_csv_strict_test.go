@@ -26,6 +26,7 @@ func TestLoadRecommendationsFromCSV_StrictCount(t *testing.T) {
 		{"trailing garbage", "3abc"},
 		{"trailing unit", "12 units"},
 		{"negative", "-1"},
+		{"zero", "0"},
 		{"blank", ""},
 		{"whitespace only", "  "},
 		{"overflows int64", "99999999999999999999"},
@@ -62,6 +63,7 @@ func TestLoadRecommendationsFromCSV_StrictEstimatedSavings(t *testing.T) {
 		name string
 		cell string
 	}{
+		{"negative", "-100"},
 		{"trailing currency", "1000 USD"},
 		{"trailing garbage", "12.5abc"},
 		{"NaN", "NaN"},
