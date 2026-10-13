@@ -78,10 +78,10 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0.54.0/go.mod h1:vB2GH9GAYYJTO3mEn8oYwzEdhlayZIdQz6zdzgUIRvA=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.54.0 h1:s0WlVbf9qpvkh1c/uDAPElam0WrL7fHRIidgZJ7UqZI=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.54.0/go.mod h1:Mf6O40IAyB9zR/1J8nGDDPirZQQPbYJni8Yisy7NTMc=
-github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261013183209-f794d75afb69 h1:MHTNQEtRh+K6OcCJlETArAB8G/RWRC4eGqcWlhMZplk=
-github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261013183209-f794d75afb69/go.mod h1:8RTmzPazA8IeVZfn7wNaU7ILx0VK5eHZQozO21Mvtq8=
-github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261013183209-f794d75afb69 h1:Ra+eyZPRa/R1YcTPVnPR3o/ywDs8TO+UuPJ8W+tck7A=
-github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261013183209-f794d75afb69/go.mod h1:no7i/7i+W37+qhEOVU8F/0dP5FhO3wtzvKIN0+tvL3A=
+github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261013184038-e9a33bb14d0d h1:LzTtaDpdS0FJJ0x9kRbrrn4Zrm85HLccnO9L8Wp8toc=
+github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261013184038-e9a33bb14d0d/go.mod h1:8RTmzPazA8IeVZfn7wNaU7ILx0VK5eHZQozO21Mvtq8=
+github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261013184038-e9a33bb14d0d h1:NlNTNHOpftHUfSNmVJKAHhA6RP0uLRJOAlk8xmhJjy8=
+github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261013184038-e9a33bb14d0d/go.mod h1:no7i/7i+W37+qhEOVU8F/0dP5FhO3wtzvKIN0+tvL3A=
 github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261007133317-58c25f04c49b h1:yurugmfdZjf+dqjfqfDyfoBR3IAiFUpMKQ8URnZnJzQ=
 github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261007133317-58c25f04c49b/go.mod h1:iIvPuWLWd+SXqLHAQNdodYMUAAcq7PnwfScXWgARt5A=
 github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20261006205158-7ff8c1aee1bb h1:AJ4nKDtttjiTDemo9PDp2esoc35ymVaiCSr0zIewwpY=

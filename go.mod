@@ -82,8 +82,8 @@ require (
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2 v2.2.0
-	github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261013183209-f794d75afb69
-	github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261013183209-f794d75afb69
+	github.com/LeanerCloud/cloud-commitments-go/pkg v0.0.0-20261013184038-e9a33bb14d0d
+	github.com/LeanerCloud/cloud-commitments-go/providers/aws v0.0.0-20261013184038-e9a33bb14d0d
 	github.com/LeanerCloud/cloud-commitments-go/providers/azure v0.0.0-20261007133317-58c25f04c49b
 	github.com/LeanerCloud/cloud-commitments-go/providers/gcp v0.0.0-20261006205158-7ff8c1aee1bb
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.45.3
