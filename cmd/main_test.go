@@ -31,6 +31,12 @@ func TestMain(m *testing.M) {
 	engineVersionFetcher = func(context.Context, Config, bool) (engineVersionData, error) {
 		return engineVersionData{}, nil
 	}
+	// An empty account turns the cross-account purchase check off for tests
+	// that do not set CallerAccountID; the check is tested explicitly in
+	// purchase_account_guard_test.go.
+	callerAccountFetcher = func(context.Context, aws.Config) (string, error) {
+		return "", nil
+	}
 	code := m.Run()
 	_ = os.Remove(toolCfg.AuditLog)
 	os.Exit(code)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/recommendations"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/google/uuid"
 )
 
@@ -238,6 +240,10 @@ func exitIfInterrupted(ctx context.Context, phase string) {
 // runToolMultiService within the cyclomatic-complexity limit.
 func runPurchaseAndReport(ctx context.Context, awsCfg aws.Config, scoredResult scorer.ScoredResult, isDryRun bool, cfg Config, drops *common.DropSummary) error {
 	runID := uuid.New().String()
+	cfg, err := withCallerAccount(ctx, awsCfg, cfg)
+	if err != nil {
+		return err
+	}
 	if !confirmPurchaseRun(scoredResult.Passed, isDryRun) {
 		printDropSummary(drops)
 		AppLogger.Printf("\n❌ Purchase canceled.\n")
@@ -300,6 +306,32 @@ func printDropSummary(drops *common.DropSummary) {
 	if line := drops.FormatOneLine(); line != "" {
 		AppLogger.Printf("\n%s\n", line)
 	}
+}
+
+// callerAccountFetcher is the seam tests replace so they never reach STS.
+var callerAccountFetcher = fetchCallerAccount
+
+func fetchCallerAccount(ctx context.Context, awsCfg aws.Config) (string, error) {
+	out, err := sts.NewFromConfig(awsCfg).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return "", err
+	}
+	if aws.ToString(out.Account) == "" {
+		return "", errors.New("GetCallerIdentity returned no account")
+	}
+	return aws.ToString(out.Account), nil
+}
+
+// withCallerAccount returns cfg with CallerAccountID resolved, so the purchase
+// preconditions can refuse recommendations that belong to another account. It
+// runs on dry runs too, so a dry run predicts what a real run will refuse.
+func withCallerAccount(ctx context.Context, awsCfg aws.Config, cfg Config) (Config, error) {
+	account, err := callerAccountFetcher(ctx, awsCfg)
+	if err != nil {
+		return cfg, fmt.Errorf("cannot determine the AWS account of the credentials (needed to check purchases): %w", err)
+	}
+	cfg.CallerAccountID = account
+	return cfg, nil
 }
 
 // loadAWSConfig builds an aws.Config from the tool config.
@@ -578,7 +610,7 @@ func purchaseAuditStatus(result common.PurchaseResult) string {
 func purchaseSingleRec(ctx context.Context, awsCfg aws.Config, rec common.Recommendation, index int, isDryRun bool, cfg Config) (purchaseResult common.PurchaseResult, auditStatus string) {
 	label := purchaseRegionLabel(rec, rec.Region)
 	AppLogger.Printf("  [%d] %s %s %s (count=%d)\n", index, rec.Service, label, rec.ResourceType, rec.Count)
-	if err := validatePurchasePreconditions(rec, rec.Region); err != nil {
+	if err := validatePurchasePreconditions(rec, rec.Region, cfg.CallerAccountID); err != nil {
 		AppLogger.Printf("    ❌ cannot purchase: %v\n", err)
 		return preconditionFailure(rec, err, isDryRun), "error"
 	}
@@ -721,6 +753,10 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 		return nil
 	}
 
+	cfg, err = withCallerAccount(ctx, awsCfg, cfg)
+	if err != nil {
+		return err
+	}
 	return runCSVPurchases(ctx, awsCfg, recs, isDryRun, cfg, runID)
 }
 
@@ -990,7 +1026,7 @@ func processPurchaseLoop(ctx context.Context, recs []common.Recommendation, regi
 // runOnePurchase validates and then dry-runs or executes one CSV-path
 // recommendation. attempted reports whether a real purchase call was made.
 func runOnePurchase(ctx context.Context, rec common.Recommendation, label, region string, index int, isDryRun bool, serviceClient provider.ServiceClient, cfg Config) (result common.PurchaseResult, status string, attempted bool) {
-	if err := validatePurchasePreconditions(rec, region); err != nil {
+	if err := validatePurchasePreconditions(rec, region, cfg.CallerAccountID); err != nil {
 		return preconditionFailure(rec, err, isDryRun), "error", false
 	}
 	if isDryRun {

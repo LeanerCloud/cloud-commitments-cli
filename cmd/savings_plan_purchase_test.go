@@ -262,7 +262,7 @@ func TestValidatePurchasePreconditions(t *testing.T) {
 		"rds":             {Service: common.ServiceRDS, Region: "us-east-1"},
 	}
 	for name, rec := range ok {
-		assert.NoError(t, validatePurchasePreconditions(rec, rec.Region), name)
+		assert.NoError(t, validatePurchasePreconditions(rec, rec.Region, ""), name)
 	}
 	bad := map[string]common.Recommendation{
 		"sp nil details":   mut(parserShapedSP(), func(r *common.Recommendation) { r.Details = nil }),
@@ -282,7 +282,7 @@ func TestValidatePurchasePreconditions(t *testing.T) {
 		"rds no region": {Service: common.ServiceRDS},
 	}
 	for name, rec := range bad {
-		assert.Error(t, validatePurchasePreconditions(rec, rec.Region), name)
+		assert.Error(t, validatePurchasePreconditions(rec, rec.Region, ""), name)
 	}
 }
 
@@ -351,7 +351,7 @@ func TestCSVRoundTrip_SavingsPlanAndEC2DetailsSurviveWriteThenRead(t *testing.T)
 	assert.Equal(t, ec2.Details, byService[ec2.Service].Details)
 	assert.Equal(t, rds.Details, byService[rds.Service].Details)
 	for _, r := range out {
-		assert.NoError(t, validatePurchasePreconditions(r, r.Region), "%s", r.Service)
+		assert.NoError(t, validatePurchasePreconditions(r, r.Region, ""), "%s", r.Service)
 	}
 }
 

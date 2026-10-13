@@ -37,6 +37,10 @@ const (
 
 // Config holds all configuration for the RI helper tool.
 type Config struct {
+	// CallerAccountID is the account the credentials belong to (STS
+	// GetCallerIdentity), set at run start. Purchases are refused for
+	// recommendations owned by any other account.
+	CallerAccountID        string
 	AuditLog               string
 	CSVInput               string
 	IdempotencyWindow      string
