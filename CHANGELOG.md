@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `configure gcp` key cleanup: the minted key is now deleted when the upload
+  panics, a second Ctrl-C aborts the cleanup, the local key file is removed
+  first, and a possibly orphaned key is reported when `CreateKey` fails
+  ambiguously (cancellation, timeout, 5xx or network error), with the `gcloud`
+  commands to list and delete it (#2117).
 - `--min-savings-pct` now rejects values below 0 or above 100 at validation.
   Previously a negative value was accepted as no filter and a value above 100
   silently dropped every recommendation (#2161).

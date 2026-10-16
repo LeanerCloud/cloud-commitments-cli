@@ -305,6 +305,9 @@ func runGCPInterruptChild(dir string) error {
 	if !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("expected cancellation from the real coordinator, got %w", err)
 	}
+	if os.Getenv("CUDLY_GCP_SIGNAL_PHASE") == "mint" && !strings.Contains(err.Error(), "may have been created") {
+		return fmt.Errorf("interrupted CreateKey must warn that a key may exist, got %w", err)
+	}
 	return nil
 }
 

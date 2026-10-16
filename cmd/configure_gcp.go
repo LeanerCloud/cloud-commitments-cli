@@ -565,6 +565,19 @@ func (k *iamKeyProvisioner) CreateKey(ctx context.Context, saEmail string) (keyN
 	return key.Name, key.PrivateKeyData, nil
 }
 
+// createKeyError wraps a CreateKey failure. Only a 4xx googleapi error proves
+// the server rejected the request; anything else (cancellation, timeout, 5xx,
+// network error) may have followed a committed mint, so warn the operator.
+func createKeyError(saEmail string, err error) error {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) && gerr.Code >= 400 && gerr.Code < 500 {
+		return fmt.Errorf("failed to create service account key: %w", err)
+	}
+	return fmt.Errorf("failed to create service account key: %w; the key may have been created before the request ended: "+
+		"list keys with `gcloud iam service-accounts keys list --iam-account=%s --managed-by=user` and delete any key created just now "+
+		"with `gcloud iam service-accounts keys delete <KEY_ID> --iam-account=%s`", err, saEmail, saEmail)
+}
+
 func (k *iamKeyProvisioner) DeleteKey(ctx context.Context, keyName string) error {
 	_, err := k.svc.Projects.ServiceAccounts.Keys.Delete(keyName).Context(ctx).Do()
 	return err
@@ -633,7 +646,7 @@ func writeServiceAccountKey(ctx context.Context, p gcpKeyProvisioner, saEmail, k
 
 	keyName, privateKeyData, err := p.CreateKey(ctx, saEmail)
 	if err != nil {
-		return "", fmt.Errorf("failed to create service account key: %w", err)
+		return "", createKeyError(saEmail, err)
 	}
 
 	// From here on, any failure must delete the newly minted remote key so it

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	cloudresourcemanager "google.golang.org/api/cloudresourcemanager/v1"
+	"google.golang.org/api/googleapi"
 )
 
 // --- addMemberToPolicyBinding -------------------------------------------------
@@ -219,17 +220,49 @@ func TestWriteServiceAccountKey_RollbackFailureSurfaced(t *testing.T) {
 // local file is left behind.
 func TestWriteServiceAccountKey_CreateFailureNoOrphan(t *testing.T) {
 	m := &mockGCPKeyProvisioner{
-		createErr: errors.New("iam 403"),
+		createErr: &googleapi.Error{Code: 403},
 	}
 	keyFile := filepath.Join(t.TempDir(), "cudly-gcp-key.json")
 
 	_, err := writeServiceAccountKey(context.Background(), m, "sa@proj.iam.gserviceaccount.com", keyFile)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create service account key")
+	assert.NotContains(t, err.Error(), "may have been created", "a 4xx rejection minted nothing")
 	assert.False(t, m.deleteCalled, "no remote key was minted, so DeleteKey must not be called")
 
 	_, statErr := os.Stat(keyFile)
 	assert.True(t, os.IsNotExist(statErr), "the reserved key file must be removed when minting fails")
+}
+
+// TestWriteServiceAccountKey_CreateFailureAmbiguous verifies that only a 4xx
+// googleapi error is a definite failure; every other outcome may have minted a key.
+func TestWriteServiceAccountKey_CreateFailureAmbiguous(t *testing.T) {
+	const sa = "sa@proj.iam.gserviceaccount.com"
+	cases := []struct {
+		name      string
+		err       error
+		ambiguous bool
+	}{
+		{"403 definite", &googleapi.Error{Code: 403}, false},
+		{"500 ambiguous", &googleapi.Error{Code: 500}, true},
+		{"canceled ambiguous", context.Canceled, true},
+		{"non-googleapi ambiguous", errors.New("connection reset"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &mockGCPKeyProvisioner{createErr: tc.err}
+			_, err := writeServiceAccountKey(context.Background(), m, sa, filepath.Join(t.TempDir(), "k.json"))
+			require.Error(t, err)
+			require.ErrorIs(t, err, tc.err)
+			if !tc.ambiguous {
+				assert.NotContains(t, err.Error(), "may have been created")
+				return
+			}
+			assert.Contains(t, err.Error(), "may have been created")
+			assert.Contains(t, err.Error(), "gcloud iam service-accounts keys list --iam-account="+sa+" --managed-by=user")
+			assert.Contains(t, err.Error(), "gcloud iam service-accounts keys delete <KEY_ID> --iam-account="+sa)
+		})
+	}
 }
 
 // TestWriteServiceAccountKey_ReserveFailureNoMint verifies that if the
