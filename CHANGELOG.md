@@ -17,8 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   Previously a negative value was accepted as no filter and a value above 100
   silently dropped every recommendation (#2161).
 - Replaying or retrying an `--input-csv` purchase no longer re-buys an
-  ElastiCache reservation that the first run already bought: CSV rows now carry
-  the AWS provider, so the duplicate check matches them. CSV Savings Plan rows
+  ElastiCache or MemoryDB reservation that the first run already bought: CSV
+  rows now carry the AWS provider, and MemoryDB rows keep their engine, so the
+  duplicate check matches them. CSV Savings Plan rows
   also now match `--include-regions` and `--exclude-regions` on their plan
   region (#2228).
 - `configure-gcp`: skipping (or giving an unknown answer at) the "Create Service

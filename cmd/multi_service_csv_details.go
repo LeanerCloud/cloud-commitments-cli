@@ -60,7 +60,7 @@ func csvDetails(rec common.Recommendation, record []string, colIdx map[string]in
 			AZConfig:      getCSVField(record, colIdx, "Deployment"),
 			InstanceClass: rec.ResourceType,
 		}, nil
-	case common.ServiceElastiCache, common.ServiceCache:
+	case common.ServiceElastiCache, common.ServiceCache, common.ServiceMemoryDB:
 		return &common.CacheDetails{Engine: engine, NodeType: rec.ResourceType}, nil
 	case common.ServiceEC2, common.ServiceCompute:
 		return &common.ComputeDetails{

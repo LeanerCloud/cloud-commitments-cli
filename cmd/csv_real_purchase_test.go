@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -106,6 +107,12 @@ type csvPurchaseEnv struct {
 // because entering at runCSVPurchases skips withCallerAccount.
 func newCSVPurchaseEnv(t *testing.T) *csvPurchaseEnv {
 	t.Helper()
+	return newCSVPurchaseEnvFor(t, csvPurchases, rdsFixtures(), cacheFixtures())
+}
+
+// newCSVPurchaseEnvFor is newCSVPurchaseEnv with its own CSV and fixtures.
+func newCSVPurchaseEnvFor(t *testing.T, csv string, fixtureSets ...map[string]awsFixture) *csvPurchaseEnv {
+	t.Helper()
 	origCfg := toolCfg
 	t.Cleanup(func() { toolCfg = origCfg })
 	denyHits := isolateAWSEnv(t)
@@ -115,14 +122,11 @@ func newCSVPurchaseEnv(t *testing.T) *csvPurchaseEnv {
 	// purchasecfg.NewConfig swaps any other HTTPClient type for the real network.
 	_, isStd := awsCfg.HTTPClient.(*http.Client)
 	require.True(t, isStd, "the fixture transport must ride on *http.Client")
-	for k, v := range rdsFixtures() {
-		stub.fixtures[k] = v
-	}
-	for k, v := range cacheFixtures() {
-		stub.fixtures[k] = v
+	for _, set := range fixtureSets {
+		maps.Copy(stub.fixtures, set)
 	}
 	dir := t.TempDir()
-	csvPath := writeTestRecommendationsCSV(t, csvPurchases)
+	csvPath := writeTestRecommendationsCSV(t, csv)
 	env := &csvPurchaseEnv{stub: stub, log: stub.log, denyHits: denyHits, dir: dir}
 	env.run = func(report string) {
 		recs, err := loadRecommendationsFromCSV(csvPath)
@@ -306,4 +310,64 @@ func TestLoadRecommendationsFromCSV_StampsAWSProvider(t *testing.T) {
 	for _, rec := range recs {
 		assert.Equal(t, common.ProviderAWS, rec.Provider, rec.Service)
 	}
+}
+
+const (
+	memdbHost     = "memory-db.eu-west-1.amazonaws.com"
+	memdbPurchase = "PurchaseReservedNodesOffering"
+	memdbRespID   = "aws-ri-memdb-1"
+	memdbCSV      = `Service,Region,ResourceType,Engine,Deployment,Count,Term,PaymentOption
+memorydb,eu-west-1,db.t4g.small,redis,,3,1yr,all-upfront
+`
+)
+
+// memdbFixtures answers MemoryDB (awsJson1.1) with no existing node, one
+// offering and a purchase; existing, when set, is the node a replay finds.
+func memdbFixtures(existing bool) map[string]awsFixture {
+	nodes := `[]`
+	if existing {
+		nodes = fmt.Sprintf(`[{"ReservationId":%q,"NodeType":"db.t4g.small","NodeCount":3,"Duration":31536000,"StartTime":%d,"State":"active"}]`,
+			memdbRespID, time.Now().Unix())
+	}
+	return map[string]awsFixture{
+		"memory-db DescribeReservedNodes": {body: `{"ReservedNodes":` + nodes + `}`},
+		"memory-db DescribeReservedNodesOfferings": {body: `{"ReservedNodesOfferings":[{"ReservedNodesOfferingId":"memdb-offering-1",` +
+			`"NodeType":"db.t4g.small","Duration":31536000,"OfferingType":"All Upfront"}]}`},
+		"memory-db " + memdbPurchase: {body: `{"ReservedNode":{"ReservationId":"` + memdbRespID + `","NodeCount":3}}`},
+	}
+}
+
+// The loader must keep the MemoryDB engine column: the dedupe key of a CSV row
+// is only equal to an existing node's ("redis") when Details carry it.
+func TestCSVReplay_MemoryDB(t *testing.T) {
+	env := newCSVPurchaseEnvFor(t, memdbCSV, memdbFixtures(false))
+	env.run("report1.csv")
+	assert.Equal(t, []string{"true"}, env.report(t, "report1.csv")["Success"])
+	assert.Equal(t, []string{memdbRespID}, env.report(t, "report1.csv")["CommitmentID"])
+	env.stub.requireRequests(t, map[string]int{
+		memdbHost + " DescribeReservedNodes":          1,
+		memdbHost + " DescribeReservedNodesOfferings": 1,
+		memdbHost + " " + memdbPurchase:               1,
+	})
+
+	maps.Copy(env.stub.fixtures, memdbFixtures(true))
+	env.log.Reset()
+	env.run("report2.csv")
+	env.stub.requireRequests(t, map[string]int{
+		memdbHost + " DescribeReservedNodes":          2,
+		memdbHost + " DescribeReservedNodesOfferings": 1,
+		memdbHost + " " + memdbPurchase:               1,
+	})
+	assert.Contains(t, env.log.String(), "instances → 0 instances", "the dedup must be what removed the row")
+	assert.NotContains(t, env.log.String(), "Could not check for existing RIs")
+	_, err := os.Stat(filepath.Join(env.dir, "report2.csv"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
+	assert.Zero(t, env.denyHits.Load())
+}
+
+func TestLoadRecommendationsFromCSV_KeepsMemoryDBEngine(t *testing.T) {
+	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, memdbCSV))
+	require.NoError(t, err)
+	require.Len(t, recs, 1)
+	assert.Equal(t, &common.CacheDetails{Engine: "redis", NodeType: "db.t4g.small"}, recs[0].Details)
 }
