@@ -187,10 +187,10 @@ repos:
   # is run by ci.yml's `unit-tests` job with -race AND an integration pass
   # with -tags=integration.
   #
-  # Moving it to the pre-push stage keeps the local safety net (devs who
-  # run `pre-commit install --hook-type pre-push` still get it on `git
-  # push`) while letting the CI pre-commit workflow stay focused on
-  # style/security/syntax. Pre-commit's default stage filter is
+  # Moving it to the pre-push stage keeps the local safety net (a plain
+  # `pre-commit install` arms pre-push too, via default_install_hook_types,
+  # so devs get it on `git push`) while letting the CI pre-commit workflow
+  # stay focused on style/security/syntax. Pre-commit's default stage filter is
   # `pre-commit`, so the CI workflow's `pre-commit run --all-files` skips
   # this hook automatically.
   - repo: local
@@ -205,4 +205,5 @@ repos:
 
 # Global configuration
 default_stages: [pre-commit, pre-push]
+default_install_hook_types: [pre-commit, pre-push]
 fail_fast: false
