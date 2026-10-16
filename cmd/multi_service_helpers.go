@@ -270,6 +270,7 @@ func adjustRecsForDuplicates(ctx context.Context, recs []common.Recommendation, 
 	if err != nil {
 		return recs, err // Return original recommendations with error
 	}
+	adjustedRecs = mapRecs(adjustedRecs, refreshCountLinear)
 
 	originalInstances := CalculateTotalInstances(recs)
 	adjustedInstances := CalculateTotalInstances(adjustedRecs)
@@ -826,7 +827,7 @@ func checkDuplicates(
 			AppLogger.Printf("  🔍 Adjusted recommendations: %d instances → %d instances to avoid duplicate purchases\n", originalInstances, adjustedInstances)
 		}
 		drops.Add(common.DropDuplicateDedup, len(dedupedOut))
-		filteredRecs = adjustedRecs
+		filteredRecs = mapRecs(adjustedRecs, refreshCountLinear)
 	}
 
 	return filteredRecs

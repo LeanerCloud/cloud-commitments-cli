@@ -13,8 +13,9 @@ import (
 // alone leaves the row claiming the money of a quantity nobody will buy
 // (#1844). The scaling goes through common.ScaleRecommendationCosts, the same
 // helper ApplyInstanceLimit and the coverage paths use, so the arithmetic
-// cannot drift between the flags. ProjectedCoverage / ProjectedUtilization are
-// count-linear but not re-derived here, exactly as after a cap (#1845).
+// cannot drift between the flags. ProjectedCoverage / ProjectedUtilization and
+// a Redshift NumberOfNodes are count-linear, so refreshCountLinear re-derives
+// them from the new Count (#1845).
 //
 // Savings Plans are left entirely alone, Count included. The flag is
 // documented as an override for "all selected RIs", an SP commitment is
@@ -55,6 +56,7 @@ func ApplyCountOverride(recs []common.Recommendation, overrideCount int32) []com
 		default:
 			result[i] = common.ScaleRecommendationCosts(rec, float64(overrideCount)/float64(rec.Count))
 			result[i].Count = int(overrideCount)
+			result[i] = refreshCountLinear(result[i])
 			if int(overrideCount) > evidencedCount(rec) {
 				extrapolated++
 			}

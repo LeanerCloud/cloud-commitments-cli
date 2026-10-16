@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -137,20 +138,20 @@ func CalculateTotalInstances(recs []common.Recommendation) int {
 // ApplyCoverage delegates to recfilter.ApplyCoverage, wiring AppLogger as the
 // logging sink. Substantive documentation lives on recfilter.ApplyCoverage.
 func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Recommendation {
-	return recfilter.ApplyCoverage(recs, coverage, AppLogger.Printf, nil)
+	return mapRecs(recfilter.ApplyCoverage(recs, coverage, AppLogger.Printf, nil), syncDataWarehouseNodes)
 }
 
 // applyCoverage delegates to recfilter.ApplyCoverage, wiring AppLogger as the
 // logging sink. Substantive documentation lives on recfilter.ApplyCoverage.
 func applyCoverage(recs []common.Recommendation, coverage float64, drops *common.DropSummary) []common.Recommendation {
-	return recfilter.ApplyCoverage(recs, coverage, AppLogger.Printf, drops)
+	return mapRecs(recfilter.ApplyCoverage(recs, coverage, AppLogger.Printf, drops), syncDataWarehouseNodes)
 }
 
 // ApplyTargetCoverage delegates to recfilter.ApplyTargetCoverage, wiring
 // AppLogger as the logging sink. Substantive documentation (the RI/SP sizing
 // formulas and the #338 flag-name history) lives on recfilter.ApplyTargetCoverage.
 func ApplyTargetCoverage(recs []common.Recommendation, targetPct float64, drops *common.DropSummary) []common.Recommendation {
-	return recfilter.ApplyTargetCoverage(recs, targetPct, AppLogger.Printf, drops)
+	return mapRecs(recfilter.ApplyTargetCoverage(recs, targetPct, AppLogger.Printf, drops), syncDataWarehouseNodes)
 }
 
 // applySizing chooses target-coverage or coverage sizing.
@@ -187,7 +188,9 @@ func applySizing(recs []common.Recommendation, cfg Config, coverage float64, dro
 // alone leaves the row claiming the savings of instances the run will not
 // buy. The run summary and the purchase report then overstate the benefit
 // of a capped run, which is the wrong direction to be wrong in on a money
-// path (#1830).
+// path (#1830). The count-linear fields that are not money (ProjectedCoverage,
+// ProjectedUtilization, Redshift NumberOfNodes) are re-derived from the new
+// Count by refreshCountLinear (#1845).
 func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []common.Recommendation {
 	if maxInstances <= 0 {
 		return recs
@@ -210,6 +213,7 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 		if rec.Count > remaining {
 			adjusted = common.ScaleRecommendationCosts(rec, float64(remaining)/float64(rec.Count))
 			adjusted.Count = remaining
+			adjusted = refreshCountLinear(adjusted)
 		}
 		result = append(result, adjusted)
 		// Only a positive Count consumes budget. Subtracting a non-positive
@@ -220,6 +224,90 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 		}
 	}
 	return result
+}
+
+// refreshCountLinear re-derives the count-linear, non-money fields after a
+// caller outside the shared sizing code changed rec.Count (#1845): the
+// projections the target-coverage sizer wrote, and the Redshift node count
+// mirrored from Count at parse. It is idempotent on a row whose Count did not
+// change, so callers may apply it to every row of a slice.
+func refreshCountLinear(rec common.Recommendation) common.Recommendation {
+	return syncDataWarehouseNodes(rederiveProjections(rec))
+}
+
+// mapRecs applies fn to every rec into a new slice, keeping a nil input nil.
+func mapRecs(recs []common.Recommendation, fn func(common.Recommendation) common.Recommendation) []common.Recommendation {
+	if recs == nil {
+		return nil
+	}
+	out := make([]common.Recommendation, len(recs))
+	for i := range recs {
+		out[i] = fn(recs[i])
+	}
+	return out
+}
+
+// rederiveProjections mirrors the projection formulas of the shared sizer
+// (recfilter applyTargetCoverageRI) for the rec's current Count. A projection
+// that is zero ("not computed") stays zero. Savings Plans, rows without a
+// usage signal (zero, negative, NaN or infinite avg) and rows without a positive
+// Count are returned unchanged.
+// RDS ProjectedCoverage is a family aggregate set by family-NU sizing, which a
+// per-row formula would corrupt, so only RDS ProjectedUtilization is refreshed.
+func rederiveProjections(rec common.Recommendation) common.Recommendation {
+	avg := rec.AverageInstancesUsedPerHour
+	if common.IsSavingsPlan(rec.Service) || rec.Count <= 0 || !(avg > 0) || math.IsInf(avg, 1) {
+		return rec
+	}
+	n := float64(rec.Count)
+	if rec.ProjectedUtilization != 0 {
+		rec.ProjectedUtilization = math.Min(100, avg/n*100)
+	}
+	if rec.ProjectedCoverage != 0 && rec.ExistingCoverageKnown && rec.Service != common.ServiceRDS {
+		rec.ProjectedCoverage = math.Min(100, rec.ExistingCoveragePct+n/avg*100)
+	}
+	return rec
+}
+
+// syncDataWarehouseNodes re-syncs a mirrored NumberOfNodes (and the
+// single-node/multi-node ClusterType derived from it) with rec.Count. The
+// details are copied, never written through the shared pointer. A zero
+// NumberOfNodes means the provider does not mirror Count and stays zero.
+func syncDataWarehouseNodes(rec common.Recommendation) common.Recommendation {
+	if rec.Count <= 0 {
+		return rec
+	}
+	d, isPtr, ok := dataWarehouseDetails(rec.Details)
+	if !ok || d.NumberOfNodes <= 0 || d.NumberOfNodes == rec.Count {
+		return rec
+	}
+	d.NumberOfNodes = rec.Count
+	if d.ClusterType == "single-node" || d.ClusterType == "multi-node" {
+		d.ClusterType = "multi-node"
+		if rec.Count == 1 {
+			d.ClusterType = "single-node"
+		}
+	}
+	if isPtr {
+		rec.Details = &d
+	} else {
+		rec.Details = d
+	}
+	return rec
+}
+
+// dataWarehouseDetails returns a copy of a pointer or value DataWarehouseDetails.
+func dataWarehouseDetails(d common.ServiceDetails) (cp common.DataWarehouseDetails, isPtr, ok bool) {
+	switch v := d.(type) {
+	case *common.DataWarehouseDetails:
+		if v == nil {
+			return cp, false, false
+		}
+		return *v, true, true
+	case common.DataWarehouseDetails:
+		return v, false, true
+	}
+	return cp, false, false
 }
 
 // ConfirmPurchase requires terminal input; totalSavings is monthly savings, not purchase cost.
