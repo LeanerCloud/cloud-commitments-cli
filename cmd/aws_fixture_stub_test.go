@@ -26,6 +26,7 @@ type awsFixtureStub struct {
 	t        *testing.T
 	mu       sync.Mutex
 	received map[string]int
+	forms    map[string][]url.Values // request forms per "host operation", in arrival order
 	fixtures map[string]awsFixture
 	log      *bytes.Buffer
 }
@@ -81,6 +82,7 @@ func (s *awsFixtureStub) RoundTrip(r *http.Request) (*http.Response, error) {
 	op := awsOperation(r, form)
 	s.mu.Lock()
 	s.received[r.URL.Host+" "+op]++
+	s.forms[r.URL.Host+" "+op] = append(s.forms[r.URL.Host+" "+op], form)
 	s.mu.Unlock()
 	svc, _, _ := strings.Cut(r.URL.Host, ".")
 	fx, ok := s.fixtures[svc+" "+op]
@@ -108,7 +110,7 @@ func (s *awsFixtureStub) RoundTrip(r *http.Request) (*http.Response, error) {
 // no environment.
 func newAWSFixtureConfig(t *testing.T) (aws.Config, *awsFixtureStub) {
 	t.Helper()
-	stub := &awsFixtureStub{t: t, received: map[string]int{}, fixtures: maps.Clone(awsFixtures), log: captureAppLog(t)}
+	stub := &awsFixtureStub{t: t, received: map[string]int{}, forms: map[string][]url.Values{}, fixtures: maps.Clone(awsFixtures), log: captureAppLog(t)}
 	return aws.Config{
 		Region:      "us-east-1",
 		HTTPClient:  &http.Client{Transport: stub},
