@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -36,7 +37,7 @@ func TestRunConfigureGCP_InterruptCleansMintedKey(t *testing.T) {
 			child, dir, stdout, stderr := startGCPInterruptChild(t, "upload")
 			defer stdout.Close()
 			var keyFile string
-			require.Eventually(t, func() bool {
+			requireMarker(t, child, stderr, "minted key.json with fixture secret", func() bool {
 				matches, err := filepath.Glob(filepath.Join(dir, "cudly-gcp-key-*", "key.json"))
 				if err != nil || len(matches) != 1 {
 					return false
@@ -47,7 +48,7 @@ func TestRunConfigureGCP_InterruptCleansMintedKey(t *testing.T) {
 				}
 				keyFile = matches[0]
 				return true
-			}, 10*time.Second, 10*time.Millisecond)
+			})
 			require.NoError(t, child.Process.Signal(sig))
 			err := child.Wait()
 			require.NoFileExists(t, keyFile)
@@ -63,10 +64,10 @@ func TestRunConfigureGCP_InterruptCleansMintedKey(t *testing.T) {
 func TestRunConfigureGCP_InterruptDuringMint(t *testing.T) {
 	child, dir, stdout, stderr := startGCPInterruptChild(t, "mint")
 	defer stdout.Close()
-	require.Eventually(t, func() bool {
+	requireMarker(t, child, stderr, "creating marker", func() bool {
 		_, err := os.Stat(filepath.Join(dir, "creating"))
 		return err == nil
-	}, 10*time.Second, 10*time.Millisecond)
+	})
 	require.NoError(t, child.Process.Signal(os.Interrupt))
 	require.NoError(t, child.Wait(), "child stderr: %s", stderr.String())
 	matches, err := filepath.Glob(filepath.Join(dir, "cudly-gcp-key-*"))
@@ -94,7 +95,56 @@ func TestRunConfigureGCP_InterruptAtPromptExits(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, "minted"))
 }
 
-func startGCPInterruptChild(t *testing.T, phase string) (*exec.Cmd, string, io.ReadCloser, *bytes.Buffer) {
+// syncBuffer lets the test read child stderr while exec is still copying it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// requireMarker polls cond for 10s. On timeout it fails with the child's
+// stderr and process state; child stdout is left untouched because one
+// scenario keeps it deliberately full.
+func requireMarker(t *testing.T, child *exec.Cmd, stderr *syncBuffer, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after 10s waiting for %s\nchild state: %s\nchild stderr: %q", what, childState(child), stderr.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// childState reaps the child if it already exited, so a later Wait would
+// fail; it is only called on the failing path.
+func childState(child *exec.Cmd) string {
+	var ws syscall.WaitStatus
+	pid, err := syscall.Wait4(child.Process.Pid, &ws, syscall.WNOHANG, nil)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("wait4 failed: %v", err)
+	case pid == 0:
+		return fmt.Sprintf("still running (pid %d)", child.Process.Pid)
+	case ws.Signaled():
+		return fmt.Sprintf("exited, killed by signal %v", ws.Signal())
+	default:
+		return fmt.Sprintf("exited with code %d", ws.ExitStatus())
+	}
+}
+
+func startGCPInterruptChild(t *testing.T, phase string) (*exec.Cmd, string, io.ReadCloser, *syncBuffer) {
 	t.Helper()
 	dir := t.TempDir()
 	adc := filepath.Join(dir, "adc.json")
@@ -111,7 +161,7 @@ func startGCPInterruptChild(t *testing.T, phase string) (*exec.Cmd, string, io.R
 	t.Cleanup(func() { _ = stdin.Close() })
 	stdout, err := child.StdoutPipe()
 	require.NoError(t, err)
-	stderr := new(bytes.Buffer)
+	stderr := new(syncBuffer)
 	child.Stderr = stderr
 	require.NoError(t, child.Start())
 	t.Cleanup(func() { _ = child.Process.Kill() })
