@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode"
@@ -156,15 +157,30 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 	}
 	store := NewAWSSecretsStore(secretsmanager.NewFromConfig(cfg))
 
-	var stop context.CancelFunc
-	defer func() {
-		if stop != nil {
-			stop()
+	var finished atomic.Bool
+	var release context.CancelFunc
+	finish := func() {
+		// Store before release(): the cancel wakes the goroutine, which reads it.
+		finished.Store(true)
+		if release != nil {
+			release()
 		}
-	}()
+	}
+	defer finish()
 	beginUpload := func() context.Context {
-		if stop == nil {
-			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		if release == nil {
+			sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			release = stop
+			ctx = sigCtx
+			go func() {
+				<-sigCtx.Done()
+				// Restore default signal handling so a second Ctrl-C aborts
+				// the cleanup; stop() also cancels sigCtx, hence the flag.
+				stop()
+				if !finished.Load() {
+					fmt.Fprintln(os.Stderr, "Interrupted: finishing cleanup (up to 60s). Press Ctrl-C again to abort immediately.")
+				}
+			}()
 		}
 		return ctx
 	}
@@ -178,7 +194,7 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	stop()
+	finish()
 	if mintedKeyName != "" {
 		fmt.Println("Removed the local copy of the minted key.")
 	}
@@ -201,10 +217,13 @@ func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName
 			if aborted {
 				err = errors.New("upload aborted before completion")
 			}
+			// Remove the local copy first: a second Ctrl-C during the slow
+			// remote delete kills the process and must not leave it on disk.
+			rmErr := removeMintedGCPKey(credsFile)
 			if err != nil {
 				err = deleteMintedGCPKeyRemotely(err, mintedKeyName, deleteKey)
 			}
-			if rmErr := removeMintedGCPKey(credsFile); rmErr != nil {
+			if rmErr != nil {
 				err = errors.Join(err, rmErr)
 			}
 			if aborted {
@@ -231,6 +250,7 @@ func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName
 func deleteMintedGCPKeyRemotely(cause error, keyName string, deleteKey func(context.Context, string) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), gcpSDKCallTimeout)
 	defer cancel()
+	fmt.Fprintf(os.Stderr, "Deleting minted key; if aborted, delete it with: %s\n", gcloudDeleteKeyCommand(keyName))
 	if err := deleteKey(ctx, keyName); err != nil {
 		return fmt.Errorf("%w; the minted key is still active in GCP and deleting it failed (%w); delete it with: %s", cause, err, gcloudDeleteKeyCommand(keyName))
 	}

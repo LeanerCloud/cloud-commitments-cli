@@ -95,6 +95,57 @@ func TestRunConfigureGCP_InterruptAtPromptExits(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(dir, "minted"))
 }
 
+func TestRunConfigureGCP_SecondInterruptAbortsSlowDelete(t *testing.T) {
+	child, dir, stdout, stderr := startGCPInterruptChild(t, "slowdelete")
+	defer stdout.Close()
+	requireMarker(t, child, stderr, "minted key.json with fixture secret", func() bool {
+		matches, err := filepath.Glob(filepath.Join(dir, "cudly-gcp-key-*", "key.json"))
+		if err != nil || len(matches) != 1 {
+			return false
+		}
+		data, err := os.ReadFile(matches[0])
+		return err == nil && bytes.Contains(data, []byte("fixture-secret"))
+	})
+	require.NoError(t, child.Process.Signal(os.Interrupt))
+	// Key the second signal on the message the handler prints after it
+	// restores default signal handling; an earlier one would be swallowed.
+	requireMarker(t, child, stderr, "Interrupted message", func() bool {
+		return strings.Contains(stderr.String(), "Interrupted: finishing cleanup")
+	})
+	requireMarker(t, child, stderr, "deleting marker", func() bool {
+		_, err := os.Stat(filepath.Join(dir, "deleting"))
+		return err == nil
+	})
+	require.Contains(t, stderr.String(), "if aborted, delete it with: gcloud iam service-accounts keys delete fixture-key --iam-account=cudly-service-account@fixture-project.iam.gserviceaccount.com")
+	matches, err := filepath.Glob(filepath.Join(dir, "cudly-gcp-key-*"))
+	require.NoError(t, err)
+	require.Empty(t, matches, "local key must be removed before the slow remote delete")
+	require.NoError(t, child.Process.Signal(os.Interrupt))
+	done := make(chan error, 1)
+	go func() { done <- child.Wait() }()
+	select {
+	case err := <-done:
+		require.Error(t, err, "child stderr: %s", stderr.String())
+		status, ok := child.ProcessState.Sys().(syscall.WaitStatus)
+		require.True(t, ok)
+		require.True(t, status.Signaled())
+		require.Equal(t, syscall.SIGINT, status.Signal())
+	case <-time.After(5 * time.Second):
+		t.Fatalf("second SIGINT did not abort the child\nchild stderr: %q", stderr.String())
+	}
+}
+
+func TestRunConfigureGCP_SuccessPrintsNoInterruptText(t *testing.T) {
+	child, _, stdout, stderr := startGCPInterruptChild(t, "success")
+	defer stdout.Close()
+	out, err := io.ReadAll(stdout)
+	require.NoError(t, err)
+	require.NoError(t, child.Wait(), "child stderr: %s", stderr.String())
+	require.Contains(t, string(out), "GCP configuration complete!")
+	require.NotContains(t, stderr.String(), "Interrupted")
+	require.NotContains(t, stderr.String(), "Deleting minted key")
+}
+
 // syncBuffer lets the test read child stderr while exec is still copying it.
 type syncBuffer struct {
 	mu  sync.Mutex
@@ -187,6 +238,14 @@ func runGCPInterruptChild(dir string) error {
 		case r.URL.Path == "/token":
 			_, _ = io.WriteString(w, `{"access_token":"fixture","token_type":"Bearer","expires_in":3600}`)
 		case r.Method == http.MethodDelete:
+			if os.Getenv("CUDLY_GCP_SIGNAL_PHASE") == "slowdelete" {
+				if err := os.WriteFile(filepath.Join(dir, "deleting"), nil, 0600); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				<-r.Context().Done()
+				return
+			}
 			if err := os.WriteFile(filepath.Join(dir, "deleted"), []byte(r.URL.Path), 0600); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -212,7 +271,13 @@ func runGCPInterruptChild(dir string) error {
 			material := base64.StdEncoding.EncodeToString([]byte(`{"type":"service_account","project_id":"fixture-project","client_email":"cudly-service-account@fixture-project.iam.gserviceaccount.com","private_key":"fixture-secret"}`))
 			_, _ = fmt.Fprintf(w, `{"name":"projects/fixture-project/serviceAccounts/cudly-service-account@fixture-project.iam.gserviceaccount.com/keys/fixture-key","privateKeyData":%q}`, material)
 		case r.Header.Get("X-Amz-Target") == "secretsmanager.ListSecrets":
+			if os.Getenv("CUDLY_GCP_SIGNAL_PHASE") == "success" {
+				_, _ = io.WriteString(w, `{"SecretList":[]}`)
+				return
+			}
 			<-r.Context().Done()
+		case os.Getenv("CUDLY_GCP_SIGNAL_PHASE") == "success" && r.Header.Get("X-Amz-Target") != "":
+			_, _ = io.WriteString(w, `{}`)
 		default:
 			http.Error(w, "unexpected fixture request", http.StatusBadRequest)
 		}
@@ -228,6 +293,14 @@ func runGCPInterruptChild(dir string) error {
 		return err
 	}
 	gcpOpts = GCPConfigOptions{StackName: "fixture-stack"}
+	if os.Getenv("CUDLY_GCP_SIGNAL_PHASE") == "success" {
+		credsFile := filepath.Join(dir, "operator-key.json")
+		if err := os.WriteFile(credsFile, []byte(`{"type":"service_account","project_id":"fixture-project","client_email":"cudly-service-account@fixture-project.iam.gserviceaccount.com","private_key":"fixture-secret"}`), 0600); err != nil {
+			return err
+		}
+		gcpOpts.CredentialsFile = credsFile
+		return runConfigureGCP(nil, nil)
+	}
 	err := runConfigureGCP(nil, nil)
 	if !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("expected cancellation from the real coordinator, got %w", err)
