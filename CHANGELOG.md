@@ -13,6 +13,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `configure-gcp`: skipping (or giving an unknown answer at) the "Create Service
+  Account" step no longer continues with the default
+  `cudly-service-account@<project>` email that was never created. The wizard now
+  asks for the existing service account email, validates it as a
+  `*.gserviceaccount.com` address, and uses it for the role grant and key steps
+  (#2211).
+- When `--max-instances`, `--count-override` or the duplicate-RI check lowers a
+  recommendation's count, `ProjectedCoverage` and `ProjectedUtilization` are
+  re-derived for the new count instead of reporting the figures sized for the
+  original count. This applies to RI rows with a usage signal; Savings Plans and
+  projections that were never computed are left as they are. The Redshift
+  `NumberOfNodes` now follows the count, including after `--coverage` and
+  `--target-coverage` sizing. RDS `ProjectedCoverage` is a family-wide figure and
+  is not re-derived yet; see issue #2214 (#2206).
 - An explicit `--output` path that already exists (file, directory or symlink)
   is now refused during validation instead of being silently truncated. Choose a
   new path or remove the old file; scripts that reuse one path must do the same.
