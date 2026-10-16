@@ -191,13 +191,24 @@ func runConfigureGCP(cmd *cobra.Command, args []string) error {
 // removed on every path, and on failure the remote key is deleted via
 // deleteKey so it does not stay active. Cleanup failures are returned.
 func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName, credsFile, mintedKeyName string, deleteKey func(context.Context, string) error) (creds GCPCredentials, err error) {
+	done := false
 	if mintedKeyName != "" {
 		defer func() {
+			// A panic or Goexit leaves the named err nil and done false; the
+			// return value is lost, so report the outcome on stderr. The panic
+			// keeps propagating.
+			aborted := err == nil && !done
+			if aborted {
+				err = errors.New("upload aborted before completion")
+			}
 			if err != nil {
 				err = deleteMintedGCPKeyRemotely(err, mintedKeyName, deleteKey)
 			}
 			if rmErr := removeMintedGCPKey(credsFile); rmErr != nil {
 				err = errors.Join(err, rmErr)
+			}
+			if aborted {
+				fmt.Fprintln(os.Stderr, err)
 			}
 		}()
 	}
@@ -211,6 +222,7 @@ func uploadGCPCredentialsFile(ctx context.Context, store SecretsStore, stackName
 		return GCPCredentials{}, err
 	}
 
+	done = true
 	return creds, nil
 }
 

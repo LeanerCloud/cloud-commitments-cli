@@ -382,6 +382,36 @@ func TestUploadGCPCredentialsFile_RemovalFailureReported(t *testing.T) {
 	_, err := uploadGCPCredentialsFile(context.Background(), NewMockSecretsStore(), "stack", keyFile, keyName, m.DeleteKey)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove the minted key file")
+	assert.False(t, m.deleteCalled, "the upload succeeded, so the stored key must stay active in GCP")
+}
+
+func TestUploadGCPCredentialsFile_PanicDeletesRemoteKey(t *testing.T) {
+	keyFile, keyName := mintTestGCPKey(t)
+	store := NewMockSecretsStore()
+	store.updateSecretFunc = func(context.Context, string, string) error { panic("store crashed") }
+	m := &mockGCPKeyProvisioner{}
+
+	assert.Panics(t, func() {
+		_, _ = uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, keyName, m.DeleteKey)
+	})
+	assert.True(t, m.deleteCalled, "the minted key must be deleted from GCP when the upload panics")
+	assert.Equal(t, testMintedKeyName, m.deletedKeyName)
+	assertMintedKeyGone(t, keyFile)
+}
+
+func TestUploadGCPCredentialsFile_PanicReportsFailedRemoteDelete(t *testing.T) {
+	keyFile, keyName := mintTestGCPKey(t)
+	store := NewMockSecretsStore()
+	store.updateSecretFunc = func(context.Context, string, string) error { panic("store crashed") }
+	m := &mockGCPKeyProvisioner{deleteErr: errors.New("delete 500")}
+
+	_, stderr := captureRealStd(t, func() {
+		assert.Panics(t, func() {
+			_, _ = uploadGCPCredentialsFile(context.Background(), store, "stack", keyFile, keyName, m.DeleteKey)
+		})
+	})
+	assert.Contains(t, stderr, gcloudDeleteKeyCommand(testMintedKeyName))
+	assertMintedKeyGone(t, keyFile)
 }
 
 func TestUploadGCPCredentialsFile_OperatorFileKept(t *testing.T) {
