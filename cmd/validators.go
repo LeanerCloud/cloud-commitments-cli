@@ -293,6 +293,15 @@ func validateFilePaths() error {
 				return fmt.Errorf("output directory does not exist: %s", dir)
 			}
 		}
+		// Lstat so a symlink (even a dangling one) counts as existing; the
+		// later os.Create would otherwise follow it and truncate its target.
+		_, err := os.Lstat(toolCfg.CSVOutput)
+		if err == nil {
+			return fmt.Errorf("output path already exists: %s (it would be overwritten); choose a new --output path or remove the existing file", toolCfg.CSVOutput)
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("cannot check output path %s: %w", toolCfg.CSVOutput, err)
+		}
 	}
 
 	// Validate CSV input path if provided

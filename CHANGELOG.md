@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- An explicit `--output` path that already exists (file, directory or symlink)
+  is now refused during validation instead of being silently truncated. Choose a
+  new path or remove the old file; scripts that reuse one path must do the same.
+  Auto-generated filenames are unaffected (#2050).
 - `--regions` now also narrows EC2 Instance Savings Plan recommendations to the listed
   regions by the plan's own region (previously only `--include-regions` did); a plan
   with no known region is dropped. Compute, SageMaker and Database plans stay

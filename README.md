@@ -62,6 +62,8 @@ Export a reviewable report when you need to share results:
 ./cudly --services rds --profile default --output recommendations.csv
 ```
 
+The path must not already exist; the run is refused rather than overwriting it.
+
 All purchase operations can spend money. Check the account, region, quantity, and selected commitment before confirming - see [Safety Features](#safety-features) for what is and is not enforced today.
 
 ## Credentials and provider status

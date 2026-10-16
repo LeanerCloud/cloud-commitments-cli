@@ -348,6 +348,55 @@ func TestValidateFilePaths(t *testing.T) {
 			errMsg:  "output directory does not exist",
 		},
 		{
+			name: "CSV output file already exists",
+			setupFunc: func() func() {
+				p := filepath.Join(tmpDir, "existing.csv")
+				if err := os.WriteFile(p, []byte("keep"), 0644); err != nil {
+					t.Fatalf("Failed to create test file: %v", err)
+				}
+				toolCfg.CSVOutput = p
+				return func() { os.Remove(p) }
+			},
+			wantErr: true,
+			errMsg:  "output path already exists",
+		},
+		{
+			name: "CSV output path is an existing directory",
+			setupFunc: func() func() {
+				toolCfg.CSVOutput = tmpDir
+				return func() {}
+			},
+			wantErr: true,
+			errMsg:  "output path already exists",
+		},
+		{
+			name: "CSV output is a dangling symlink",
+			setupFunc: func() func() {
+				p := filepath.Join(tmpDir, "dangling.csv")
+				if err := os.Symlink(filepath.Join(tmpDir, "missing-target"), p); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				toolCfg.CSVOutput = p
+				return func() { os.Remove(p) }
+			},
+			wantErr: true,
+			errMsg:  "output path already exists",
+		},
+		{
+			name: "CSV input equals output",
+			setupFunc: func() func() {
+				p := filepath.Join(tmpDir, "same.csv")
+				if err := os.WriteFile(p, []byte("keep"), 0644); err != nil {
+					t.Fatalf("Failed to create test file: %v", err)
+				}
+				toolCfg.CSVOutput = p
+				toolCfg.CSVInput = p
+				return func() { os.Remove(p) }
+			},
+			wantErr: true,
+			errMsg:  "output path already exists",
+		},
+		{
 			name: "CSV input file does not exist",
 			setupFunc: func() func() {
 				toolCfg.CSVInput = filepath.Join(tmpDir, "nonexistent.csv")
