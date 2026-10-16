@@ -72,17 +72,16 @@ func (s *maxInstancesAWSStub) RoundTrip(r *http.Request) (*http.Response, error)
 }
 
 // newMaxInstancesAWSConfig returns an aws.Config whose HTTP client is the
-// stub and whose credentials are static, so signing needs no environment.
+// stub and whose credentials are anonymous, so requests are unsigned and need
+// no environment.
 func newMaxInstancesAWSConfig(t *testing.T) (aws.Config, *maxInstancesAWSStub) {
 	t.Helper()
 	stub := &maxInstancesAWSStub{t: t, received: map[string]int{}, log: captureAppLog(t)}
 	return aws.Config{
-		Region:     "us-east-1",
-		HTTPClient: &http.Client{Transport: stub},
-		Credentials: aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
-			return aws.Credentials{AccessKeyID: "AKIDEXAMPLE", SecretAccessKey: "secret"}, nil
-		}),
-		Retryer: func() aws.Retryer { return aws.NopRetryer{} },
+		Region:      "us-east-1",
+		HTTPClient:  &http.Client{Transport: stub},
+		Credentials: aws.AnonymousCredentials{},
+		Retryer:     func() aws.Retryer { return aws.NopRetryer{} },
 	}, stub
 }
 
@@ -96,6 +95,7 @@ func (s *maxInstancesAWSStub) requireDuplicateChecks(t *testing.T, pairs int) {
 	total := 0
 	for k, n := range s.received {
 		assert.Contains(t, maxInstancesAWSFixtures, k)
+		assert.Equalf(t, 1, n, "duplicate-check requests for %s", k)
 		total += n
 	}
 	// A fixture the SDK cannot parse only logs this warning in dry-run, so the
