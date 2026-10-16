@@ -161,7 +161,7 @@ func (s *rdsAPIStub) serveEnv(t *testing.T) {
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", empty)
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	t.Setenv("AWS_PROFILE", "")
-	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "")
+	clearAWSEndpointOverrides(t)
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
 	t.Setenv("AWS_SESSION_TOKEN", "")

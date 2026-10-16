@@ -150,10 +150,10 @@ func TestRunToolFromCSVRequiresTerminal(t *testing.T) {
 	t.Setenv("HTTP_PROXY", server.URL)
 	t.Setenv("HTTPS_PROXY", server.URL)
 	t.Setenv("NO_PROXY", "")
+	clearAWSEndpointOverrides(t)
 	for _, key := range []string{"AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_RDS", "AWS_ENDPOINT_URL_EC2"} {
 		t.Setenv(key, server.URL)
 	}
-	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "false")
 	cfg := toolCfg
 	cfg.ActualPurchase = actualPurchase
 	cfg.Coverage = 100

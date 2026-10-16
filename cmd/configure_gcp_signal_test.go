@@ -146,6 +146,8 @@ func childState(child *exec.Cmd) string {
 
 func startGCPInterruptChild(t *testing.T, phase string) (*exec.Cmd, string, io.ReadCloser, *syncBuffer) {
 	t.Helper()
+	// The child inherits this env; it sets its own secretsmanager endpoint.
+	clearAWSEndpointOverrides(t)
 	dir := t.TempDir()
 	adc := filepath.Join(dir, "adc.json")
 	require.NoError(t, os.WriteFile(adc, []byte(`{"type":"authorized_user","client_id":"fixture","client_secret":"fixture","refresh_token":"fixture"}`), 0600))

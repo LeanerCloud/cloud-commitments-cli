@@ -1648,6 +1648,20 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 	}
 }
 
+// clearAWSEndpointOverrides blanks every service-specific AWS_ENDPOINT_URL_*
+// variable and AWS_IGNORE_CONFIGURED_ENDPOINT_URLS for the test, so a
+// developer's global overrides can neither bypass nor disable a test's local
+// endpoint. Set the test's own endpoint variables after calling it.
+func clearAWSEndpointOverrides(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "AWS_ENDPOINT_URL_") {
+			t.Setenv(name, "")
+		}
+	}
+	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "")
+}
+
 // isolateAWSEnv pins the AWS environment to deterministic invalid static
 // credentials and points every SDK client at a local server that answers 403
 // AccessDenied, so the runToolFromCSV tests behave identically on credentialed
@@ -1674,13 +1688,7 @@ func isolateAWSEnv(t *testing.T) *atomic.Int64 {
 	}))
 	t.Cleanup(srv.Close)
 
-	// A developer's global endpoint overrides must not bypass the local server.
-	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "AWS_ENDPOINT_URL_") {
-			t.Setenv(name, "")
-		}
-	}
-	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "")
+	clearAWSEndpointOverrides(t)
 	t.Setenv("AWS_ENDPOINT_URL", srv.URL)
 	return hits
 }
