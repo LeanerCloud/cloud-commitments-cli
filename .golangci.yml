@@ -41,6 +41,13 @@ linters:
           sizeThreshold: 1024
     gocyclo:
       min-complexity: 10
+    # gosec here is a code-hygiene signal, narrower than the enforcing gate
+    # scripts/run-gosec.sh (CI, pre-commit, Make; all rules, all severities,
+    # no config file, #nosec honored). Here G104 is excluded, severity and
+    # confidence are medium+, and the legacy/common-false-positives presets
+    # drop G301/G302/G304; gosec is also skipped in _test.go (the standalone
+    # scan omits tests by default). A clean golangci run does not imply a
+    # clean gosec run.
     gosec:
       excludes:
         - G104
