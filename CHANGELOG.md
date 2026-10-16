@@ -18,10 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   silently dropped every recommendation (#2161).
 - Replaying or retrying an `--input-csv` purchase no longer re-buys an
   ElastiCache or MemoryDB reservation that the first run already bought: CSV
-  rows now carry the AWS provider, and MemoryDB rows keep their engine, so the
-  duplicate check matches them. CSV Savings Plan rows
-  also now match `--include-regions` and `--exclude-regions` on their plan
-  region (#2228).
+  rows now carry the AWS provider, and MemoryDB rows use the engine AWS reports
+  for existing nodes whatever the CSV says, so the duplicate check matches
+  them. CSV Savings Plan rows also now match `--include-regions` and
+  `--exclude-regions` on their plan region (#2228).
 - `configure-gcp`: skipping (or giving an unknown answer at) the "Create Service
   Account" step no longer continues with the default
   `cudly-service-account@<project>` email that was never created. The wizard now

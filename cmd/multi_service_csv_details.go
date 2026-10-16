@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/services/memorydb"
 	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/services/savingsplans"
 )
 
@@ -49,6 +50,12 @@ func csvDetails(rec common.Recommendation, record []string, colIdx map[string]in
 	if _, isSP := savingsplans.PlanTypeForServiceType(rec.Service); isSP {
 		return csvSavingsPlanDetails(record, colIdx)
 	}
+	if rec.Service == common.ServiceMemoryDB {
+		// MemoryDB reservations are engine-agnostic for purchase and the
+		// inventory reports every node as ReservedNodeEngine, so the CSV engine
+		// (blank, valkey, ...) must not reach the dedupe key or a replay re-buys.
+		return &common.CacheDetails{Engine: memorydb.ReservedNodeEngine, NodeType: rec.ResourceType}, nil
+	}
 	engine := getCSVField(record, colIdx, "Engine")
 	if engine == "" {
 		return nil, nil
@@ -60,7 +67,7 @@ func csvDetails(rec common.Recommendation, record []string, colIdx map[string]in
 			AZConfig:      getCSVField(record, colIdx, "Deployment"),
 			InstanceClass: rec.ResourceType,
 		}, nil
-	case common.ServiceElastiCache, common.ServiceCache, common.ServiceMemoryDB:
+	case common.ServiceElastiCache, common.ServiceCache:
 		return &common.CacheDetails{Engine: engine, NodeType: rec.ResourceType}, nil
 	case common.ServiceEC2, common.ServiceCompute:
 		return &common.ComputeDetails{

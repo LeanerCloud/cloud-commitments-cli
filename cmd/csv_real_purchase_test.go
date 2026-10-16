@@ -316,10 +316,14 @@ const (
 	memdbHost     = "memory-db.eu-west-1.amazonaws.com"
 	memdbPurchase = "PurchaseReservedNodesOffering"
 	memdbRespID   = "aws-ri-memdb-1"
-	memdbCSV      = `Service,Region,ResourceType,Engine,Deployment,Count,Term,PaymentOption
-memorydb,eu-west-1,db.t4g.small,redis,,3,1yr,all-upfront
-`
 )
+
+const memdbCSVHeader = "Service,Region,ResourceType,Engine,Deployment,Count,Term,PaymentOption\n"
+
+// memdbCSVWithEngine is the MemoryDB row with the given Engine cell.
+func memdbCSVWithEngine(engine string) string {
+	return memdbCSVHeader + "memorydb,eu-west-1,db.t4g.small," + engine + ",,3,1yr,all-upfront\n"
+}
 
 // memdbFixtures answers MemoryDB (awsJson1.1) with no existing node, one
 // offering and a purchase; existing, when set, is the node a replay finds.
@@ -337,10 +341,16 @@ func memdbFixtures(existing bool) map[string]awsFixture {
 	}
 }
 
-// The loader must keep the MemoryDB engine column: the dedupe key of a CSV row
-// is only equal to an existing node's ("redis") when Details carry it.
+// The dedupe key of a CSV row only equals an existing node's ("redis") when
+// Details carry that engine, whatever the CSV Engine cell says.
 func TestCSVReplay_MemoryDB(t *testing.T) {
-	env := newCSVPurchaseEnvFor(t, memdbCSV, memdbFixtures(false))
+	for _, engine := range []string{"redis", "valkey", "Redis", ""} {
+		t.Run("engine="+engine, func(t *testing.T) { testCSVReplayMemoryDB(t, memdbCSVWithEngine(engine)) })
+	}
+}
+
+func testCSVReplayMemoryDB(t *testing.T, csv string) {
+	env := newCSVPurchaseEnvFor(t, csv, memdbFixtures(false))
 	env.run("report1.csv")
 	assert.Equal(t, []string{"true"}, env.report(t, "report1.csv")["Success"])
 	assert.Equal(t, []string{memdbRespID}, env.report(t, "report1.csv")["CommitmentID"])
@@ -365,9 +375,11 @@ func TestCSVReplay_MemoryDB(t *testing.T) {
 	assert.Zero(t, env.denyHits.Load())
 }
 
-func TestLoadRecommendationsFromCSV_KeepsMemoryDBEngine(t *testing.T) {
-	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, memdbCSV))
-	require.NoError(t, err)
-	require.Len(t, recs, 1)
-	assert.Equal(t, &common.CacheDetails{Engine: "redis", NodeType: "db.t4g.small"}, recs[0].Details)
+func TestLoadRecommendationsFromCSV_MemoryDBEngineIsCanonical(t *testing.T) {
+	for _, engine := range []string{"redis", "valkey", ""} {
+		recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, memdbCSVWithEngine(engine)))
+		require.NoError(t, err)
+		require.Len(t, recs, 1)
+		assert.Equal(t, &common.CacheDetails{Engine: "redis", NodeType: "db.t4g.small"}, recs[0].Details, "engine=%q", engine)
+	}
 }
