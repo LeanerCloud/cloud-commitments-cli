@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -248,11 +249,7 @@ func TestCSVReplay_SecondRunBuysNothing(t *testing.T) {
 		wantAdjusted string // dedup log line proving the rows were removed by the match
 		wantRefused  bool
 	}{
-		// KNOWN GAP: CSV rows carry no Provider, so recfilter builds the
-		// ElastiCache rec key without the "elasticache:" engine prefix and never
-		// matches the existing node (Provider=AWS on the rec suppresses it).
-		// cacheBuys must become 0 and the log line "1 instances → 0 instances" when fixed.
-		{name: "matching RIs suppress the repurchase", replay: replayFixtures("db.t3.small", "cache.t3.micro"), cacheBuys: 1, wantAdjusted: "2 instances → 0 instances"},
+		{name: "matching RIs suppress the repurchase", replay: replayFixtures("db.t3.small", "cache.t3.micro"), wantAdjusted: "instances → 0 instances"},
 		{name: "RIs of another class do not suppress it", replay: replayFixtures("db.m5.large", "cache.m5.large"), rdsBuys: 1, cacheBuys: 1},
 		{name: "a failing check refuses to purchase", replay: map[string]awsFixture{
 			"rds DescribeReservedDBInstances":        queryErr("AccessDenied", "describe denied by fixture"),
@@ -297,5 +294,16 @@ func TestCSVReplay_SecondRunBuysNothing(t *testing.T) {
 			assert.Len(t, env.auditStatuses(t), 2+rows)
 			assert.Zero(t, env.denyHits.Load())
 		})
+	}
+}
+
+// The dedupe key adds the "elasticache:" engine prefix only for ProviderAWS,
+// so a CSV row must carry its provider or replays re-buy ElastiCache (#2228).
+func TestLoadRecommendationsFromCSV_StampsAWSProvider(t *testing.T) {
+	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, csvPurchases))
+	require.NoError(t, err)
+	require.Len(t, recs, 2)
+	for _, rec := range recs {
+		assert.Equal(t, common.ProviderAWS, rec.Provider, rec.Service)
 	}
 }

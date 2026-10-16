@@ -838,3 +838,37 @@ savings-plans-ec2instance,,,1,1yr,no-upfront,EC2Instance,1.5,m5,us-east-1
 	got := applyFilters(recs, &cfg, nil, nil, "", common.NewDropSummary())
 	assert.Len(t, got, 3)
 }
+
+// TestApplyFilters_SavingsPlansIncludeRegionsCSVMode pins that a CSV Savings
+// Plan row with an empty Region is matched by --include/--exclude-regions on
+// its plan region (Details.Region), as on the main path, while --regions alone
+// still leaves it alone (#2228).
+func TestApplyFilters_SavingsPlansIncludeRegionsCSVMode(t *testing.T) {
+	csvPath := filepath.Join(t.TempDir(), "sp.csv")
+	content := `Service,Region,ResourceType,Count,Term,PaymentOption,PlanType,HourlyCommitment,InstanceFamily,DetailsRegion
+savings-plans-ec2instance,,,1,1yr,no-upfront,EC2Instance,1.5,m5,us-east-1
+`
+	require.NoError(t, os.WriteFile(csvPath, []byte(content), 0o600))
+	recs, err := loadRecommendationsFromCSV(csvPath)
+	require.NoError(t, err)
+	require.Len(t, recs, 1)
+	require.Empty(t, recs[0].Region)
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want int
+	}{
+		{"include another region drops it", Config{IncludeRegions: []string{"eu-west-1"}}, 0},
+		{"include its region keeps it", Config{IncludeRegions: []string{"us-east-1"}}, 1},
+		{"exclude its region drops it", Config{ExcludeRegions: []string{"us-east-1"}}, 0},
+		{"--regions alone does not drop it", Config{Regions: []string{"eu-west-1"}}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.CSVInput = csvPath
+			got := applyFilters(recs, &tt.cfg, nil, nil, "", common.NewDropSummary())
+			assert.Len(t, got, tt.want)
+		})
+	}
+}

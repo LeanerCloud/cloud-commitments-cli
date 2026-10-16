@@ -396,7 +396,7 @@ func TestProcessCSVRegionPurchases_SavingsPlanRowFromWrittenCSV(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, recs, 1)
 	require.Empty(t, recs[0].Region)
-	require.Empty(t, recs[0].Provider)
+	require.Equal(t, common.ProviderAWS, recs[0].Provider)
 
 	_, results, ok, _ := processCSVRegionPurchases(context.Background(), awsCfg, recs[0].Service, recs[0].Region, recs, false, cfg, "run-1")
 
