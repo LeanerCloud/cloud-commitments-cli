@@ -1,108 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
-
-// maxInstancesAWSStub is the offline AWS endpoint behind the duplicate check
-// (checkDuplicates -> GetExistingCommitments). Every request must match a
-// fixture keyed "host Action"; anything else fails the test, so a request that
-// would have left the machine is reported instead of silently timing out.
-type maxInstancesAWSStub struct {
-	t        *testing.T
-	mu       sync.Mutex
-	received map[string]int
-	log      *bytes.Buffer
-}
-
-// maxInstancesAWSFixtures answer the Query-protocol DescribeReserved* calls
-// with an empty existing-commitment list.
-var maxInstancesAWSFixtures = map[string]string{
-	"rds.us-east-1.amazonaws.com DescribeReservedDBInstances":        maxInstancesEmptyRDS,
-	"rds.us-west-2.amazonaws.com DescribeReservedDBInstances":        maxInstancesEmptyRDS,
-	"rds.eu-west-1.amazonaws.com DescribeReservedDBInstances":        maxInstancesEmptyRDS,
-	"elasticache.us-east-1.amazonaws.com DescribeReservedCacheNodes": maxInstancesEmptyElastiCache,
-	"elasticache.us-west-2.amazonaws.com DescribeReservedCacheNodes": maxInstancesEmptyElastiCache,
-	"elasticache.eu-west-1.amazonaws.com DescribeReservedCacheNodes": maxInstancesEmptyElastiCache,
-}
-
-const (
-	maxInstancesEmptyRDS = `<DescribeReservedDBInstancesResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/">` +
-		`<DescribeReservedDBInstancesResult><ReservedDBInstances/></DescribeReservedDBInstancesResult>` +
-		`<ResponseMetadata><RequestId>fixture</RequestId></ResponseMetadata></DescribeReservedDBInstancesResponse>`
-	maxInstancesEmptyElastiCache = `<DescribeReservedCacheNodesResponse xmlns="http://elasticache.amazonaws.com/doc/2015-02-02/">` +
-		`<DescribeReservedCacheNodesResult><ReservedCacheNodes/></DescribeReservedCacheNodesResult>` +
-		`<ResponseMetadata><RequestId>fixture</RequestId></ResponseMetadata></DescribeReservedCacheNodesResponse>`
-)
-
-func (s *maxInstancesAWSStub) RoundTrip(r *http.Request) (*http.Response, error) {
-	b, _ := io.ReadAll(r.Body)
-	form, _ := url.ParseQuery(string(b))
-	key := r.URL.Host + " " + form.Get("Action")
-	s.mu.Lock()
-	s.received[key]++
-	s.mu.Unlock()
-	body, ok := maxInstancesAWSFixtures[key]
-	status := http.StatusOK
-	if !ok {
-		s.t.Errorf("unexpected AWS request %s %s%s", r.Method, key, r.URL.Path)
-		status, body = http.StatusInternalServerError, "unexpected request"
-	}
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"text/xml"}},
-		Body:       io.NopCloser(strings.NewReader(body)),
-		Request:    r,
-	}, nil
-}
-
-// newMaxInstancesAWSConfig returns an aws.Config whose HTTP client is the
-// stub and whose credentials are anonymous, so requests are unsigned and need
-// no environment.
-func newMaxInstancesAWSConfig(t *testing.T) (aws.Config, *maxInstancesAWSStub) {
-	t.Helper()
-	stub := &maxInstancesAWSStub{t: t, received: map[string]int{}, log: captureAppLog(t)}
-	return aws.Config{
-		Region:      "us-east-1",
-		HTTPClient:  &http.Client{Transport: stub},
-		Credentials: aws.AnonymousCredentials{},
-		Retryer:     func() aws.Retryer { return aws.NopRetryer{} },
-	}, stub
-}
-
-// requireDuplicateChecks asserts the duplicate check really ran against the
-// stub: one call per (service, region) pair, no other request, and every
-// response parsed.
-func (s *maxInstancesAWSStub) requireDuplicateChecks(t *testing.T, pairs int) {
-	t.Helper()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	total := 0
-	for k, n := range s.received {
-		assert.Contains(t, maxInstancesAWSFixtures, k)
-		assert.Equalf(t, 1, n, "duplicate-check requests for %s", k)
-		total += n
-	}
-	// A fixture the SDK cannot parse only logs this warning in dry-run, so the
-	// request count alone would not notice a broken fixture.
-	assert.NotContains(t, s.log.String(), "Could not check for existing RIs")
-	require.Equal(t, pairs, total, fmt.Sprintf("duplicate-check requests received: %v", s.received))
-}
 
 // maxInstancesFixtureServices and maxInstancesFixtureRegions describe the
 // multi-service, multi-region fan-out the run-wide cap has to survive. A
@@ -169,7 +76,7 @@ func TestMaxInstancesCapsWholeRunAcrossServicesAndRegions(t *testing.T) {
 	const maxInstances = 10
 
 	ctx := context.Background()
-	awsCfg, awsStub := newMaxInstancesAWSConfig(t)
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	t.Cleanup(func() { toolCfg = origCfg })
@@ -242,7 +149,7 @@ func TestMaxInstancesKeepsHighestSavingsNotFirstFetched(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	awsCfg, awsStub := newMaxInstancesAWSConfig(t)
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	t.Cleanup(func() { toolCfg = origCfg })
@@ -317,7 +224,7 @@ func TestMaxInstancesNeverPurchasesBelowMinCount(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	awsCfg, awsStub := newMaxInstancesAWSConfig(t)
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	t.Cleanup(func() { toolCfg = origCfg })
@@ -407,7 +314,7 @@ func TestDropTruncatedBelowMinCount(t *testing.T) {
 // run that never asked for one.
 func TestMaxInstancesNotAppliedWhenUnset(t *testing.T) {
 	ctx := context.Background()
-	awsCfg, awsStub := newMaxInstancesAWSConfig(t)
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	t.Cleanup(func() { toolCfg = origCfg })
