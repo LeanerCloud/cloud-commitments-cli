@@ -162,7 +162,7 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 
 // parseCSVRecord parses a single CSV record into a Recommendation.
 func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendation, error) {
-	rec := common.Recommendation{}
+	rec := common.Recommendation{Provider: common.ProviderAWS}
 
 	// Parse string fields
 	rec.Service = common.ServiceType(getCSVField(record, colIdx, "Service"))
