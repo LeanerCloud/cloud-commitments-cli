@@ -30,7 +30,7 @@ repos:
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # v6.0.0
     hooks:
       - id: trailing-whitespace
         name: Trim trailing whitespace
@@ -127,7 +127,7 @@ repos:
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.47.0
+    rev: 76b3d32d3f4b965e1d6425253c59407420ae2c43  # v0.47.0
     hooks:
       - id: markdownlint
         name: Lint Markdown files

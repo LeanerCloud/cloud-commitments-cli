@@ -40,7 +40,7 @@ linters:
         hugeParam:
           sizeThreshold: 1024
     gocyclo:
-      min-complexity: 15
+      min-complexity: 10
     gosec:
       excludes:
         - G104
