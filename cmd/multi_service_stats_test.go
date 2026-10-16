@@ -6,14 +6,17 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/stretchr/testify/assert"
 )
 
 // captureAppOutput captures output from AppLogger and returns the captured string.
-// Usage: output := captureAppOutput(t, func() { printSomething() }).
+// The pipe is drained while fn runs so output beyond the pipe buffer cannot
+// block the writer. Usage: output := captureAppOutput(t, func() { printSomething() }).
 func captureAppOutput(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
@@ -22,19 +25,29 @@ func captureAppOutput(t *testing.T, fn func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe failed: %v", err)
 	}
+	var buf bytes.Buffer
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		_, _ = io.Copy(&buf, r)
+	}()
 	os.Stdout = w
 	AppLogger = log.New(w, "", 0)
 
+	// Runs on panic too: restore, close the writer to end the drain, then
+	// close the reader.
 	defer func() {
 		os.Stdout = old
 		AppLogger = oldLogger
+		_ = w.Close()
+		<-drained
+		_ = r.Close()
 	}()
 
 	fn()
-
-	w.Close() // Must close writer before reading to unblock io.Copy
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
+	// Close the writer before reading the buffer so the drain sees EOF.
+	_ = w.Close()
+	<-drained
 	return buf.String()
 }
 
@@ -556,5 +569,27 @@ func TestPrintFinalMessage(t *testing.T) {
 				assert.NotContains(t, output, notWant)
 			}
 		})
+	}
+}
+
+func TestCaptureAppOutputDrainsLargeOutput(t *testing.T) {
+	const lines, width = 1024, 1024 // 1 MiB, far above the pipe buffer
+	line := strings.Repeat("x", width-1)
+	// A deadlocked helper never restores these; do it so later tests run.
+	savedStdout, savedLogger := os.Stdout, AppLogger
+	t.Cleanup(func() { os.Stdout, AppLogger = savedStdout, savedLogger })
+	done := make(chan string, 1)
+	go func() {
+		done <- captureAppOutput(t, func() {
+			for i := 0; i < lines; i++ {
+				AppLogger.Println(line)
+			}
+		})
+	}()
+	select {
+	case out := <-done:
+		assert.Equal(t, lines*width, len(out))
+	case <-time.After(10 * time.Second):
+		t.Fatal("captureAppOutput deadlocked on output larger than the pipe buffer")
 	}
 }
