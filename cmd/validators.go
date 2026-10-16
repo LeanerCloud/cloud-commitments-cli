@@ -145,8 +145,8 @@ func requireFinite(name string, v float64) error {
 	return nil
 }
 
-// validateCoverageAndSavingsPct checks --coverage (finite, 0-100) and that
-// --min-savings-pct is finite. target-coverage and min-pool-size call
+// validateCoverageAndSavingsPct checks that --coverage and --min-savings-pct
+// are finite and within 0-100. target-coverage and min-pool-size call
 // requireFinite in their own validators.
 func validateCoverageAndSavingsPct() error {
 	if err := requireFinite("coverage", toolCfg.Coverage); err != nil {
@@ -155,7 +155,13 @@ func validateCoverageAndSavingsPct() error {
 	if toolCfg.Coverage < 0 || toolCfg.Coverage > 100 {
 		return fmt.Errorf("coverage percentage must be between 0 and 100, got: %.2f", toolCfg.Coverage)
 	}
-	return requireFinite("min-savings-pct", toolCfg.MinSavingsPct)
+	if err := requireFinite("min-savings-pct", toolCfg.MinSavingsPct); err != nil {
+		return err
+	}
+	if toolCfg.MinSavingsPct < 0 || toolCfg.MinSavingsPct > 100 {
+		return fmt.Errorf("min-savings-pct must be between 0 and 100, got: %.2f", toolCfg.MinSavingsPct)
+	}
+	return nil
 }
 
 // validateMinPoolSize checks that --min-pool-size is a non-negative whole number.

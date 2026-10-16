@@ -815,10 +815,11 @@ func TestCheckDuplicates_HonorsIdempotencyWindow(t *testing.T) {
 	}
 }
 
-// TestValidateNumericFlagsRejectNonFinite drives the real flag set through
+// TestValidateNumericFlagsRejectInvalid drives the real flag set through
 // rootCmd.ParseFlags (cobra/pflag parse "NaN" and "Inf" as floats) and then
-// the validators. Nothing here calls runTool, so no AWS client is built.
-func TestValidateNumericFlagsRejectNonFinite(t *testing.T) {
+// the validators, covering non-finite and out-of-range values. Nothing here
+// calls runTool, so no AWS client is built.
+func TestValidateNumericFlagsRejectInvalid(t *testing.T) {
 	saved := toolCfg
 	reset := func() {
 		toolCfg = Config{}
@@ -848,6 +849,9 @@ func TestValidateNumericFlagsRejectNonFinite(t *testing.T) {
 		{name: "min-pool-size NaN", args: []string{"--min-pool-size", "NaN"}, wantErr: "min-pool-size must be a finite number, got: NaN"},
 		{name: "min-savings-pct NaN", args: []string{"--min-savings-pct", "NaN"}, wantErr: "min-savings-pct must be a finite number, got: NaN"},
 		{name: "min-savings-pct Inf", args: []string{"--min-savings-pct", "Inf"}, wantErr: "min-savings-pct must be a finite number, got: +Inf"},
+		{name: "min-savings-pct negative", args: []string{"--min-savings-pct", "-1"}, wantErr: "min-savings-pct must be between 0 and 100, got: -1.00"},
+		{name: "min-savings-pct above 100", args: []string{"--min-savings-pct", "100.5"}, wantErr: "min-savings-pct must be between 0 and 100, got: 100.50"},
+		{name: "min-savings-pct bounds stay valid", args: []string{"--min-savings-pct", "100"}},
 		{name: "overflow rejected by the flag parser", args: []string{"--target-coverage", "1e999"}, parseErr: true},
 		{name: "explicit target 0 stays valid", args: []string{"--target-coverage", "0"}},
 		{name: "valid values pass", args: []string{"--target-coverage", "95", "--coverage", "50", "--min-pool-size", "2", "--min-savings-pct", "5"}},

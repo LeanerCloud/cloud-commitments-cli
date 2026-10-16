@@ -149,7 +149,7 @@ cudly --services rds --min-count 3
 --min-savings-pct <float>   Minimum savings percentage (0 = no filter)
 ```
 
-Drop recommendations whose estimated savings percentage falls below this threshold.
+Drop recommendations whose estimated savings percentage falls below this threshold. The value must be between 0 and 100.
 
 **Important naming distinction:** `--min-savings-pct` is a **percentage** value (e.g. `10` means "at least 10% savings"). This is different from the GUI and API `min_savings` parameter, which filters by **dollar amount**. A value of `30` in `--min-savings-pct` means "30% savings", but `min_savings=30` in the API means "$30 in savings". Mixing up the two by copying a CLI value into the GUI filter (or vice versa) produces silent, incorrect filtering.
 
