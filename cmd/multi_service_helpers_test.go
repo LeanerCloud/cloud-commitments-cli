@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -89,24 +88,13 @@ func TestGetAllAWSRegions(t *testing.T) {
 		})
 	}
 
-	t.Run("Integration test", func(t *testing.T) {
-		// This test requires actual AWS credentials
-		if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
-			t.Skip("Skipping integration test: AWS credentials not present")
-		}
-
-		cfg := aws.Config{Region: "us-east-1"}
+	t.Run("SDK client path against the fixture endpoint", func(t *testing.T) {
+		cfg, awsStub := newAWSFixtureConfig(t)
 		regions, err := getAllAWSRegions(ctx, cfg)
 
-		if err == nil {
-			assert.NotNil(t, regions)
-			assert.Greater(t, len(regions), 0)
-
-			// Verify regions are sorted
-			for i := 1; i < len(regions); i++ {
-				assert.LessOrEqual(t, regions[i-1], regions[i])
-			}
-		}
+		require.NoError(t, err)
+		assert.Equal(t, []string{"eu-west-1", "us-west-2"}, regions, "regions are sorted")
+		awsStub.requireRequests(t, map[string]int{"ec2.us-east-1.amazonaws.com DescribeRegions": 1})
 	})
 }
 

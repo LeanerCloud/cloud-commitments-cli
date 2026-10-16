@@ -212,7 +212,14 @@ func TestProcessService_EdgeCases(t *testing.T) {
 func TestProcessServiceWithMocks(t *testing.T) {
 	useCallerAccount(t)
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg, awsStub := newAWSFixtureConfig(t)
+	// The real-purchase case below relies on a failed duplicate check refusing
+	// the purchase (fail closed); an empty fixture would instead let it reach
+	// the purchase call.
+	awsStub.fixtures["elasticache DescribeReservedCacheNodes"] = awsFixture{
+		status: http.StatusForbidden,
+		body:   `{"__type":"AccessDeniedException","message":"denied by test"}`,
+	}
 
 	// Save original values
 	origCfg := toolCfg
@@ -315,15 +322,23 @@ func TestProcessServiceWithMocks(t *testing.T) {
 				assert.Empty(t, recs)
 				assert.Empty(t, results)
 			}
+			if !tt.isDryRun {
+				assert.Empty(t, results, "a failed duplicate check must refuse a real purchase")
+			}
 
 			mockClient.AssertExpectations(t)
 		})
 	}
+
+	awsStub.requireRequests(t, map[string]int{
+		"rds.us-east-1.amazonaws.com DescribeReservedDBInstances":        1,
+		"elasticache.eu-west-1.amazonaws.com DescribeReservedCacheNodes": 1,
+	})
 }
 
 func TestProcessService_SavingsPlansAccountLevel(t *testing.T) {
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
@@ -353,6 +368,7 @@ func TestProcessService_SavingsPlansAccountLevel(t *testing.T) {
 	// Verify Savings Plans queried only once
 	mockClient.AssertNumberOfCalls(t, "GetRecommendations", 1)
 	mockClient.AssertExpectations(t)
+	awsStub.requireRequests(t, map[string]int{"savingsplans.amazonaws.com DescribeSavingsPlans": 1})
 }
 
 func TestProcessService_WithInstanceLimit(t *testing.T) {
@@ -367,7 +383,7 @@ func TestProcessService_WithInstanceLimit(t *testing.T) {
 	// TestProcessService_InstanceLimitRefusesRealPurchase covers that.
 
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
@@ -406,6 +422,7 @@ func TestProcessService_WithInstanceLimit(t *testing.T) {
 		"the per-region path must not apply --max-instances; the cap is run-wide")
 
 	mockClient.AssertExpectations(t)
+	awsStub.requireDuplicateChecks(t, 1)
 }
 
 // TestProcessService_InstanceLimitRefusesRealPurchase pins the fail-closed
@@ -457,7 +474,7 @@ func TestProcessService_InstanceLimitRefusesRealPurchase(t *testing.T) {
 
 func TestProcessService_WithOverrideCount(t *testing.T) {
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
@@ -485,11 +502,12 @@ func TestProcessService_WithOverrideCount(t *testing.T) {
 	}
 
 	mockClient.AssertExpectations(t)
+	awsStub.requireDuplicateChecks(t, 1)
 }
 
 func TestProcessService_MultipleRegions(t *testing.T) {
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
@@ -521,6 +539,7 @@ func TestProcessService_MultipleRegions(t *testing.T) {
 	// Verify each region was queried
 	mockClient.AssertNumberOfCalls(t, "GetRecommendations", 3)
 	mockClient.AssertExpectations(t)
+	awsStub.requireDuplicateChecks(t, 3)
 }
 
 // ==================== Helper Function Tests ====================

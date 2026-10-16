@@ -860,7 +860,7 @@ func TestFetchExistingCoverage_LookbackDays(t *testing.T) {
 // ce:GetReservationCoverage permission would.
 func TestFetchExistingCoverage_FetchFailure(t *testing.T) {
 	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
+	awsCfg, awsStub := newAWSFixtureConfig(t)
 	realClient := awsprovider.NewRecommendationsClientDirect(awsCfg)
 
 	t.Run("purchase run aborts: returns the error and a nil map", func(t *testing.T) {
@@ -876,4 +876,7 @@ func TestFetchExistingCoverage_FetchFailure(t *testing.T) {
 		require.NoError(t, err, "a dry run must not abort; nothing is bought")
 		assert.Nil(t, got)
 	})
+
+	// Each case asked CE once; the fixture answers with a non-retryable 400.
+	awsStub.requireRequests(t, map[string]int{"ce.us-east-1.amazonaws.com GetReservationCoverage": 2})
 }

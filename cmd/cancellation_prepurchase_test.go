@@ -112,9 +112,15 @@ func TestFetchAllRecs_DefaultRunKeepsRecommendationsInRegionsOutsideTheCallersOp
 	client.On("GetRecommendations", mock.Anything, mock.Anything).
 		Return([]common.Recommendation{rec("us-east-1"), rec("eu-central-2")}, nil)
 
-	recs, _, err := fetchAllRecs(context.Background(), aws.Config{}, client, NewAccountAliasCache(aws.Config{}), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+	awsCfg, awsStub := newAWSFixtureConfig(t)
+	recs, _, err := fetchAllRecs(context.Background(), awsCfg, client, NewAccountAliasCache(awsCfg), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
 
 	require.NoError(t, err)
+	// One duplicate check per region: us-east-1 and eu-central-2.
+	awsStub.requireRequests(t, map[string]int{
+		"rds.us-east-1.amazonaws.com DescribeReservedDBInstances":    1,
+		"rds.eu-central-2.amazonaws.com DescribeReservedDBInstances": 1,
+	})
 	regions := make([]string, 0, len(recs))
 	for i := range recs {
 		regions = append(regions, recs[i].Region)
@@ -235,6 +241,7 @@ func TestFetchAllRecs_AccountFilters(t *testing.T) {
 	}
 	base := Config{Regions: []string{"us-east-1"}, Coverage: 100, TermYears: 1, PaymentOption: "partial-upfront"}
 	// Member accounts cannot call DescribeAccount: every lookup is denied.
+	dupChecks := 0
 	run := func(t *testing.T, cfg Config, accounts ...string) (accountsOut []string, orgCalls int, err error) {
 		t.Helper()
 		found := make([]common.Recommendation, 0, len(accounts))
@@ -245,7 +252,11 @@ func TestFetchAllRecs_AccountFilters(t *testing.T) {
 		client.On("GetRecommendations", mock.Anything, mock.Anything).Return(found, nil)
 		org := &MockOrganizationsClient{}
 		org.On("DescribeAccount", mock.Anything, mock.Anything).Return(nil, errors.New("AccessDenied"))
-		recs, _, err := fetchAllRecs(context.Background(), aws.Config{}, client, NewAccountAliasCacheWithClient(org), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+		awsCfg, awsStub := newAWSFixtureConfig(t)
+		recs, _, err := fetchAllRecs(context.Background(), awsCfg, client, NewAccountAliasCacheWithClient(org), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+		for _, n := range awsStub.received {
+			dupChecks += n
+		}
 		for i := range recs {
 			accountsOut = append(accountsOut, recs[i].Account)
 		}
@@ -296,6 +307,7 @@ func TestFetchAllRecs_AccountFilters(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, calls)
 	})
+	assert.Equal(t, 4, dupChecks, "duplicate checks served by the fixture stub")
 }
 
 func TestRequireResolvedAccountNames_CSVRows(t *testing.T) {
