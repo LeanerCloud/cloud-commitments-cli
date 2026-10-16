@@ -11,10 +11,6 @@ AWS SDK for Go v2                   Apache-2.0
   github.com/aws/aws-sdk-go-v2
   https://github.com/aws/aws-sdk-go-v2/blob/main/LICENSE.txt
 
-AWS Lambda Go                       Apache-2.0
-  github.com/aws/aws-lambda-go
-  https://github.com/aws/aws-lambda-go/blob/main/LICENSE
-
 Azure SDK for Go                    MIT
   github.com/Azure/azure-sdk-for-go
   https://github.com/Azure/azure-sdk-for-go/blob/main/LICENSE.txt
@@ -39,25 +35,9 @@ Testify                             MIT
   github.com/stretchr/testify
   https://github.com/stretchr/testify/blob/master/LICENSE
 
-pgx (PostgreSQL driver)             MIT
-  github.com/jackc/pgx/v5
-  https://github.com/jackc/pgx/blob/master/LICENSE
-
-pgxmock                             BSD-2-Clause
-  github.com/pashagolub/pgxmock/v4
-  https://github.com/pashagolub/pgxmock/blob/master/LICENSE
-
-golang-migrate                      MIT
-  github.com/golang-migrate/migrate/v4
-  https://github.com/golang-migrate/migrate/blob/master/LICENSE
-
 google/uuid                         BSD-3-Clause
   github.com/google/uuid
   https://github.com/google/uuid/blob/master/LICENSE
-
-testcontainers-go                   MIT
-  github.com/testcontainers/testcontainers-go
-  https://github.com/testcontainers/testcontainers-go/blob/main/LICENSE
 
 Go standard library extensions      BSD-3-Clause
   golang.org/x/crypto, golang.org/x/term

@@ -12,7 +12,7 @@ This section documents the full CLI surface of the `cudly` binary. The Makefile 
 |------|--------|
 | [filtering.md](filtering.md) | Account, region, engine, instance-type, and Savings Plan type include/exclude filters; numeric threshold filters (min-count, min-savings-pct, max-break-even-months, min-pool-size, max-instances) |
 | [purchase-safety.md](purchase-safety.md) | Purchase pipeline guardrails: dry-run, --purchase, interactive confirmation, --audit-log, --idempotency-window, --rebuy-window-days, DISABLE_PURCHASE_DELAY env |
-| [cloud-setup.md](cloud-setup.md) | `configure-azure` and `configure-gcp` subcommands for self-hosted credential bootstrap |
+| [cloud-setup.md](cloud-setup.md) | `configure-azure` and `configure-gcp` subcommands to bootstrap credentials for the [self-hosted platform](https://github.com/LeanerCloud/cloud-commitments-platform) |
 
 ## Complete flag reference
 

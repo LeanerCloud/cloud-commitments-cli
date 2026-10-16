@@ -1,14 +1,14 @@
 # Cloud Setup (Self-Hosted)
 
-CUDly is a self-hosted tool. Two CLI subcommands handle the one-time credential bootstrap for Azure and GCP: `configure-azure` and `configure-gcp`. Both write credentials to AWS Secrets Manager, where the CUDly server reads them at runtime.
+The CUDly CLI has two subcommands that handle the one-time credential bootstrap for Azure and GCP: `configure-azure` and `configure-gcp`. Both write credentials to AWS Secrets Manager, where the [self-hosted CUDly platform](https://github.com/LeanerCloud/cloud-commitments-platform) reads them at runtime.
 
 These are one-time setup operations, not part of the regular analysis/purchase workflow.
 
 ## Deployment overview
 
-For the full Terraform deployment guide (supported runtimes, quick-deploy script, manual steps, `tfvars` reference, accessing the dashboard after deploy), see the [Deployment (self-hosted via Terraform)](../../README.md#deployment-self-hosted-via-terraform) section in the README.
+For the full Terraform deployment guide (supported runtimes, quick-deploy script, manual steps, `tfvars` reference, accessing the dashboard after deploy), see the [cloud-commitments-platform](https://github.com/LeanerCloud/cloud-commitments-platform) repository, which owns the deployment.
 
-The `ci-cd-permissions/` module within each environment provisions the CI/CD deploy identity and is applied once, manually, by a privileged operator. The main deploy workflow (`.github/workflows/deploy-*.yml`) then runs `terraform init / plan / apply` against the environment directory using OIDC keyless authentication.
+The CI/CD deploy identity and the deploy workflows are owned by the [cloud-commitments-platform](https://github.com/LeanerCloud/cloud-commitments-platform) repository, not this CLI.
 
 ## Prerequisites
 
@@ -318,5 +318,5 @@ Any missing required field causes the command to exit with an error before writi
 
 | Scenario | Notes |
 |----------|-------|
-| First-time setup | Deploy with Terraform first (`terraform/environments/<cloud>/`). The secrets are created as part of that deployment; these commands only update them. |
+| First-time setup | Deploy the platform with Terraform first (see [cloud-commitments-platform](https://github.com/LeanerCloud/cloud-commitments-platform)). The secrets are created as part of that deployment; these commands only update them. |
 | Rotating credentials | Both commands update (not create) the secret, so they can be run again to rotate credentials without redeploying. |

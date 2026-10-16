@@ -100,19 +100,8 @@ linters:
         text: "unusedwrite"
         path: _test\.go
       - linters:
-          - errcheck
-          - gosec
-        path: internal/testutil/
-      - linters:
           - all
         path: .*_gen\.go
-      # revive var-naming: "api" is an intentional package name for the HTTP API
-      # layer; it is not a utility package and "avoid meaningless package names"
-      # is a false positive here. All 88+ files in internal/api use this name.
-      - linters:
-          - revive
-        path: internal/api/
-        text: "avoid meaningless package names"
       # noctx: exec.Command calls in configure CLI helpers intentionally
       # omit context (CommandRunner interface contract; operator-controlled inputs).
       # Suppressed per-file rather than per-line so #nosec G204 can lead the comment.
@@ -125,14 +114,6 @@ linters:
       - linters:
           - noctx
         path: _test\.go
-      # misspell: "cancelled" is the canonical DB column name (migration 000035,
-      # UK spelling throughout; migration #1277 tracks the rename). "initialised"
-      # appears in established comments in internal/config/types.go matching the
-      # existing UK convention. Allow both spellings in the files listed below.
-      - linters:
-          - misspell
-        path: (internal/config/(store_postgres|store_postgres_pgxmock_test|store_postgres_ladder|types|interfaces)|pkg/ladder/(store|types_test)|internal/api/(handler_history|handler_ri_exchange(_test)?|router_handlers_test|coverage_extras_test)|internal/mocks/stores|internal/purchase/scheduled_fire_test)\.go
-        text: "cancelled|initialised"
     paths:
       - third_party$
       - builtin$
