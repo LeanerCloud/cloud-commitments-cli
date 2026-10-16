@@ -401,7 +401,7 @@ func TestGcloudDeleteKeyCommand(t *testing.T) {
 		gcloudDeleteKeyCommand(testMintedKeyName))
 }
 
-// --- gcpStepCreateServiceAccount ----------------------------------------------
+// --- gcpStepCreateServiceAccount ---
 
 func TestGCPStepCreateServiceAccount_SkipUsesOperatorEmail(t *testing.T) {
 	const existing = "existing-sa@my-proj.iam.gserviceaccount.com"
