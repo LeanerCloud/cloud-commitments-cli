@@ -11,6 +11,7 @@ import (
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAdjustRecommendationForExcludedVersions(t *testing.T) {
@@ -775,100 +776,46 @@ func TestIsInExtendedSupport(t *testing.T) {
 	}
 }
 
-func TestQueryMajorEngineVersions_ErrorHandling(t *testing.T) {
-	// This test validates the error handling logic when AWS config fails
-	ctx := context.Background()
-
+// TestQueryRunningInstanceEngineVersions_ProfileSelection asserts the
+// validation-profile precedence deterministically: the profiles name entries
+// absent from the (redirected, empty) shared config, so config loading fails
+// before any AWS call and the error names the profile actually selected.
+// Engine-error and region-failure behavior is covered by the stubbed
+// TestQueryMajorEngineVersionsWithClient_* and TestQueryRDSInstancesInRegions_*.
+func TestQueryRunningInstanceEngineVersions_ProfileSelection(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     Config
-		wantErr bool
+		name              string
+		profile           string
+		validationProfile string
+		wantProfileInErr  string
 	}{
 		{
-			name: "Empty profile - should use default credentials",
-			cfg: Config{
-				Profile:           "",
-				ValidationProfile: "",
-			},
-			wantErr: false, // Will fail with real AWS but tests error path exists
+			name:              "validation profile takes precedence",
+			profile:           "cudly-test-main-profile-does-not-exist",
+			validationProfile: "cudly-test-validation-profile-does-not-exist",
+			wantProfileInErr:  "cudly-test-validation-profile-does-not-exist",
 		},
 		{
-			name: "With validation profile",
-			cfg: Config{
-				Profile:           "default",
-				ValidationProfile: "validation-profile",
-			},
-			wantErr: false,
-		},
-		{
-			name: "Fallback to main profile",
-			cfg: Config{
-				Profile:           "main-profile",
-				ValidationProfile: "",
-			},
-			wantErr: false,
+			name:             "falls back to main profile",
+			profile:          "cudly-test-main-profile-does-not-exist",
+			wantProfileInErr: "cudly-test-main-profile-does-not-exist",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// This will likely fail in test environment without real AWS credentials
-			// but it validates the function signature and basic logic paths
-			_, err := queryMajorEngineVersions(ctx, tt.cfg)
-			// We expect an error in test environment (no real AWS creds)
-			// The important thing is that the function doesn't panic
-			if err != nil {
-				assert.Regexp(t, "failed to load AWS config|major engine versions for", err.Error())
-			}
-		})
-	}
-}
+			isolateAWSEnv(t)
 
-func TestQueryRunningInstanceEngineVersions_ErrorHandling(t *testing.T) {
-	// This test validates the error handling logic
-	ctx := context.Background()
+			instances, failed, err := queryRunningInstanceEngineVersions(context.Background(), Config{
+				Profile:           tt.profile,
+				ValidationProfile: tt.validationProfile,
+			})
 
-	tests := []struct {
-		name    string
-		cfg     Config
-		wantErr bool
-	}{
-		{
-			name: "Empty profile - should use default credentials",
-			cfg: Config{
-				Profile:           "",
-				ValidationProfile: "",
-			},
-			wantErr: false,
-		},
-		{
-			name: "With validation profile",
-			cfg: Config{
-				Profile:           "default",
-				ValidationProfile: "validation-profile",
-			},
-			wantErr: false,
-		},
-		{
-			name: "Fallback to main profile",
-			cfg: Config{
-				Profile:           "main-profile",
-				ValidationProfile: "",
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// This will likely fail in test environment without real AWS credentials
-			// but it validates the function signature and basic logic paths
-			_, _, err := queryRunningInstanceEngineVersions(ctx, tt.cfg)
-			// We expect an error in test environment (no real AWS creds)
-			// The important thing is that the function doesn't panic
-			if err != nil {
-				assert.Contains(t, err.Error(), "failed to")
-			}
+			require.Error(t, err)
+			assert.Nil(t, instances)
+			assert.Nil(t, failed)
+			assert.Contains(t, err.Error(), "failed to load validation AWS config")
+			assert.Contains(t, err.Error(), tt.wantProfileInErr, "error must name the selected profile")
 		})
 	}
 }
