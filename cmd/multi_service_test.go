@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1627,11 +1630,12 @@ func TestFilterAndAdjustRecommendations(t *testing.T) {
 }
 
 // isolateAWSEnv pins the AWS environment to deterministic invalid static
-// credentials so the runToolFromCSV tests behave identically on credentialed
-// developer machines and bare CI runners: config loading succeeds, every
-// outbound AWS API call fails and takes the warn-and-continue path, and no
-// real account is ever touched.
-func isolateAWSEnv(t *testing.T) {
+// credentials and points every SDK client at a local server that answers 403
+// AccessDenied, so the runToolFromCSV tests behave identically on credentialed
+// developer machines and bare CI runners: config loading succeeds, every AWS
+// API call fails fast on the warn-and-continue path, and nothing leaves the
+// machine. It returns the number of requests the local server has received.
+func isolateAWSEnv(t *testing.T) *atomic.Int64 {
 	t.Helper()
 	t.Setenv("AWS_ACCESS_KEY_ID", "invalid-test-key-id")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "invalid-test-secret")
@@ -1640,6 +1644,26 @@ func isolateAWSEnv(t *testing.T) {
 	t.Setenv("AWS_CONFIG_FILE", os.DevNull)
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", os.DevNull)
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+	hits := &atomic.Int64{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/x-amz-json-1.1")
+		w.Header().Set("X-Amzn-ErrorType", "AccessDeniedException")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"__type":"AccessDeniedException","message":"denied by test"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// A developer's global endpoint overrides must not bypass the local server.
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "AWS_ENDPOINT_URL_") {
+			t.Setenv(name, "")
+		}
+	}
+	t.Setenv("AWS_IGNORE_CONFIGURED_ENDPOINT_URLS", "")
+	t.Setenv("AWS_ENDPOINT_URL", srv.URL)
+	return hits
 }
 
 // readPurchaseReport parses the CSV purchase report written by runToolFromCSV
@@ -1693,7 +1717,7 @@ func writeTestRecommendationsCSV(t *testing.T, csvData string) string {
 func TestRunToolFromCSV(t *testing.T) {
 	origCfg := toolCfg
 	defer func() { toolCfg = origCfg }()
-	isolateAWSEnv(t)
+	awsHits := isolateAWSEnv(t)
 
 	// Column names match writeMultiServiceCSVReport's header (the real
 	// round-trip shape). The previous fixture used headers the parser
@@ -1750,6 +1774,8 @@ elasticache,us-west-2,cache.t3.micro,redis,1,1yr,all-upfront,111111111111
 			}
 		})
 	}
+	// Without a request the env wiring in isolateAWSEnv would be vacuous.
+	assert.Positive(t, awsHits.Load(), "isolateAWSEnv's local endpoint must have served the duplicate checks")
 }
 
 // TestRunToolFromCSV_DuplicateCheckFailureRefusesToPurchase reproduces #1941:
