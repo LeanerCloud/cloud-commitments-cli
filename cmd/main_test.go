@@ -57,7 +57,15 @@ func TestMain(m *testing.M) {
 	callerAccountFetcher = func(context.Context, aws.Config) (string, error) {
 		return defaultTestAccount, nil
 	}
+	finishGuard, err := startOffhostGuard()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "off-host guard:", err)
+		os.Exit(1)
+	}
 	code := m.Run()
+	if reportOffhost(finishGuard()) {
+		code = 1
+	}
 	_ = os.Remove(toolCfg.AuditLog)
 	os.Exit(code)
 }
