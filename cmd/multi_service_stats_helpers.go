@@ -1,44 +1,80 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 )
 
 // SPTypeBreakdown holds savings information broken down by Savings Plan type.
+// Other collects every Savings Plan recommendation whose type is not one of
+// the four known plan types, so the per-type counts and savings always add up
+// to the number of Savings Plan recommendations.
 type SPTypeBreakdown struct {
 	ComputeSavings     float64
 	EC2InstanceSavings float64
 	SageMakerSavings   float64
 	DatabaseSavings    float64
+	OtherSavings       float64
 	ComputeCount       int
 	EC2InstanceCount   int
 	SageMakerCount     int
 	DatabaseCount      int
+	OtherCount         int
+}
+
+// spPlanKind resolves a Savings Plan recommendation to one of the four
+// per-plan-type service slugs, or ServiceSavingsPlansAll when it is unknown.
+// The per-plan-type slug on the recommendation wins (the AWS parser and the
+// purchase path both key on it); the umbrella slug falls back to
+// SavingsPlanDetails.PlanType, matched case-insensitively because CSV input is
+// hand-edited.
+func spPlanKind(rec common.Recommendation) common.ServiceType {
+	for _, slug := range common.SavingsPlansPlanTypes() {
+		if rec.Service == slug {
+			return slug
+		}
+	}
+	if details, ok := rec.Details.(*common.SavingsPlanDetails); ok && details != nil {
+		switch strings.ToLower(strings.TrimSpace(details.PlanType)) {
+		case "compute":
+			return common.ServiceSavingsPlansCompute
+		case "ec2instance":
+			return common.ServiceSavingsPlansEC2Instance
+		case "sagemaker":
+			return common.ServiceSavingsPlansSageMaker
+		case "database":
+			return common.ServiceSavingsPlansDatabase
+		}
+	}
+	return common.ServiceSavingsPlansAll
 }
 
 // categorizeSPRecommendations categorizes Savings Plan recommendations by type.
 func categorizeSPRecommendations(recommendations []common.Recommendation) SPTypeBreakdown {
 	breakdown := SPTypeBreakdown{}
 
-	for _rvc := range recommendations {
-		rec := recommendations[_rvc]
-		if common.IsSavingsPlan(rec.Service) {
-			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
-				switch details.PlanType {
-				case "Compute":
-					breakdown.ComputeSavings += rec.EstimatedSavings
-					breakdown.ComputeCount++
-				case "EC2Instance":
-					breakdown.EC2InstanceSavings += rec.EstimatedSavings
-					breakdown.EC2InstanceCount++
-				case "SageMaker":
-					breakdown.SageMakerSavings += rec.EstimatedSavings
-					breakdown.SageMakerCount++
-				case "Database":
-					breakdown.DatabaseSavings += rec.EstimatedSavings
-					breakdown.DatabaseCount++
-				}
-			}
+	for i := range recommendations {
+		rec := recommendations[i]
+		if !common.IsSavingsPlan(rec.Service) {
+			continue
+		}
+		switch spPlanKind(rec) {
+		case common.ServiceSavingsPlansCompute:
+			breakdown.ComputeSavings += rec.EstimatedSavings
+			breakdown.ComputeCount++
+		case common.ServiceSavingsPlansEC2Instance:
+			breakdown.EC2InstanceSavings += rec.EstimatedSavings
+			breakdown.EC2InstanceCount++
+		case common.ServiceSavingsPlansSageMaker:
+			breakdown.SageMakerSavings += rec.EstimatedSavings
+			breakdown.SageMakerCount++
+		case common.ServiceSavingsPlansDatabase:
+			breakdown.DatabaseSavings += rec.EstimatedSavings
+			breakdown.DatabaseCount++
+		default:
+			breakdown.OtherSavings += rec.EstimatedSavings
+			breakdown.OtherCount++
 		}
 	}
 
@@ -62,6 +98,10 @@ func printSPTypeSummaries(breakdown SPTypeBreakdown) {
 	if breakdown.DatabaseCount > 0 {
 		AppLogger.Printf("  Database SP   | Recs: %3d | Covers: RDS, Aurora, ElastiCache, etc. | $%8.2f/mo\n",
 			breakdown.DatabaseCount, breakdown.DatabaseSavings)
+	}
+	if breakdown.OtherCount > 0 {
+		AppLogger.Printf("  Other SP      | Recs: %3d | Unrecognized plan type              | $%8.2f/mo\n",
+			breakdown.OtherCount, breakdown.OtherSavings)
 	}
 }
 
@@ -91,32 +131,23 @@ func printBestSPOptions(breakdown SPTypeBreakdown) {
 
 // SPSavingsByType holds Savings Plan savings categorized by plan type.
 type SPSavingsByType struct {
-	EC2SPSavings      float64
-	ComputeSPSavings  float64
-	DatabaseSPSavings float64
+	EC2SPSavings       float64
+	ComputeSPSavings   float64
+	DatabaseSPSavings  float64
+	SageMakerSPSavings float64
+	OtherSPSavings     float64
 }
 
 // collectSPSavings collects Savings Plan savings by type.
 func collectSPSavings(recommendations []common.Recommendation) SPSavingsByType {
-	savings := SPSavingsByType{}
-
-	for _rvc := range recommendations {
-		rec := recommendations[_rvc]
-		if common.IsSavingsPlan(rec.Service) {
-			if details, ok := rec.Details.(*common.SavingsPlanDetails); ok {
-				switch details.PlanType {
-				case "EC2Instance":
-					savings.EC2SPSavings += rec.EstimatedSavings
-				case "Compute":
-					savings.ComputeSPSavings += rec.EstimatedSavings
-				case "Database":
-					savings.DatabaseSPSavings += rec.EstimatedSavings
-				}
-			}
-		}
+	b := categorizeSPRecommendations(recommendations)
+	return SPSavingsByType{
+		EC2SPSavings:       b.EC2InstanceSavings,
+		ComputeSPSavings:   b.ComputeSavings,
+		DatabaseSPSavings:  b.DatabaseSavings,
+		SageMakerSPSavings: b.SageMakerSavings,
+		OtherSPSavings:     b.OtherSavings,
 	}
-
-	return savings
 }
 
 // RISavingsByService holds Reserved Instance savings categorized by service.
@@ -125,19 +156,21 @@ type RISavingsByService struct {
 	DBRISavings  float64
 }
 
-// collectRISavings collects Reserved Instance savings by service.
+// collectRISavings collects Reserved Instance savings by service. Both the
+// legacy service constants and the canonical ones (a CSV Service column is
+// taken verbatim) are recognized.
 func collectRISavings(riStats map[common.ServiceType]ServiceProcessingStats) RISavingsByService {
 	savings := RISavingsByService{}
 
-	// EC2 RIs
-	if stats, ok := riStats[common.ServiceEC2]; ok {
-		savings.EC2RISavings = stats.TotalEstimatedSavings
-	}
-
-	// Database RIs (RDS, ElastiCache, MemoryDB, Redshift)
 	for service, stats := range riStats {
-		if service == common.ServiceRDS || service == common.ServiceElastiCache ||
-			service == common.ServiceMemoryDB || service == common.ServiceRedshift {
+		switch service {
+		case common.ServiceEC2, common.ServiceCompute:
+			savings.EC2RISavings += stats.TotalEstimatedSavings
+		// Database RIs (RDS, ElastiCache, MemoryDB, Redshift)
+		case common.ServiceRDS, common.ServiceRelationalDB,
+			common.ServiceElastiCache, common.ServiceCache,
+			common.ServiceMemoryDB,
+			common.ServiceRedshift, common.ServiceDataWarehouse:
 			savings.DBRISavings += stats.TotalEstimatedSavings
 		}
 	}
