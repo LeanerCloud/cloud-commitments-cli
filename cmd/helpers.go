@@ -269,16 +269,17 @@ func rederiveProjections(rec common.Recommendation) common.Recommendation {
 	return rec
 }
 
-// syncDataWarehouseNodes re-syncs a mirrored NumberOfNodes (and the
-// single-node/multi-node ClusterType derived from it) with rec.Count. The
-// details are copied, never written through the shared pointer. A zero
-// NumberOfNodes means the provider does not mirror Count and stays zero.
+// syncDataWarehouseNodes re-syncs NumberOfNodes (and the single-node/multi-node
+// ClusterType derived from it) with rec.Count for AWS Redshift recs, the only
+// parser that mirrors Count into NumberOfNodes; other users of
+// DataWarehouseDetails keep their value. The details are copied, never written
+// through the shared pointer.
 func syncDataWarehouseNodes(rec common.Recommendation) common.Recommendation {
-	if rec.Count <= 0 {
+	if rec.Service != common.ServiceRedshift || rec.Count <= 0 {
 		return rec
 	}
 	d, isPtr, ok := dataWarehouseDetails(rec.Details)
-	if !ok || d.NumberOfNodes <= 0 || d.NumberOfNodes == rec.Count {
+	if !ok || d.NumberOfNodes == rec.Count {
 		return rec
 	}
 	d.NumberOfNodes = rec.Count

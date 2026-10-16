@@ -68,15 +68,15 @@ func TestSyncDataWarehouseNodes(t *testing.T) {
 	rec.Count = 1
 	assert.Equal(t, "single-node", syncDataWarehouseNodes(rec).Details.(*common.DataWarehouseDetails).ClusterType)
 
-	val := common.Recommendation{Count: 2, Details: common.DataWarehouseDetails{NumberOfNodes: 1, ClusterType: "single-node"}}
+	val := common.Recommendation{Service: common.ServiceRedshift, Count: 2, Details: common.DataWarehouseDetails{NumberOfNodes: 1, ClusterType: "single-node"}}
 	d := syncDataWarehouseNodes(val).Details.(common.DataWarehouseDetails)
 	assert.Equal(t, 2, d.NumberOfNodes)
 	assert.Equal(t, "multi-node", d.ClusterType)
 
-	azure := common.Recommendation{Count: 4, Details: common.DataWarehouseDetails{ClusterType: "dedicated-sql-pool"}}
-	assert.Equal(t, azure, syncDataWarehouseNodes(azure), "NumberOfNodes 0 means not mirrored")
-	custom := common.Recommendation{Count: 4, Details: common.DataWarehouseDetails{NumberOfNodes: 9, ClusterType: "dedicated-sql-pool"}}
-	assert.Equal(t, "dedicated-sql-pool", syncDataWarehouseNodes(custom).Details.(common.DataWarehouseDetails).ClusterType)
+	azure := common.Recommendation{Service: common.ServiceDataWarehouse, Count: 4, Details: common.DataWarehouseDetails{ClusterType: "dedicated-sql-pool"}}
+	assert.Equal(t, azure, syncDataWarehouseNodes(azure), "non-Redshift recs are never touched")
+	custom := common.Recommendation{Service: common.ServiceDataWarehouse, Count: 4, Details: common.DataWarehouseDetails{NumberOfNodes: 9, ClusterType: "single-node"}}
+	assert.Equal(t, custom, syncDataWarehouseNodes(custom), "non-Redshift NumberOfNodes stays 9")
 
 	same := common.Recommendation{Count: 10, Details: ptr}
 	assert.Same(t, ptr, syncDataWarehouseNodes(same).Details, "equal values keep pointer identity")
