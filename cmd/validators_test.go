@@ -140,6 +140,7 @@ func TestValidateNumericRanges(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
+			t.Cleanup(saveGlobalVars().restore)
 			toolCfg = Config{}
 			tt.setupFunc()
 
@@ -237,6 +238,7 @@ func TestValidatePaymentAndTerm(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
+			t.Cleanup(saveGlobalVars().restore)
 			toolCfg = Config{}
 			tt.setupFunc()
 
@@ -428,6 +430,7 @@ func TestValidateFilePaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup
+			t.Cleanup(saveGlobalVars().restore)
 			toolCfg = Config{}
 			cleanup := tt.setupFunc()
 			defer cleanup()
@@ -562,6 +565,7 @@ func TestValidateTargetCoverage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(saveGlobalVars().restore)
 			toolCfg = Config{Coverage: tt.coverage, TargetCoverage: tt.target, CoverageLookbackDays: 30}
 			var cmd *cobra.Command
 			if tt.useCobraCmd {
