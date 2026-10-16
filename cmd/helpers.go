@@ -66,6 +66,17 @@ func NewAccountAliasCacheWithClient(orgClient OrganizationsAPI) *AccountAliasCac
 	}
 }
 
+// knownAccounts lists every account whose name resolved this run.
+func (c *AccountAliasCache) knownAccounts() []common.Recommendation {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := make([]common.Recommendation, 0, len(c.cache))
+	for id, name := range c.cache {
+		out = append(out, common.Recommendation{Account: id, AccountName: name})
+	}
+	return out
+}
+
 // GetAccountAlias returns the account alias for an account ID, or the ID itself
 // when the name cannot be resolved. For display only: a caller that filters on
 // the name must use ResolveAccountName, because the ID is not the name.

@@ -872,3 +872,76 @@ savings-plans-ec2instance,,,1,1yr,no-upfront,EC2Instance,1.5,m5,us-east-1
 		})
 	}
 }
+
+func TestShouldIncludeAccountIDOrNameExactMatch(t *testing.T) {
+	const id = "123456789012"
+	tests := []struct {
+		name        string
+		accountName string
+		include     []string
+		exclude     []string
+		want        bool
+	}{
+		{"include dev does not select devops-prod", "devops-prod", []string{"dev"}, nil, false},
+		{"exclude dev does not drop devops-prod", "devops-prod", nil, []string{"dev"}, true},
+		{"include exact name different case", "DevOps-Prod", []string{"devops-prod"}, nil, true},
+		{"exclude exact name different case", "devops-prod", nil, []string{"DEVOPS-PROD"}, false},
+		{"include exact ID", "devops-prod", []string{id}, nil, true},
+		{"exclude exact ID", "devops-prod", nil, []string{id}, false},
+		{"include name with surrounding whitespace", "dev", []string{"  dev\t"}, nil, true},
+		{"exclude ID with surrounding whitespace", "dev", nil, []string{" " + id + " "}, false},
+		{"include substring of ID does not match", "devops-prod", []string{"12345"}, nil, false},
+		{"exclude substring of ID does not drop", "devops-prod", nil, []string{"9012"}, true},
+		{"blank include never matches", "dev", []string{"  "}, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{IncludeAccounts: tt.include, ExcludeAccounts: tt.exclude}
+			assert.Equal(t, tt.want, shouldIncludeAccountIDOrName(id, tt.accountName, cfg))
+		})
+	}
+}
+
+func TestRequireExactExcludes(t *testing.T) {
+	recs := []common.Recommendation{
+		{
+			Account:     "123456789012",
+			AccountName: "dev-1",
+		},
+		{
+			Account:     "111222333444",
+			AccountName: "devops",
+		},
+		{
+			Account:     "999888777666",
+			AccountName: "prod",
+		},
+	}
+	tests := []struct {
+		name    string
+		exclude []string
+		include []string
+		wantErr []string
+	}{
+		{"partial exclude errors and names accounts", []string{"dev"}, nil, []string{`"dev-1", "devops"`, `"dev"`}},
+		{"partial exclude with whitespace and case", []string{" DEV "}, nil, []string{`"dev-1", "devops"`}},
+		{"exact name exclude works", []string{"DevOps"}, nil, nil},
+		{"exact ID exclude works", []string{"123456789012"}, nil, nil},
+		{"exclude matching nothing is a no-op", []string{"zzz"}, nil, nil},
+		{"include stays exact and does not error", nil, []string{"dev"}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := requireResolvedAccountNames(recs, &Config{ExcludeAccounts: tt.exclude, IncludeAccounts: tt.include})
+			if tt.wantErr == nil {
+				assert.NoError(t, err)
+				return
+			}
+			if assert.Error(t, err) {
+				for _, w := range tt.wantErr {
+					assert.Contains(t, err.Error(), w)
+				}
+			}
+		})
+	}
+}

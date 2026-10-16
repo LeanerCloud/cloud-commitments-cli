@@ -85,6 +85,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `--min-pool-size` and `--min-savings-pct` before any API call. NaN used to
   pass validation and silently switch `--target-coverage` runs to
   `--coverage` sizing (#2136).
+- `--include-accounts` and `--exclude-accounts` are both exact now: they match
+  the account name or ID exactly (case-insensitive, surrounding whitespace
+  ignored) instead of by substring. Previously `--include-accounts dev` also selected `devops-prod`,
+  so a purchase run could buy in accounts that were not named. Behavior change:
+  anyone relying on substring matching must now list the full account names or
+  IDs. An `--exclude-accounts` value that matches no account exactly but is
+  part of account names now stops the run, naming those accounts, instead of
+  being applied as a substring (#2237).
 
 ### Changed
 

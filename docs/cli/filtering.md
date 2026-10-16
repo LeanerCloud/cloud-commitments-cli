@@ -18,11 +18,13 @@ The conflict check is NOT applied to `--include-accounts`/`--exclude-accounts` o
 ### Account filters
 
 ```text
---include-accounts  Only include recommendations for these account names (comma-separated)
---exclude-accounts  Exclude recommendations for these account names (comma-separated)
+--include-accounts  Only include recommendations for these accounts, matched exactly (case-insensitive) on account name or ID (comma-separated)
+--exclude-accounts  Exclude recommendations for these accounts, matched exactly (case-insensitive) on account name or ID; a value that only partly matches account names stops the run (comma-separated)
 ```
 
-Each filter value is matched against the account ID (exactly) and against the account name (case-insensitive, substring). The name is the friendly name from AWS Organizations (`organizations:DescribeAccount`, called once per account ID per run). Member accounts usually cannot call it, so filter by account ID there.
+Each filter value is matched against the account ID and against the account name. The match is exact and case-insensitive, after trimming surrounding whitespace; it is never a substring match, so `dev` does not select `devops-prod`. The name is the friendly name from AWS Organizations (`organizations:DescribeAccount`, called once per account ID per run). Member accounts usually cannot call it, so filter by account ID there.
+
+An `--exclude-accounts` value that matches no account exactly but is part of one or more account names (for example `prod` with accounts `prod-eu` and `prod-us`) stops the run with an error naming those accounts: `--exclude-accounts "prod" matches no account exactly but is part of "prod-eu", "prod-us"; list the full account names to exclude`. A value that matches nothing at all is ignored.
 
 When a filter value is a name (anything other than a 12-digit account ID) and an account's name cannot be resolved, cudly stops with an error instead of guessing: carrying on would treat an account you excluded as "not excluded". ID-only filters never need the name. The same rule applies to `--input-csv` replay, where the name comes from the CSV's `AccountName` column; a row whose name column holds the account ID counts as unresolved.
 
@@ -30,8 +32,8 @@ When a filter value is a name (anything other than a 12-digit account ID) and an
 # Only process two accounts
 cudly --services rds --include-accounts prod-account,staging-account
 
-# Skip the sandbox account
-cudly --services rds --exclude-accounts sandbox
+# Skip the account named sandbox-account
+cudly --services rds --exclude-accounts sandbox-account
 ```
 
 ### Region filters

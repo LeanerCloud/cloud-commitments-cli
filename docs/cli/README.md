@@ -69,8 +69,8 @@ All flags belong to the root command unless noted otherwise.
 | `--exclude-instance-types` | (none) | Exclude these instance types. Same format as `--include-instance-types`. |
 | `--include-engines` | (all) | Only include recommendations for these database engines (e.g. `redis,mysql,postgresql`). |
 | `--exclude-engines` | (none) | Exclude recommendations for these database engines. |
-| `--include-accounts` | (all) | Only include recommendations for these AWS account names (comma-separated). |
-| `--exclude-accounts` | (none) | Exclude recommendations for these account names. |
+| `--include-accounts` | (all) | Only include recommendations for these accounts, matched exactly (case-insensitive) on account name or ID (comma-separated). |
+| `--exclude-accounts` | (none) | Exclude recommendations for these accounts, matched exactly (case-insensitive) on account name or ID. A value that only partly matches account names stops the run. |
 | `--include-sp-types` | (all) | Only include these Savings Plan types: `Compute`, `EC2Instance`, `SageMaker`, `Database`. |
 | `--exclude-sp-types` | (none) | Exclude these Savings Plan types. |
 | `--sp-account-scope` | `linked` | Cost Explorer account scope for Savings Plan recommendations: `linked` or `payer`. A management account may only get recommendations at `payer` scope. |

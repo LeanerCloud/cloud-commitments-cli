@@ -657,7 +657,7 @@ func stampSavingsPlanRegions(recs []common.Recommendation) {
 // populateRecommendationAccountNames populates account names from account IDs.
 // An account whose name cannot be resolved gets its ID as the name (member
 // accounts cannot call organizations:DescribeAccount). That is fine for
-// ID-based account filters; requireResolvedAccountNames fails the run when a
+// ID-based account filters; requireNamesResolved fails the run when a
 // name-based --include-accounts / --exclude-accounts value needs the name.
 func populateRecommendationAccountNames(ctx context.Context, recs []common.Recommendation, accountCache *AccountAliasCache, cfg Config) error {
 	for i := range recs {
@@ -665,7 +665,7 @@ func populateRecommendationAccountNames(ctx context.Context, recs []common.Recom
 			recs[i].AccountName = accountCache.GetAccountAlias(ctx, recs[i].Account)
 		}
 	}
-	return requireResolvedAccountNames(recs, &cfg)
+	return requireNamesResolved(recs, &cfg)
 }
 
 // applyRegionFilters applies region and instance type filters to recommendations.
@@ -949,6 +949,11 @@ func fetchAllRecs(
 			}
 			all = append(all, recs...)
 		}
+	}
+	// Checked once over every account seen in any batch, including those the
+	// filters dropped, so an exact account in another batch is not missed.
+	if err := requireExactExcludes(accountCache.knownAccounts(), &cfg); err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", errRecommendationFetch, err)
 	}
 	return all, drops, nil
 }

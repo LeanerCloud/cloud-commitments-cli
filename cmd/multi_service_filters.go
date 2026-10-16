@@ -174,20 +174,17 @@ func shouldIncludeAccount(accountName string, cfg *Config) bool {
 }
 
 // shouldIncludeAccountIDOrName applies --include-accounts / --exclude-accounts
-// to an account, matching each filter value against the account ID (exactly)
-// and the account name (case-insensitive substring). Name-based values are
-// only decidable once the name is known; requireResolvedAccountNames fails the
-// run before this point when it is not.
+// to an account, matching each filter value against the account ID and the
+// account name, both trimmed and case-insensitive, never by substring.
+// Name-based values are only decidable once the name is known;
+// requireNamesResolved fails the run before this point when it is not.
 func shouldIncludeAccountIDOrName(accountID, accountName string, cfg *Config) bool {
 	// If the account is unidentified and there are filters, skip it.
 	if accountID == "" && accountName == "" {
 		return len(cfg.IncludeAccounts) == 0 && len(cfg.ExcludeAccounts) == 0
 	}
 	matches := func(filter string) bool {
-		if accountID != "" && strings.EqualFold(accountID, filter) {
-			return true
-		}
-		return accountName != "" && accountMatchesFilter(strings.ToLower(accountName), filter)
+		return accountMatchesFilter(accountID, filter) || accountMatchesFilter(accountName, filter)
 	}
 	if len(cfg.IncludeAccounts) > 0 && !slices.ContainsFunc(cfg.IncludeAccounts, matches) {
 		return false
@@ -199,16 +196,25 @@ func shouldIncludeAccountIDOrName(accountID, accountName string, cfg *Config) bo
 // that can be decided without the account's name.
 var accountIDPattern = regexp.MustCompile(`^\d{12}$`)
 
-// requireResolvedAccountNames fails when an account filter holds a name and a
+// requireResolvedAccountNames runs both account-filter pre-checks over a full
+// set of recommendations: requireNamesResolved and requireExactExcludes.
+func requireResolvedAccountNames(recs []common.Recommendation, cfg *Config) error {
+	if err := requireNamesResolved(recs, cfg); err != nil {
+		return err
+	}
+	return requireExactExcludes(recs, cfg)
+}
+
+// requireNamesResolved fails when an account filter holds a name and a
 // recommendation's account name is unknown (its name lookup failed, so the ID
 // stands in for it, or the CSV row carries no name). Such a recommendation
 // cannot be matched against the name, and carrying on would treat an excluded
 // account as "not excluded". Filters made only of account IDs never need the
 // name.
-func requireResolvedAccountNames(recs []common.Recommendation, cfg *Config) error {
+func requireNamesResolved(recs []common.Recommendation, cfg *Config) error {
 	nameFilter := ""
 	for _, v := range slices.Concat(cfg.IncludeAccounts, cfg.ExcludeAccounts) {
-		if !accountIDPattern.MatchString(v) {
+		if !accountIDPattern.MatchString(strings.TrimSpace(v)) {
 			nameFilter = v
 			break
 		}
@@ -224,8 +230,45 @@ func requireResolvedAccountNames(recs []common.Recommendation, cfg *Config) erro
 	return nil
 }
 
-// accountMatchesFilter checks if an account matches a filter pattern (exact or substring match).
-func accountMatchesFilter(accountLower, filter string) bool {
-	filterLower := strings.ToLower(filter)
-	return filterLower == accountLower || strings.Contains(accountLower, filterLower)
+// requireExactExcludes fails when an --exclude-accounts value matches no
+// account exactly (name or ID) but is part of other account names: the
+// operator likely meant a substring, which no longer excludes anything, so
+// carrying on would buy in accounts they meant to skip. A value matching
+// nothing at all is a harmless no-op. recs must hold every account of the run,
+// not one batch, or an exact account in another batch is missed.
+func requireExactExcludes(recs []common.Recommendation, cfg *Config) error {
+	for _, raw := range cfg.ExcludeAccounts {
+		if partial := partialOnlyMatches(recs, raw); len(partial) > 0 {
+			return fmt.Errorf("--exclude-accounts %q matches no account exactly but is part of \"%s\"; list the full account names to exclude", strings.TrimSpace(raw), strings.Join(partial, `", "`))
+		}
+	}
+	return nil
+}
+
+// partialOnlyMatches returns the sorted account names that contain the filter
+// as a substring, or nil when the filter is blank or matches an account exactly.
+func partialOnlyMatches(recs []common.Recommendation, filter string) []string {
+	f := strings.ToLower(strings.TrimSpace(filter))
+	if f == "" {
+		return nil
+	}
+	var partial []string
+	for i := range recs {
+		if accountMatchesFilter(recs[i].Account, f) || accountMatchesFilter(recs[i].AccountName, f) {
+			return nil
+		}
+		if n := recs[i].AccountName; strings.Contains(strings.ToLower(n), f) && !slices.Contains(partial, n) {
+			partial = append(partial, n)
+		}
+	}
+	slices.Sort(partial)
+	return partial
+}
+
+// accountMatchesFilter reports whether value (an account name or ID) equals the
+// filter, ignoring surrounding whitespace and case. Never a substring match, so
+// "dev" does not select "devops-prod". An empty value or filter never matches.
+func accountMatchesFilter(value, filter string) bool {
+	value, filter = strings.TrimSpace(value), strings.TrimSpace(filter)
+	return value != "" && filter != "" && strings.EqualFold(value, filter)
 }

@@ -1060,9 +1060,9 @@ func TestApplyFilters_AccountFiltering(t *testing.T) {
 				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, AccountName: "dev-account"},
 				{Region: "us-east-1", ResourceType: "db.t3.large", Count: 3, Service: common.ServiceRDS, AccountName: "staging-account"},
 			},
-			includeAccounts: []string{"prod", "dev"},
+			includeAccounts: []string{"prod-account", "DEV-account"},
 			excludeAccounts: []string{},
-			expectedCount:   2, // Substring match
+			expectedCount:   2, // Exact, case-insensitive match
 		},
 		{
 			name: "Exclude specific accounts",
@@ -1071,7 +1071,7 @@ func TestApplyFilters_AccountFiltering(t *testing.T) {
 				{Region: "us-east-1", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, AccountName: "dev-account"},
 			},
 			includeAccounts: []string{},
-			excludeAccounts: []string{"dev"},
+			excludeAccounts: []string{"dev-account"},
 			expectedCount:   1,
 		},
 		{
@@ -1121,7 +1121,7 @@ func TestApplyFilters_CombinedFilters(t *testing.T) {
 		IncludeRegions:       []string{"us-east-1", "us-west-2"},
 		IncludeEngines:       []string{"postgresql", "mysql"},
 		ExcludeInstanceTypes: []string{"db.r5.large"},
-		IncludeAccounts:      []string{"prod", "dev"},
+		IncludeAccounts:      []string{"prod-account", "dev-account"},
 	}
 
 	result := applyFilters(recs, &cfg, map[string][]InstanceEngineVersion{}, map[string]MajorEngineVersionInfo{}, "", nil)
