@@ -376,24 +376,24 @@ We welcome contributions in these areas:
 
 ### High Priority
 
-- Additional AWS services (Lambda, DynamoDB, etc.)
-- Azure service implementations
-- GCP service implementations
+- Command and flag support for additional services (the provider and service clients themselves live in [cloud-commitments-go](https://github.com/LeanerCloud/cloud-commitments-go))
 - Improved error messages and user experience
 
 ### Medium Priority
 
 - Enhanced reporting and analytics
-- Terraform/CloudFormation integration
-- Web UI dashboard
 - Performance optimizations
 
 ### Documentation
 
 - Usage tutorials and guides
 - Architecture documentation
-- API documentation
 - Translation to other languages
+
+The web dashboard, REST API and deployment infrastructure (Terraform,
+CloudFormation) live in
+[cloud-commitments-platform](https://github.com/LeanerCloud/cloud-commitments-platform);
+contribute those there.
 
 ## Getting Help
 
