@@ -26,7 +26,7 @@ func TestGCPStepGrantRole(t *testing.T) {
 		runGCPIAMFixture(t, scenario)
 		return
 	}
-	for _, scenario := range []string{"create", "empty", "reuse", "extra-permission", "deleted", "disabled", "wrong-name", "bad-created", "forbidden", "write-error", "skip", "conditional-other", "conditional-member", "already-unconditional", "existing-admin", "coordinator", "coordinator-error", "coordinator-conflict", "coordinator-second-write", "reader-create", "reader-extra-permission", "reader-deleted", "reader-wrong-name"} {
+	for _, scenario := range []string{"create", "reuse", "extra-permission", "deleted", "disabled", "wrong-name", "bad-created", "forbidden", "write-error", "skip", "conditional-other", "conditional-member", "already-unconditional", "existing-admin", "coordinator", "coordinator-error", "coordinator-conflict", "coordinator-second-write", "reader-create", "reader-extra-permission", "reader-deleted", "reader-wrong-name"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -109,7 +109,7 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/roles/cudlyCommitmentPurchaser"):
 			roleReads++
 			switch scenario {
-			case "create", "empty", "bad-created", "coordinator", "coordinator-conflict":
+			case "create", "bad-created", "coordinator", "coordinator-conflict":
 				http.Error(w, `{"error":{"code":404,"message":"missing"}}`, http.StatusNotFound)
 			case "forbidden", "coordinator-error":
 				http.Error(w, `{"error":{"code":403,"message":"denied"}}`, http.StatusForbidden)
@@ -162,9 +162,6 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 	require.NoError(t, os.WriteFile(adc, []byte(`{"type":"authorized_user","client_id":"fixture","client_secret":"fixture","refresh_token":"fixture"}`), 0600))
 	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", adc)
 	input := "r\n"
-	if scenario == "empty" {
-		input = "\n"
-	}
 	if scenario == "skip" {
 		input = "s\n"
 	}
@@ -213,7 +210,7 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 	require.Zero(t, keyCalls, "role setup must never mint a key or call unexpected endpoints")
 	wantCreates := 0
 	switch scenario {
-	case "create", "empty", "bad-created", "coordinator", "coordinator-conflict", "reader-create":
+	case "create", "bad-created", "coordinator", "coordinator-conflict", "reader-create":
 		wantCreates = 1
 	}
 	require.Len(t, creates, wantCreates)

@@ -802,21 +802,21 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 	fmt.Println("------------------------------")
 	fmt.Println("This creates a GCP Service Account for CUDly via the IAM API.")
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? (creates service account '%s' via SDK) ", saName)
+	fmt.Printf("[r]un, [S]kip (default)? (creates service account '%s' via SDK) ", saName)
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
 		return "", fmt.Errorf("failed to read service-account choice: %w", err)
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
-	case "r", "run", "":
+	case "r", "run":
 		email, createErr := createGCPServiceAccount(ctx, projectID, saName)
 		if createErr != nil {
 			return "", createErr
 		}
 		fmt.Printf("Service account created: %s\n", email)
 		return email, nil
-	case "s", "skip":
+	case "s", "skip", "":
 		fmt.Println("Skipping Create Service Account")
 		return promptExistingGCPServiceAccount(reader)
 	default:
@@ -897,7 +897,7 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 	fmt.Println("Grant the required roles to the service account.")
 	fmt.Println()
 	fmt.Println("Prerequisite: enable recommender.googleapis.com in the service account's project (this step does not enable it).")
-	fmt.Printf("[R]un, [S]kip? (creates or validates %s with %s and %s with %s, then grants both and roles/compute.viewer to %s on project %s via SDK) ",
+	fmt.Printf("[r]un, [S]kip (default)? (creates or validates %s with %s and %s with %s, then grants both and roles/compute.viewer to %s on project %s via SDK) ",
 		gcpPurchaserRole.id, gcpPurchaserRole.permission, gcpRecommendationReaderRole.id, gcpRecommendationReaderRole.permission, saEmail, projectID)
 
 	choice, err := reader.ReadString('\n')
@@ -905,7 +905,7 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 		return fmt.Errorf("failed to read grant-role choice: %w", err)
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
-	case "r", "run", "":
+	case "r", "run":
 		grants := []string{"roles/compute.viewer"}
 		for _, spec := range []gcpCustomRole{gcpPurchaserRole, gcpRecommendationReaderRole} {
 			role, roleErr := ensureGCPCustomRole(ctx, projectID, spec)
@@ -920,7 +920,7 @@ func gcpStepGrantRole(ctx context.Context, reader *bufio.Reader, projectID, saEm
 			}
 			fmt.Printf("Role %s granted to %s on project %s.\n", grant, saEmail, projectID)
 		}
-	case "s", "skip":
+	case "s", "skip", "":
 		fmt.Println("Skipping Grant IAM Roles")
 	default:
 		fmt.Printf("Unknown option, skipping\n")
@@ -944,20 +944,20 @@ func gcpStepCreateKey(reader *bufio.Reader, saEmail string, beginUpload func() c
 	fmt.Println("-------------------------------")
 	fmt.Println("Create a JSON key file for the service account.")
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? (creates key for %s via SDK; the local copy is removed after upload) ", saEmail)
+	fmt.Printf("[r]un, [S]kip (default)? (creates key for %s via SDK; the local copy is removed after upload) ", saEmail)
 
 	choice, err := reader.ReadString('\n')
 	if err != nil {
 		return "", "", errors.Join(fmt.Errorf("failed to read create-key choice: %w", err), removeMintedGCPKey(keyFile))
 	}
 	switch strings.ToLower(strings.TrimSpace(choice)) {
-	case "r", "run", "":
+	case "r", "run":
 		keyName, err = createGCPServiceAccountKey(beginUpload(), saEmail, keyFile)
 		if err != nil {
 			return "", "", errors.Join(err, removeMintedGCPKey(keyFile))
 		}
 		return keyFile, keyName, nil
-	case "s", "skip":
+	case "s", "skip", "":
 		fmt.Println("Skipping Create Key")
 	default:
 		fmt.Printf("Unknown option, skipping\n")
@@ -1013,7 +1013,7 @@ func readRequiredInputLine(reader *bufio.Reader, prompt, fieldName string) (stri
 func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd, program string, args ...string) error {
 	fmt.Printf("Command: %s\n", displayCmd)
 	fmt.Println()
-	fmt.Printf("[R]un, [S]kip? ")
+	fmt.Printf("[r]un, [S]kip (default)? ")
 
 	choice, err := readTrimmedLine(reader)
 	if err != nil {
@@ -1022,9 +1022,9 @@ func promptAndRunGCPCommand(reader *bufio.Reader, name, displayCmd, program stri
 	choice = strings.ToLower(choice)
 
 	switch choice {
-	case "r", "run", "":
+	case "r", "run":
 		return executeGCPCommand(reader, displayCmd, program, args...)
-	case "s", "skip":
+	case "s", "skip", "":
 		fmt.Printf("Skipping %s\n", name)
 		return nil
 	default:

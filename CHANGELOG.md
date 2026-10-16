@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `configure gcp`: pressing Enter at a `[r]un, [S]kip (default)?` step now skips
+  instead of creating the service account, granting roles, minting a key or
+  running `gcloud auth login`; type `r` to run a step (#1613).
 - `configure gcp` key cleanup: the minted key is now deleted when the upload
   panics, a second Ctrl-C aborts the cleanup, the local key file is removed
   first, and a possibly orphaned key is reported when `CreateKey` fails

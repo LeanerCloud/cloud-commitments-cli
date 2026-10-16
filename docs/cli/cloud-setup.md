@@ -110,6 +110,8 @@ When `--skip-setup` is not set, the command runs an interactive guided flow:
 5. **Grant IAM roles via SDK** - creates or validates the project custom role `cudlyCommitmentPurchaser`, then grants it and `roles/compute.viewer` to the Service Account.
 6. **`gcloud iam service-accounts keys create ~/cudly-gcp-key.json`** - downloads a JSON key to your home directory.
 
+Each step prompts `[r]un, [S]kip (default)?`: type `r` to run it. Pressing Enter or typing anything else skips it, so no cloud change happens by accident.
+
 Choosing Skip at the service-account step prompts for the email of an existing service account, which is used for the role grant and key steps.
 
 After the guided steps (or with `--skip-setup --credentials-file <path>`), the command reads and validates the JSON file and writes it to the `<stack-name>-GCPCredentials` secret.
