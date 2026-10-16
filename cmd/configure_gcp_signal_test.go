@@ -115,7 +115,7 @@ func startGCPInterruptChild(t *testing.T, phase string) (*exec.Cmd, string, io.R
 	child.Stderr = stderr
 	require.NoError(t, child.Start())
 	t.Cleanup(func() { _ = child.Process.Kill() })
-	input := "s\ns\ns\nfixture-project\ns\ns\n"
+	input := "s\ns\ns\nfixture-project\ns\ncudly-service-account@fixture-project.iam.gserviceaccount.com\ns\n"
 	if phase != "prompt" {
 		input += "r\n"
 	}

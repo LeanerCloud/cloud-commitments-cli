@@ -180,7 +180,7 @@ func runGCPIAMFixture(t *testing.T, scenario string) {
 		stdin, writeErr := os.Create(filepath.Join(dir, "stdin"))
 		require.NoError(t, writeErr)
 		defer stdin.Close()
-		_, writeErr = io.WriteString(stdin, "s\ns\ns\nfixture-project\ns\nr\n")
+		_, writeErr = io.WriteString(stdin, "s\ns\ns\nfixture-project\ns\ncudly-service-account@fixture-project.iam.gserviceaccount.com\nr\n")
 		require.NoError(t, writeErr)
 		_, writeErr = stdin.Seek(0, io.SeekStart)
 		require.NoError(t, writeErr)

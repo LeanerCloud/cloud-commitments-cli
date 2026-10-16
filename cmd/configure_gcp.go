@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -751,8 +752,6 @@ func gcpStepSelectProject(ctx context.Context, reader *bufio.Reader) (string, er
 // SDK. It fails loud on any SDK error (no CLI fallback).
 func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, projectID string) (string, error) {
 	saName := "cudly-service-account"
-	saEmail := fmt.Sprintf("%s@%s.iam.gserviceaccount.com", saName, projectID)
-
 	fmt.Println()
 	fmt.Println("Step 3: Create Service Account")
 	fmt.Println("------------------------------")
@@ -770,14 +769,33 @@ func gcpStepCreateServiceAccount(ctx context.Context, reader *bufio.Reader, proj
 		if createErr != nil {
 			return "", createErr
 		}
-		saEmail = email
-		fmt.Printf("Service account created: %s\n", saEmail)
+		fmt.Printf("Service account created: %s\n", email)
+		return email, nil
 	case "s", "skip":
 		fmt.Println("Skipping Create Service Account")
+		return promptExistingGCPServiceAccount(reader)
 	default:
 		fmt.Printf("Unknown option, skipping\n")
+		return promptExistingGCPServiceAccount(reader)
 	}
-	return saEmail, nil
+}
+
+// promptExistingGCPServiceAccount asks for the email of an existing service
+// account when creation is skipped, so later steps never act on a principal
+// that was neither created nor supplied by the operator.
+func promptExistingGCPServiceAccount(reader *bufio.Reader) (string, error) {
+	email, err := readRequiredInputLine(reader, "Skipped. Enter the existing service account email (name@project.iam.gserviceaccount.com): ", "service-account email")
+	if err != nil {
+		return "", err
+	}
+	email = strings.ToLower(email)
+	local, domain, ok := strings.Cut(email, "@")
+	label, hasSuffix := strings.CutSuffix(domain, ".gserviceaccount.com")
+	if !ok || local == "" || !hasSuffix || label == "" || strings.Contains(domain, "@") ||
+		strings.IndexFunc(email, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return "", fmt.Errorf("invalid service account email %q: expected a name@<project>.gserviceaccount.com address", email)
+	}
+	return email, nil
 }
 
 // gcpCustomRole is a single-permission custom role the wizard provisions.
