@@ -151,8 +151,21 @@ func validateSavingsPlanPreconditions(rec common.Recommendation) error {
 	if fmt.Sprintf(spCommitmentFormat, d.HourlyCommitment) == "0.00" {
 		return fmt.Errorf("%s recommendation's hourly commitment %v would be sent as 0.00; it must be at least 0.005", rec.Service, d.HourlyCommitment)
 	}
-	if rec.Service == common.ServiceSavingsPlansEC2Instance && d.Region == "" {
+	if rec.Service == common.ServiceSavingsPlansEC2Instance {
+		return validateEC2InstanceSPOffering(d)
+	}
+	return nil
+}
+
+// validateEC2InstanceSPOffering mirrors the library's offering lookup: an
+// explicit offering ID skips it, otherwise it needs the region and family to
+// pick exactly one offering.
+func validateEC2InstanceSPOffering(d *common.SavingsPlanDetails) error {
+	if d.Region == "" {
 		return fmt.Errorf("EC2 Instance Savings Plan needs a region to pick the offering")
+	}
+	if d.OfferingID == "" && d.InstanceFamily == "" {
+		return fmt.Errorf("EC2 Instance Savings Plan needs an instance family or an offering ID to pick the offering")
 	}
 	return nil
 }

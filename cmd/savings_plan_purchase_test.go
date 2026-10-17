@@ -258,8 +258,14 @@ func TestValidatePurchasePreconditions(t *testing.T) {
 	ok := map[string]common.Recommendation{
 		"compute sp":      parserShapedSP(),
 		"ec2 instance sp": validEC2InstanceSP(),
-		"ec2":             validEC2Rec(),
-		"rds":             {Service: common.ServiceRDS, Region: "us-east-1"},
+		"ec2 instance sp offering id no family": mut(validEC2InstanceSP(), func(r *common.Recommendation) {
+			r.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1, Region: "eu-west-1", OfferingID: "o-1"}
+		}),
+		"compute sp no family": mut(parserShapedSP(), func(r *common.Recommendation) {
+			r.Details = &common.SavingsPlanDetails{PlanType: "Compute", HourlyCommitment: 1}
+		}),
+		"ec2": validEC2Rec(),
+		"rds": {Service: common.ServiceRDS, Region: "us-east-1"},
 	}
 	for name, rec := range ok {
 		assert.NoError(t, validatePurchasePreconditions(rec, rec.Region, defaultTestAccount), name)
@@ -273,6 +279,9 @@ func TestValidatePurchasePreconditions(t *testing.T) {
 		}),
 		"ec2 instance sp no region": mut(validEC2InstanceSP(), func(r *common.Recommendation) {
 			r.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1, InstanceFamily: "m5"}
+		}),
+		"ec2 instance sp no family no offering": mut(validEC2InstanceSP(), func(r *common.Recommendation) {
+			r.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1, Region: "eu-west-1"}
 		}),
 		"sp all":        mut(parserShapedSP(), func(r *common.Recommendation) { r.Service = common.ServiceSavingsPlansAll }),
 		"ec2 nil":       mut(validEC2Rec(), func(r *common.Recommendation) { r.Details = nil }),

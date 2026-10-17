@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A dry run now refuses an EC2 Instance Savings Plan that has no instance family
+  and no offering ID, the same way the real run does, instead of reporting
+  success for a purchase the offering lookup would reject (#2164).
 - A purchase result with `Success=true` and a non-nil `Error` is now treated as
   a failure in the Ctrl-C summary, the audit-stop message, the per-service
   success/failed counts and the non-zero exit. The CSV `Success` column keeps the

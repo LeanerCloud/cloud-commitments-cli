@@ -305,7 +305,7 @@ func (p *completenessProxy) spRecommendation(body []byte) (int, string, string) 
 	const invalid = `{"HourlyCommitmentToPurchase":"not-a-number","EstimatedMonthlySavingsAmount":"10","UpfrontCost":"3"}`
 	details := valid
 	if request.SavingsPlansType == "EC2_INSTANCE_SP" {
-		details = strings.TrimSuffix(valid, "}") + `,"SavingsPlansDetails":{"Region":"us-east-1"}}`
+		details = strings.TrimSuffix(valid, "}") + `,"SavingsPlansDetails":{"InstanceFamily":"m5","Region":"us-east-1"}}`
 	}
 	switch p.details {
 	case "mixed":
