@@ -118,7 +118,7 @@ type archeraDeltaDTO struct {
 	BreakevenDays     *string `json:"breakeven_days"`
 }
 
-type archeraOfferDTO struct {
+type archeraOfferDTO struct { //nolint:govet // fieldalignment: field order is the JSON output contract (testdata/archera_json.golden)
 	IsCurrent             bool                     `json:"is_current"`
 	OfferID               string                   `json:"offer_id"`
 	CommitmentType        string                   `json:"commitment_type"`
@@ -143,7 +143,7 @@ type archeraRowDTO struct {
 
 // archeraComparisonDTO is the CLI's stable JSON contract. Money values are
 // exact decimal strings; null means unknown, never zero.
-type archeraComparisonDTO struct {
+type archeraComparisonDTO struct { //nolint:govet // fieldalignment: field order is the JSON output contract (testdata/archera_json.golden)
 	Title                 string                   `json:"title"`
 	PlanID                string                   `json:"plan_id"`
 	FetchedAt             string                   `json:"fetched_at"`

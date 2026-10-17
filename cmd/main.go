@@ -40,14 +40,21 @@ type Config struct {
 	// CallerAccountID is the account the credentials belong to (STS
 	// GetCallerIdentity), set at run start. Purchases are refused for
 	// recommendations owned by any other account.
-	CallerAccountID        string
-	AuditLog               string
-	CSVInput               string
-	IdempotencyWindow      string
-	ValidationProfile      string
-	Profile                string
-	PaymentOption          string
-	CSVOutput              string
+	CallerAccountID   string
+	AuditLog          string
+	CSVInput          string
+	IdempotencyWindow string
+	ValidationProfile string
+	Profile           string
+	PaymentOption     string
+	CSVOutput         string
+	SPAccountScope    string
+	// RecLookbackPeriod controls the LookbackPeriodInDays passed to
+	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d"
+	// (recommendations.DefaultRecLookbackPeriod is the shared default).
+	// A longer window smooths seasonal spikes; a shorter window weights
+	// recent demand more heavily.
+	RecLookbackPeriod      string
 	Regions                []string
 	Services               []string
 	ExcludeAccounts        []string
@@ -60,17 +67,16 @@ type Config struct {
 	ExcludeEngines         []string
 	ExcludeSPTypes         []string
 	IncludeSPTypes         []string
-	SPAccountScope         string
-	MaxBreakEvenMonths     int
 	TargetCoverage         float64
 	Coverage               float64
 	MinPoolSize            float64
+	MinSavingsPct          float64
+	MaxBreakEvenMonths     int
 	RebuyWindowDays        int
 	TermYears              int
 	CoverageLookbackDays   int
 	MinCount               int
 	IdempotencyWindowHours int
-	MinSavingsPct          float64
 	OverrideCount          int32
 	MaxInstances           int32
 	IncludeExtendedSupport bool
@@ -82,12 +88,6 @@ type Config struct {
 	// Count when no coverage was asked for (determineCSVCoverage). A Config
 	// built in code leaves it false, so its Coverage is always honored.
 	CoverageFromDefault bool
-	// RecLookbackPeriod controls the LookbackPeriodInDays passed to
-	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d"
-	// (recommendations.DefaultRecLookbackPeriod is the shared default).
-	// A longer window smooths seasonal spikes; a shorter window weights
-	// recent demand more heavily.
-	RecLookbackPeriod string
 }
 
 func main() {
