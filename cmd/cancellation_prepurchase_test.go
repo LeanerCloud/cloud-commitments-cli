@@ -362,3 +362,45 @@ func TestFetchAllRecs_ExcludeAccountsExactInAnotherBatchIsNotAmbiguous(t *testin
 		assert.NotEqual(t, "prod", recs[i].AccountName)
 	}
 }
+
+func TestFetchAllRecs_ExcludeAccountsPartialOnlyIsRefused(t *testing.T) {
+	captureAppLog(t)
+	rec := func(region, account string) common.Recommendation {
+		return common.Recommendation{Service: common.ServiceRDS, Region: region, ResourceType: "db.t3.small", Count: 3, EstimatedSavings: 10, SavingsPercentage: 10, Account: account}
+	}
+	usProd, euProd := rec("us-east-1", "123456789012"), rec("eu-central-2", "999888777666")
+	run := func(t *testing.T, exclude string) ([]common.Recommendation, error) {
+		t.Helper()
+		client := &MockRecommendationsClient{}
+		client.On("GetRecommendations", mock.Anything, mock.MatchedBy(func(p *common.RecommendationParams) bool { return p.Region == "" })).
+			Return([]common.Recommendation{usProd, euProd}, nil)
+		client.On("GetRecommendations", mock.Anything, mock.MatchedBy(func(p *common.RecommendationParams) bool { return p.Region == "us-east-1" })).
+			Return([]common.Recommendation{usProd}, nil)
+		client.On("GetRecommendations", mock.Anything, mock.MatchedBy(func(p *common.RecommendationParams) bool { return p.Region == "eu-central-2" })).
+			Return([]common.Recommendation{euProd}, nil)
+		org := &MockOrganizationsClient{}
+		for id, name := range map[string]string{"123456789012": "prod-us", "999888777666": "prod-eu"} {
+			org.On("DescribeAccount", mock.Anything, mock.MatchedBy(func(in *organizations.DescribeAccountInput) bool { return *in.AccountId == id })).
+				Return(&organizations.DescribeAccountOutput{Account: &orgtypes.Account{Name: aws.String(name)}}, nil)
+		}
+		cfg := Config{TermYears: 1, PaymentOption: "no-upfront", Coverage: 100, ExcludeAccounts: []string{exclude}}
+		awsCfg, _ := newAWSFixtureConfig(t)
+		recs, _, err := fetchAllRecs(context.Background(), awsCfg, client, NewAccountAliasCacheWithClient(org), []common.ServiceType{common.ServiceRDS}, engineVersionData{}, cfg, nil)
+		return recs, err
+	}
+
+	t.Run("a substring matching no account exactly is refused", func(t *testing.T) {
+		recs, err := run(t, "prod")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "matches no account exactly")
+		assert.Contains(t, err.Error(), "prod-us")
+		assert.Contains(t, err.Error(), "prod-eu")
+		assert.Empty(t, recs)
+	})
+	t.Run("an exact name in another case excludes only that account", func(t *testing.T) {
+		recs, err := run(t, "PROD-US")
+		require.NoError(t, err)
+		require.Len(t, recs, 1)
+		assert.Equal(t, "prod-eu", recs[0].AccountName)
+	})
+}
