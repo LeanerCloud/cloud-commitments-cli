@@ -68,6 +68,12 @@ func processRecommendation(rec *common.Recommendation, cfg *Config, instanceVers
 		// operator-scoping choices, not drops worth surfacing in the summary.
 		// --min-pool-size drops are counted separately in applyFilters before
 		// this function runs, so no drop reason is surfaced here.
+		// The exception is a recommendation with no account ID or name under
+		// --include-accounts: it is not a scoping choice but data the filter
+		// cannot place, so it is counted.
+		if isUnidentifiedAccount(rec) && len(cfg.IncludeAccounts) > 0 && passesWithoutAccountFilters(rec, cfg) {
+			return *rec, false, dropUnidentifiedAccount
+		}
 		return *rec, false, ""
 	}
 
@@ -168,6 +174,24 @@ func shouldIncludeEngine(rec *common.Recommendation, cfg *Config) bool {
 	return filtersFromConfig(cfg).IncludesEngine(rec)
 }
 
+// dropUnidentifiedAccount is the DropSummary reason for a recommendation that
+// carries neither an account ID nor an account name and is dropped by
+// --include-accounts because it cannot be shown to belong to an included account.
+const dropUnidentifiedAccount = "unidentified-account (--include-accounts)"
+
+func isUnidentifiedAccount(rec *common.Recommendation) bool {
+	return rec.Account == "" && rec.AccountName == ""
+}
+
+// passesWithoutAccountFilters reports whether rec passes every dimension filter
+// except the account ones, so an unidentified-account drop is only counted for
+// a recommendation the account filter alone removed.
+func passesWithoutAccountFilters(rec *common.Recommendation, cfg *Config) bool {
+	c := *cfg
+	c.IncludeAccounts, c.ExcludeAccounts = nil, nil
+	return passesDimensionFilters(rec, &c)
+}
+
 // shouldIncludeAccount checks if an account should be included based on filters.
 func shouldIncludeAccount(accountName string, cfg *Config) bool {
 	return shouldIncludeAccountIDOrName("", accountName, cfg)
@@ -196,13 +220,35 @@ func shouldIncludeAccountIDOrName(accountID, accountName string, cfg *Config) bo
 // that can be decided without the account's name.
 var accountIDPattern = regexp.MustCompile(`^\d{12}$`)
 
-// requireResolvedAccountNames runs both account-filter pre-checks over a full
-// set of recommendations: requireNamesResolved and requireExactExcludes.
+// requireResolvedAccountNames runs the account-filter pre-checks over a full
+// set of recommendations: requireIdentifiedForExclude, requireNamesResolved and
+// requireExactExcludes.
 func requireResolvedAccountNames(recs []common.Recommendation, cfg *Config) error {
+	if err := requireIdentifiedForExclude(recs, cfg); err != nil {
+		return err
+	}
 	if err := requireNamesResolved(recs, cfg); err != nil {
 		return err
 	}
 	return requireExactExcludes(recs, cfg)
+}
+
+// requireIdentifiedForExclude fails when --exclude-accounts is the only account
+// filter and a recommendation has neither an account ID nor a name. Such a
+// recommendation cannot be shown to be outside the excluded accounts, and
+// carrying on would let it be purchased. Under --include-accounts the same
+// recommendation is dropped instead (it cannot be shown to be included) and
+// counted in the drop summary, so no error is needed there.
+func requireIdentifiedForExclude(recs []common.Recommendation, cfg *Config) error {
+	if len(cfg.ExcludeAccounts) == 0 || len(cfg.IncludeAccounts) > 0 {
+		return nil
+	}
+	for i := range recs {
+		if isUnidentifiedAccount(&recs[i]) {
+			return fmt.Errorf("cannot apply --exclude-accounts: a %s %s recommendation in %s has no account ID or name, so --exclude-accounts cannot rule it out; use --include-accounts with the accounts to buy in, or (for --input-csv) fill the Account column", recs[i].Service, recs[i].ResourceType, recs[i].Region)
+		}
+	}
+	return nil
 }
 
 // requireNamesResolved fails when an account filter holds a name and a
