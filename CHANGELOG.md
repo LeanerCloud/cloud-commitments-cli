@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A recommendation with no account ID and no account name is no longer dropped
+  silently by `--include-accounts` (it is counted in the drop summary as
+  `unidentified-account`), and `--exclude-accounts` alone now stops the run with
+  an error instead of letting such a recommendation through. A live run with
+  `--exclude-accounts` therefore stops when Cost Explorer returns a
+  recommendation without an account ID (#1613).
 - A purchase result with `Success=true` and a non-nil `Error` is now treated as
   a failure in the Ctrl-C summary, the audit-stop message, the per-service
   success/failed counts and the non-zero exit. The CSV `Success` column keeps the
