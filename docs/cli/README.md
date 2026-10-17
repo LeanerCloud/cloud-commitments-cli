@@ -87,7 +87,7 @@ All flags belong to the root command unless noted otherwise.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--output` | `-o` | auto-generated | Output CSV file path. Auto-name format: `ri-helper-dryrun-YYYYMMDD-HHMMSS.csv` or `ri-helper-purchase-YYYYMMDD-HHMMSS.csv`. An explicit path that already exists (file, directory or symlink) is refused instead of overwritten; choose a new path or remove the old file. |
+| `--output` | `-o` | auto-generated | Output CSV file path. Auto-name format: `ri-helper-dryrun-YYYYMMDD-HHMMSS.csv` or `ri-helper-purchase-YYYYMMDD-HHMMSS.csv`. An explicit path that already exists (file, directory or symlink) is refused instead of overwritten; choose a new path or remove the old file. The `Success` column is the raw flag the provider returned; a provider can report `true` together with an error, so read the `Error` column too (a row with an error counts as failed in the run summary). |
 | `--input-csv` | `-i` | (none) | Read recommendations from an existing CSV instead of fetching from cloud APIs. The file must have a `.csv` extension and exist at the path given. The header must contain `Service`, `Region`, `ResourceType`, `Count`, `Term` and `PaymentOption`; a missing column is a load error that names it. `Term` must be `1yr` or `3yr` and `PaymentOption` must be `all-upfront`, `partial-upfront` or `no-upfront` on every row; a blank or unknown value fails the load with the row number. CSVs with only the older four columns are rejected. |
 
 ### Authentication

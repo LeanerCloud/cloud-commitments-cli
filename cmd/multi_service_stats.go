@@ -20,7 +20,7 @@ func purchaseFailureError(results []common.PurchaseResult, isDryRun bool) error 
 	}
 	failed := 0
 	for i := range results {
-		if !results[i].Success {
+		if !purchaseSucceeded(results[i]) {
 			failed++
 		}
 	}
@@ -61,7 +61,7 @@ func calculateServiceStats(service common.ServiceType, recs []common.Recommendat
 
 	for _rvc := range results {
 		result := results[_rvc]
-		if result.Success {
+		if purchaseSucceeded(result) {
 			stats.SuccessfulPurchases++
 		} else {
 			stats.FailedPurchases++

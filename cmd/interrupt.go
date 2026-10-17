@@ -40,7 +40,7 @@ func printInterruptedSummary(attempted, total int, results []common.PurchaseResu
 	}
 	for i := range results {
 		r := results[i]
-		if r.Success {
+		if purchaseSucceeded(r) {
 			continue
 		}
 		AppLogger.Printf("   %s\n", unverifiedPurchaseLine(r))
@@ -62,7 +62,7 @@ func auditStopMessage(attempted, total int, results []common.PurchaseResult, cau
 	if n := len(results); n > 0 {
 		r := results[n-1]
 		last = fmt.Sprintf("last attempted: %s %s", r.Recommendation.Service, r.Recommendation.ResourceType)
-		if r.Success {
+		if purchaseSucceeded(r) {
 			last += " (commitment " + r.CommitmentID + ")"
 		} else {
 			last += " (errored: " + fmt.Sprint(r.Error) + ")"

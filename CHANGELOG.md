@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A purchase result with `Success=true` and a non-nil `Error` is now treated as
+  a failure in the Ctrl-C summary, the audit-stop message, the per-service
+  success/failed counts and the non-zero exit. The CSV `Success` column keeps the
+  raw provider flag; read the `Error` column alongside it (#2205).
 - `configure gcp`: pressing Enter at a `[r]un, [S]kip (default)?` step now skips
   instead of creating the service account, granting roles, minting a key or
   running `gcloud auth login`; type `r` to run a step (#1613).
