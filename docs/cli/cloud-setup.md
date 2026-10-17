@@ -105,18 +105,20 @@ cudly configure-gcp [flags]
 
 ### What it does
 
-The command first loads the AWS config and resolves AWS credentials, and stops there if either fails, before any Azure resource is created.
+The command first loads the AWS config (honoring `--profile`) and stops there if that fails, before any GCP resource or key is created. AWS credentials are not resolved until the secret is written.
 
 When `--skip-setup` is not set, the command then runs an interactive guided flow:
 
-1. **`gcloud auth login`** - opens a browser window for GCP authentication.
-2. **`gcloud projects list`** - lists projects so you can identify your Project ID.
-3. **`gcloud config set project <id>`** - sets the active project.
-4. **Creates a `cudly-service-account` Service Account** with the display name "CUDly Service Account".
-5. **Grant IAM roles via SDK** - creates or validates the project custom role `cudlyCommitmentPurchaser`, then grants it and `roles/compute.viewer` to the Service Account.
-6. **`gcloud iam service-accounts keys create ~/cudly-gcp-key.json`** - downloads a JSON key to your home directory.
+1. **`gcloud auth login`** and **`gcloud auth application-default login`** - each opens a browser window for GCP authentication (user session, then the Application Default Credentials the SDK steps use).
+2. **List projects via SDK** - lists projects so you can identify your Project ID, then asks you to enter it. This step prompts `[R]un ... or [S]kip to enter the ID directly?`; anything other than `s` or `skip` runs the listing.
+3. **`gcloud config set project <id>`** - sets the active project (runs without a prompt).
+4. **Creates a `cudly-service-account` Service Account** via the IAM API.
+5. **Grant IAM roles via SDK** - creates or validates the project custom roles `cudlyCommitmentPurchaser` and `cudlyRecommendationReader`, then grants them and `roles/compute.viewer` to the Service Account.
+6. **Creates a JSON key via SDK** - writes it to a private temporary directory and removes the local copy after the upload.
 
-Each step prompts `[r]un, [S]kip (default)?`: type `r` to run it. Pressing Enter or typing anything else skips it, so no cloud change happens by accident.
+Except for the project listing, each step prompts `[r]un, [S]kip (default)?`: type `r` to run it. Pressing Enter or typing anything else skips it, so no cloud change happens by accident.
+
+Press Ctrl-C once during key creation or upload to finish cleanup (up to 60s); press it again to abort immediately. If the upload fails, the command removes the local key and deletes the newly created remote key; if that deletion fails, the error names the key and gives the `gcloud` command to delete it manually. If key creation fails with an error that does not prove the request was rejected (for example a timeout, cancellation or server error), the error says a key may have been created and gives the `gcloud` commands to list and delete it.
 
 Choosing Skip at the service-account step prompts for the email of an existing service account, which is used for the role grant and key steps.
 
