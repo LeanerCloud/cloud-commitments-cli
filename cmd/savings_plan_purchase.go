@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
@@ -164,7 +165,7 @@ func validateEC2InstanceSPOffering(d *common.SavingsPlanDetails) error {
 	if d.Region == "" {
 		return fmt.Errorf("EC2 Instance Savings Plan needs a region to pick the offering")
 	}
-	if d.OfferingID == "" && d.InstanceFamily == "" {
+	if d.OfferingID == "" && strings.TrimSpace(d.InstanceFamily) == "" {
 		return fmt.Errorf("EC2 Instance Savings Plan needs an instance family or an offering ID to pick the offering")
 	}
 	return nil

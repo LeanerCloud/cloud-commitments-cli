@@ -283,6 +283,9 @@ func TestValidatePurchasePreconditions(t *testing.T) {
 		"ec2 instance sp no family no offering": mut(validEC2InstanceSP(), func(r *common.Recommendation) {
 			r.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1, Region: "eu-west-1"}
 		}),
+		"ec2 instance sp whitespace family no offering": mut(validEC2InstanceSP(), func(r *common.Recommendation) {
+			r.Details = &common.SavingsPlanDetails{PlanType: "EC2Instance", HourlyCommitment: 1, Region: "eu-west-1", InstanceFamily: "   "}
+		}),
 		"sp all":        mut(parserShapedSP(), func(r *common.Recommendation) { r.Service = common.ServiceSavingsPlansAll }),
 		"ec2 nil":       mut(validEC2Rec(), func(r *common.Recommendation) { r.Details = nil }),
 		"ec2 tenancy":   mut(validEC2Rec(), func(r *common.Recommendation) { r.Details.(*common.ComputeDetails).Tenancy = "" }),
