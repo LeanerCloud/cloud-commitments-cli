@@ -546,9 +546,6 @@ func populateRecommendationAccountNames(ctx context.Context, recs []common.Recom
 			recs[i].AccountName = accountCache.GetAccountAlias(ctx, recs[i].Account)
 		}
 	}
-	if err := requireIdentifiedForExclude(recs, &cfg); err != nil {
-		return err
-	}
 	return requireNamesResolved(recs, &cfg)
 }
 

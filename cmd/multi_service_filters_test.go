@@ -383,7 +383,7 @@ func TestShouldIncludeAccount(t *testing.T) {
 		{
 			name:            "In include list",
 			accountID:       "123456789012",
-			includeAccounts: []string{"123456789012", "210987654321"},
+			includeAccounts: []string{"123456789012", "111111111111"},
 			excludeAccounts: []string{},
 			expected:        true,
 		},
@@ -947,7 +947,10 @@ func TestRequireExactExcludes(t *testing.T) {
 	}
 }
 
-const testUnidentifiedAcct = "123456789012"
+const (
+	testUnidentifiedAcct = "123456789012"
+	testOtherAcct        = "999888777666"
+)
 
 func TestApplyFilters_UnidentifiedAccountUnderInclude(t *testing.T) {
 	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1}
@@ -976,31 +979,45 @@ func TestApplyFilters_UnidentifiedAccountUnderInclude(t *testing.T) {
 	}
 }
 
-func TestRequireResolvedAccountNames_UnidentifiedRecUnderExcludeOnly(t *testing.T) {
-	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro"}
-	named := common.Recommendation{Account: testUnidentifiedAcct, AccountName: "prod"}
+func TestApplyFilters_UnidentifiedAccountUnderExclude(t *testing.T) {
+	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1}
+	named := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testUnidentifiedAcct, AccountName: "prod"}
+	other := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testOtherAcct, AccountName: "dev"}
 	tests := []struct {
-		name    string
-		cfg     Config
-		recs    []common.Recommendation
-		wantErr bool
+		name       string
+		cfg        Config
+		recs       []common.Recommendation
+		wantKept   int
+		wantDrops  int
+		wantReason string
 	}{
-		{"exclude-only fails loud", Config{ExcludeAccounts: []string{testUnidentifiedAcct}}, []common.Recommendation{named, unidentified}, true},
-		{"exclude with include drops instead of failing", Config{IncludeAccounts: []string{"prod"}, ExcludeAccounts: []string{testUnidentifiedAcct}}, []common.Recommendation{unidentified}, false},
-		{"no account filter is fine", Config{}, []common.Recommendation{unidentified}, false},
-		{"exclude-only with all rows identified is fine", Config{ExcludeAccounts: []string{testUnidentifiedAcct}}, []common.Recommendation{named}, false},
+		{"exclude-only drops and counts it, keeps others", Config{IncludeExtendedSupport: true, ExcludeAccounts: []string{testUnidentifiedAcct}}, []common.Recommendation{unidentified, named, other}, 1, 1, "unidentified-account (--exclude-accounts)"},
+		{"exclude-only with other region mismatch is not counted", Config{IncludeExtendedSupport: true, ExcludeAccounts: []string{testUnidentifiedAcct}, IncludeRegions: []string{"eu-west-1"}}, []common.Recommendation{unidentified}, 0, 0, ""},
+		{"include and exclude count it once under the include reason", Config{IncludeExtendedSupport: true, IncludeAccounts: []string{"dev"}, ExcludeAccounts: []string{testUnidentifiedAcct}}, []common.Recommendation{unidentified, other}, 1, 1, "unidentified-account (--include-accounts)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := requireResolvedAccountNames(tt.recs, &tt.cfg)
-			if !tt.wantErr {
-				assert.NoError(t, err)
-				return
-			}
-			if assert.Error(t, err) {
-				assert.Contains(t, err.Error(), "no account ID or name")
+			drops := common.NewDropSummary()
+			got := applyFilters(tt.recs, &tt.cfg, nil, nil, "", drops)
+			assert.Len(t, got, tt.wantKept)
+			assert.Equal(t, tt.wantDrops, drops.Total())
+			if tt.wantReason != "" {
+				assert.Contains(t, drops.FormatOneLine(), tt.wantReason)
 			}
 		})
+	}
+}
+
+func TestCSVExcludeOnly_UnidentifiedRowFilteredOutWithoutError(t *testing.T) {
+	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1}
+	other := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testOtherAcct, AccountName: "dev"}
+	cfg := Config{IncludeExtendedSupport: true, ExcludeAccounts: []string{testUnidentifiedAcct}}
+	recs := []common.Recommendation{unidentified, other}
+
+	assert.NoError(t, requireResolvedAccountNames(recs, &cfg))
+	got := applyFilters(recs, &cfg, nil, nil, "", common.NewDropSummary())
+	if assert.Len(t, got, 1) {
+		assert.Equal(t, testOtherAcct, got[0].Account)
 	}
 }
 
@@ -1008,10 +1025,5 @@ func TestPopulateRecommendationAccountNames_UnidentifiedRecUnderExcludeOnly(t *t
 	cache := NewAccountAliasCacheWithClient(&MockOrganizationsClient{})
 	recs := []common.Recommendation{{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro"}}
 
-	err := populateRecommendationAccountNames(context.Background(), recs, cache, Config{ExcludeAccounts: []string{testUnidentifiedAcct}})
-	if assert.Error(t, err) {
-		assert.Contains(t, err.Error(), "no account ID or name")
-		assert.Contains(t, err.Error(), "--include-accounts")
-	}
-	assert.NoError(t, populateRecommendationAccountNames(context.Background(), recs, cache, Config{}))
+	assert.NoError(t, populateRecommendationAccountNames(context.Background(), recs, cache, Config{ExcludeAccounts: []string{testUnidentifiedAcct}}))
 }
