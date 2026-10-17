@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -387,6 +390,67 @@ func TestWriteMultiServiceCSVReport_SortAndTotal(t *testing.T) {
 	assert.Equal(t, "60", totalRow[idxNU])
 	assert.Equal(t, "26000.00", totalRow[idxUpfront])
 	assert.Equal(t, "2080.00", totalRow[idxSavings])
+}
+
+// TestBuildTotalRow_NUSkipsRowsWithBlankNUCell is the regression test for
+// issue #2005: the TOTAL NormalizedUnits cell must equal the sum of the
+// per-row NU cells above it. ElastiCache and OpenSearch types such as
+// "cache.r7g.large" have three dot-separated parts, so the NU lookup
+// resolves their size suffix even though their own NU cell renders blank;
+// before the fix those rows inflated the TOTAL.
+func TestBuildTotalRow_NUSkipsRowsWithBlankNUCell(t *testing.T) {
+	results := []common.PurchaseResult{
+		// 5 × db.r6g.large = 20 NU (rendered on the row).
+		{Recommendation: common.Recommendation{Service: common.ServiceRDS, ResourceType: "db.r6g.large", Count: 5}},
+		// 2 × db.r6g.xlarge = 16 NU via the relational-db alias (rendered).
+		{Recommendation: common.Recommendation{Service: common.ServiceRelationalDB, ResourceType: "db.r6g.xlarge", Count: 2}},
+		// Non-RDS rows whose NU cell is blank: must add nothing.
+		{Recommendation: common.Recommendation{Service: common.ServiceElastiCache, ResourceType: "cache.r7g.large", Count: 3}},
+		{Recommendation: common.Recommendation{Service: common.ServiceOpenSearch, ResourceType: "r6g.large.search", Count: 4}},
+		{Recommendation: common.Recommendation{Service: common.ServiceEC2, ResourceType: "m5.large", Count: 7}},
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, writeMultiServiceCSV(&buf, results))
+	rows, err := csv.NewReader(&buf).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, len(results)+2) // header + data rows + TOTAL
+
+	idxNU := slices.Index(rows[0], "NormalizedUnits")
+	require.GreaterOrEqual(t, idxNU, 0)
+
+	var columnSum float64
+	for _, row := range rows[1 : len(rows)-1] {
+		if row[idxNU] == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(row[idxNU], 64)
+		require.NoError(t, err)
+		columnSum += v
+	}
+	require.InDelta(t, 36, columnSum, 1e-9, "only the two RDS rows render NU")
+
+	totalRow := rows[len(rows)-1]
+	require.Equal(t, "TOTAL", totalRow[0])
+	assert.Equal(t, "36", totalRow[idxNU], "TOTAL NU must equal the sum of the visible NU cells")
+}
+
+// TestBuildTotalRow_NUBlankWhenNoRowHasNU locks that a run with no RDS rows
+// leaves the TOTAL NU cell blank instead of summing NU for blank-cell rows.
+func TestBuildTotalRow_NUBlankWhenNoRowHasNU(t *testing.T) {
+	results := []common.PurchaseResult{
+		{Recommendation: common.Recommendation{Service: common.ServiceElastiCache, ResourceType: "cache.r7g.large", Count: 3}},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, writeMultiServiceCSV(&buf, results))
+	rows, err := csv.NewReader(&buf).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 3) // header + 1 data row + TOTAL
+
+	totalRow := rows[2]
+	require.Equal(t, "TOTAL", totalRow[0])
+	assert.Equal(t, "3", totalRow[slices.Index(rows[0], "Count")], "Count still sums")
+	assert.Empty(t, totalRow[slices.Index(rows[0], "NormalizedUnits")], "NormalizedUnits stays blank when no row renders NU")
 }
 
 // TestFormatExistingCoverage locks the three-state rendering:

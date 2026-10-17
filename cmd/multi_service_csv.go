@@ -406,7 +406,7 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 	for i := range results {
 		r := results[i]
 		totalCount += r.Recommendation.Count
-		totalNU += float64(r.Recommendation.Count) * recommendations.RDSInstanceNUFromType(r.Recommendation.ResourceType)
+		totalNU += rowNormalizedUnits(r.Recommendation)
 		totalUpfront += r.Recommendation.CommitmentCost
 		totalSavings += r.Recommendation.EstimatedSavings
 		if r.Recommendation.RecurringMonthlyCost != nil {
@@ -466,14 +466,24 @@ func extractFamily(rec common.Recommendation) string {
 // to compute NU by hand to verify the bundling. Renders blank for
 // non-RDS rows and for sizes not in the standard NU scale.
 func formatNormalizedUnitsOrBlank(rec common.Recommendation) string {
+	nu := rowNormalizedUnits(rec)
+	if nu == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%g", nu)
+}
+
+// rowNormalizedUnits returns the NU a row contributes (rec.Count × NU(size))
+// for RDS rows, and 0 for every other service. It is the single source of
+// the per-row NU value, so the TOTAL row sums exactly what the NU cells
+// above it show: ElastiCache types like "cache.r7g.large" would otherwise
+// resolve a size suffix in the RDS NU lookup even though their own cell is
+// blank (issue #2005).
+func rowNormalizedUnits(rec common.Recommendation) float64 {
 	if rec.Service != common.ServiceRDS && rec.Service != common.ServiceRelationalDB {
-		return ""
+		return 0
 	}
-	nu := recommendations.RDSInstanceNUFromType(rec.ResourceType)
-	if nu == 0 || rec.Count == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%g", float64(rec.Count)*nu)
+	return float64(rec.Count) * recommendations.RDSInstanceNUFromType(rec.ResourceType)
 }
 
 // extractDeployment returns the RDS deployment-option string
