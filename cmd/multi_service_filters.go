@@ -214,10 +214,12 @@ func requireResolvedAccountNames(recs []common.Recommendation, cfg *Config) erro
 func requireNamesResolved(recs []common.Recommendation, cfg *Config) error {
 	nameFilter := ""
 	for _, v := range slices.Concat(cfg.IncludeAccounts, cfg.ExcludeAccounts) {
-		if !accountIDPattern.MatchString(strings.TrimSpace(v)) {
-			nameFilter = v
-			break
+		v = strings.TrimSpace(v)
+		if v == "" || accountIDPattern.MatchString(v) {
+			continue
 		}
+		nameFilter = v
+		break
 	}
 	if nameFilter == "" {
 		return nil

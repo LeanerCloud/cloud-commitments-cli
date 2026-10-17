@@ -323,6 +323,13 @@ func TestRequireResolvedAccountNames_CSVRows(t *testing.T) {
 	assert.False(t, shouldIncludeAccountIDOrName(testCallerAccount, "sandbox", &Config{ExcludeAccounts: []string{testCallerAccount}}), "an ID filter matches a named account")
 }
 
+func TestRequireNamesResolved_BlankFilterValueIsNotANameFilter(t *testing.T) {
+	unresolved := []common.Recommendation{{Account: testCallerAccount, AccountName: testCallerAccount}}
+
+	require.NoError(t, requireNamesResolved(unresolved, &Config{ExcludeAccounts: []string{" "}}))
+	require.Error(t, requireNamesResolved(unresolved, &Config{ExcludeAccounts: []string{" ", "sandbox"}}))
+}
+
 func TestFilterAndAdjustRecommendations_NameExcludeOnCSVRowsWithoutNamesFails(t *testing.T) {
 	captureAppLog(t)
 	rows := []common.Recommendation{{Service: common.ServiceRDS, Region: "us-east-1", Account: testCallerAccount, AccountName: testCallerAccount, ResourceType: "db.t3.small", Count: 2}}
