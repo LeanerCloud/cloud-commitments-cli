@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Recommendations with no account ID or name are now reported in the drop summary
   when an account filter (`--include-accounts` or `--exclude-accounts`) removes
   them (#1613).
+- A dry run now refuses an EC2 Instance Savings Plan that has no instance family
+  and no offering ID, the same way the real run does, instead of reporting
+  success for a purchase the offering lookup would reject (#2164).
 - A purchase result with `Success=true` and a non-nil `Error` is now treated as
   a failure in the Ctrl-C summary, the audit-stop message, the per-service
   success/failed counts and the non-zero exit. The CSV `Success` column keeps the
