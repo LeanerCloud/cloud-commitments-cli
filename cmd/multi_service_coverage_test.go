@@ -13,7 +13,6 @@ import (
 	awsrds "github.com/aws/aws-sdk-go-v2/service/rds"
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -622,98 +621,6 @@ func TestValidateFlags_CSVPaths(t *testing.T) {
 		err = validateFlags(nil, nil)
 		assert.NoError(t, err)
 	})
-}
-
-// ==================== Tests for processService Error Paths ====================
-
-func TestProcessService_GetRegionsError(t *testing.T) {
-	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
-
-	origCfg := toolCfg
-	defer func() { toolCfg = origCfg }()
-
-	toolCfg.Coverage = 100.0
-	toolCfg.PaymentOption = "all-upfront"
-	toolCfg.TermYears = 3
-	toolCfg.Regions = []string{} // Empty - will trigger auto-discovery
-
-	mockClient := &MockRecommendationsClient{}
-	accountCache := NewAccountAliasCache(awsCfg)
-
-	// This test verifies behavior when region discovery is needed
-	// Since getAllAWSRegions requires real AWS config, we test with explicit regions instead
-	toolCfg.Regions = []string{"us-east-1"}
-
-	// Setup mock to return empty recommendations
-	mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return([]common.Recommendation{}, nil)
-
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
-
-	// Should return empty recommendations
-	assert.Empty(t, recs)
-	assert.Empty(t, results)
-
-	mockClient.AssertExpectations(t)
-}
-
-func TestProcessService_GetRecommendationsError(t *testing.T) {
-	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
-
-	origCfg := toolCfg
-	defer func() { toolCfg = origCfg }()
-
-	toolCfg.Coverage = 100.0
-	toolCfg.PaymentOption = "partial-upfront"
-	toolCfg.TermYears = 1
-	toolCfg.Regions = []string{"us-east-1"}
-
-	mockClient := &MockRecommendationsClient{}
-	accountCache := NewAccountAliasCache(awsCfg)
-
-	// Setup mock to return error
-	mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return([]common.Recommendation(nil), errors.New("API error"))
-
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceEC2, true, toolCfg, engineVersionData{})
-
-	// Should continue with empty results after error
-	assert.Empty(t, recs)
-	assert.Empty(t, results)
-
-	mockClient.AssertExpectations(t)
-}
-
-func TestProcessService_AllRecommendationsFilteredOut(t *testing.T) {
-	ctx := context.Background()
-	awsCfg := aws.Config{Region: "us-east-1"}
-
-	origCfg := toolCfg
-	defer func() { toolCfg = origCfg }()
-
-	toolCfg.Coverage = 100.0
-	toolCfg.PaymentOption = "no-upfront"
-	toolCfg.TermYears = 1
-	toolCfg.Regions = []string{"us-east-1"}
-	toolCfg.IncludeInstanceTypes = []string{"db.r5.large"} // Filter to specific type
-
-	mockClient := &MockRecommendationsClient{}
-	accountCache := NewAccountAliasCache(awsCfg)
-
-	// Return recommendations that don't match the filter
-	mockRecs := []common.Recommendation{
-		{ResourceType: "db.t3.small", Count: 5, Region: "us-east-1", EstimatedSavings: 100},
-		{ResourceType: "db.t3.medium", Count: 3, Region: "us-east-1", EstimatedSavings: 200},
-	}
-	mockClient.On("GetRecommendations", ctx, mock.AnythingOfType("*common.RecommendationParams")).Return(mockRecs, nil)
-
-	recs, results := processService(ctx, awsCfg, mockClient, accountCache, common.ServiceRDS, true, toolCfg, engineVersionData{})
-
-	// All recommendations should be filtered out
-	assert.Empty(t, recs)
-	assert.Empty(t, results)
-
-	mockClient.AssertExpectations(t)
 }
 
 // ==================== Tests for filterAndAdjustRecommendations Edge Cases ====================

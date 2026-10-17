@@ -223,7 +223,7 @@ func TestGetServiceDisplayName(t *testing.T) {
 	}
 }
 
-func TestApplyCommonCoverage(t *testing.T) {
+func TestApplyCoverage_FloorsPerRecommendationCounts(t *testing.T) {
 	recs := []common.Recommendation{
 		{Count: 10, EstimatedSavings: 100},
 		{Count: 5, EstimatedSavings: 50},
@@ -264,7 +264,7 @@ func TestApplyCommonCoverage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := applyCommonCoverage(recs, tt.coverage)
+			result := ApplyCoverage(recs, tt.coverage)
 			assert.Equal(t, tt.expectedCount, len(result))
 
 			for i, rec := range result {
@@ -881,5 +881,19 @@ func TestDetermineServicesToProcess_SavingsPlanTypeFilters(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
+	}
+}
+
+// Moved from the deleted TestProcessService_WithOverrideCount: the override is
+// applied by applyCoverageAndOverrides, which the live pipeline also calls.
+func TestApplyCoverageAndOverrides_OverrideCount(t *testing.T) {
+	recs := []common.Recommendation{
+		{ResourceType: "cache.t3.micro", Count: 10, Region: "us-east-1", EstimatedSavings: 100},
+		{ResourceType: "cache.t3.small", Count: 5, Region: "us-east-1", EstimatedSavings: 200},
+	}
+	got := applyCoverageAndOverrides(recs, Config{Coverage: 100, OverrideCount: 3}, nil, nil, nil)
+	assert.Len(t, got, 2)
+	for _, rec := range got {
+		assert.Equal(t, 3, rec.Count)
 	}
 }

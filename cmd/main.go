@@ -51,7 +51,6 @@ type Config struct {
 	Regions                []string
 	Services               []string
 	ExcludeAccounts        []string
-	Providers              []string
 	IncludeRegions         []string
 	ExcludeRegions         []string
 	IncludeInstanceTypes   []string

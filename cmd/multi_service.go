@@ -960,38 +960,6 @@ func requireFilterInputs(recs []common.Recommendation, cfg Config, engineData en
 	return requireResolvedAccountNames(recs, &cfg)
 }
 
-// processService processes a single service and returns recommendations and results.
-// Used by legacy callers; new code should use fetchAllRecs + executePurchasePipeline.
-func processService(ctx context.Context, awsCfg aws.Config, recClient provider.RecommendationsClient, accountCache *AccountAliasCache, service common.ServiceType, isDryRun bool, cfg Config, engineData engineVersionData) ([]common.Recommendation, []common.PurchaseResult) { //nolint:unparam // engineData always nil at current callsites but param is part of the API
-	regionsToProcess, err := determineRegionsForService(ctx, recClient, service, cfg)
-	if err != nil {
-		log.Printf("❌ Failed to determine regions: %v", err)
-		return nil, nil
-	}
-
-	serviceRecs := make([]common.Recommendation, 0)
-	serviceResults := make([]common.PurchaseResult, 0)
-
-	for i, region := range regionsToProcess {
-		// Legacy single-service entry point — no coverage map is fetched here,
-		// so sizing falls back to the no-existing-commitments formula. The new
-		// path (runToolMultiService) fetches coverage once and threads it through.
-		regionResult := processRegionRecommendations(
-			ctx, awsCfg, recClient, accountCache,
-			service, region, i+1, len(regionsToProcess),
-			engineData, isDryRun, cfg, nil,
-		)
-		serviceRecs = append(serviceRecs, regionResult.recommendations...)
-		serviceResults = append(serviceResults, regionResult.results...)
-		if regionResult.auditErr != nil {
-			log.Printf("%s", auditStopMessage(len(serviceResults), len(serviceRecs), serviceResults, regionResult.auditErr))
-			break
-		}
-	}
-
-	return serviceRecs, serviceResults
-}
-
 // processPurchaseLoop processes purchases for a single region (used by CSV
 // mode). runID groups every recommendation processed across the whole CSV
 // run into one audit trail, matching how executePurchasePipeline (the main

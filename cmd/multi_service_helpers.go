@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"maps"
 	"slices"
 	"sort"
@@ -18,7 +17,6 @@ import (
 	azureprovider "github.com/LeanerCloud/cloud-commitments-go/providers/azure"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/google/uuid"
 )
 
 // EC2ClientInterface defines the interface for EC2 operations.
@@ -135,11 +133,6 @@ func discoverRegionsForService(ctx context.Context, client provider.Recommendati
 
 	sort.Strings(regions)
 	return regions, nil
-}
-
-// applyCommonCoverage applies coverage percentage to recommendations.
-func applyCommonCoverage(recs []common.Recommendation, coverage float64) []common.Recommendation {
-	return ApplyCoverage(recs, coverage)
 }
 
 // determineServicesToProcess returns the list of services to process based on flags.
@@ -458,118 +451,6 @@ func requireRegionInventory(recs []common.Recommendation, cfg Config, data engin
 	return fmt.Errorf("extended-support exclusion cannot be applied: RDS inventory unavailable in %s (re-run, or pass --include-extended-support to skip the check)", describeFailedRegions(affected))
 }
 
-// regionRecommendations holds the processed recommendations for a single region.
-type regionRecommendations struct {
-	recommendations []common.Recommendation
-	results         []common.PurchaseResult
-	auditErr        error // errAuditTrailLost: stop buying
-}
-
-// processRegionRecommendations fetches and processes recommendations for a single region.
-func processRegionRecommendations(
-	ctx context.Context,
-	awsCfg aws.Config,
-	recClient provider.RecommendationsClient,
-	accountCache *AccountAliasCache,
-	service common.ServiceType,
-	region string,
-	regionIndex, totalRegions int,
-	engineData engineVersionData,
-	isDryRun bool,
-	cfg Config,
-	coverageMap recommendations.PoolCoverageMap,
-) regionRecommendations {
-	result := regionRecommendations{
-		recommendations: make([]common.Recommendation, 0),
-		results:         make([]common.PurchaseResult, 0),
-	}
-
-	AppLogger.Printf("\n  📍 [%d/%d] Region: %s\n", regionIndex, totalRegions, region)
-
-	// Fetch recommendations
-	recs, fetchErr := fetchRecommendationsForRegion(ctx, recClient, service, region, cfg)
-	if fetchErr != nil {
-		// Legacy test-only path: the CLI run goes through fetchAndFilterRegionRecs,
-		// which returns this error to the caller.
-		AppLogger.Printf("  ❌ Failed to fetch recommendations: %v\n", fetchErr)
-		return result
-	}
-	if len(recs) == 0 {
-		AppLogger.Printf("  ℹ️  No recommendations found\n")
-		return result
-	}
-
-	AppLogger.Printf("  ✅ Found %d recommendations\n", len(recs))
-
-	// Populate account names
-	if err := populateRecommendationAccountNames(ctx, recs, accountCache, cfg); err != nil {
-		AppLogger.Printf("  ❌ %v\n", err)
-		return result
-	}
-
-	// Apply filters (drops not tracked on this legacy test-only path).
-	recs = applyRegionFilters(recs, engineData, region, cfg, nil)
-	if len(recs) == 0 {
-		AppLogger.Printf("  ℹ️  No recommendations after applying filters\n")
-		return result
-	}
-
-	// Apply coverage and overrides. This legacy path (test-only) doesn't
-	// fetch expiring commitments — expiry-aware sizing only runs via the
-	// main pipeline in fetchAndFilterRegionRecs, which has access to the
-	// regional service client at the right moment. Drop tracking skipped (nil).
-	// nil commitments: no expiry deduction, so family sizing is identical to
-	// ApplyFamilyNUSizingRDS (documented on applyCoverageAndOverrides).
-	filteredRecs := applyCoverageAndOverrides(recs, cfg, coverageMap, nil, nil)
-
-	result.recommendations = filteredRecs
-
-	// --max-instances is a run-wide cap, and this legacy per-region entry point
-	// has no view of the other services and regions in the run, so it cannot
-	// evaluate the cap. Refuse to spend rather than purchase uncapped: an
-	// over-purchase of reserved capacity is not reversible. Dry runs continue
-	// so the recommendations are still reported.
-	//
-	// This is deliberately the first thing after the recommendations are
-	// recorded, ahead of building the service client and of the duplicate
-	// check. The decision depends only on cfg.MaxInstances and isDryRun, both
-	// already known, so reaching it through a cloud API call would be work
-	// done to arrive at an answer that was already determined -- and it would
-	// make the refusal path fail differently depending on whether the describe
-	// call happened to succeed.
-	if cfg.MaxInstances > 0 && !isDryRun {
-		log.Printf("❌ Refusing to purchase %s/%s: --max-instances is a run-wide cap and cannot be enforced on the per-region path. Use the multi-service pipeline (the default entry point).",
-			getServiceDisplayName(service), region)
-		return result
-	}
-
-	// Get service client and process purchases
-	regionalCfg := awsCfg.Copy()
-	regionalCfg.Region = region
-	serviceClient := createServiceClient(service, regionalCfg)
-
-	if serviceClient == nil {
-		AppLogger.Printf("  ⚠️  Service client not yet implemented for %s\n", getServiceDisplayName(service))
-		AppLogger.Printf("     (Skipping purchase phase for this service)\n")
-		return result
-	}
-
-	// Check for duplicate RIs. Drop tracking skipped (nil).
-	adjustedRecs := checkDuplicates(ctx, filteredRecs, serviceClient, isDryRun, nil)
-
-	// Process purchases. This legacy per-region entry point has no run-wide
-	// runID of its own (unlike runToolMultiService/runToolFromCSV, which mint
-	// one per invocation), so each call gets its own -- every recommendation
-	// it processes still ends up in cfg.AuditLog with a durable, groupable
-	// record; it is simply not grouped with a sibling region's run.
-	runID := uuid.New().String()
-	regionResults, auditErr := processPurchaseLoop(ctx, adjustedRecs, region, isDryRun, serviceClient, cfg, runID)
-	result.results = regionResults
-	result.auditErr = auditErr
-
-	return result
-}
-
 // errRecommendationFetch marks a failure to obtain recommendations from the
 // provider, as opposed to a successful but empty answer.
 var errRecommendationFetch = errors.New("recommendation fetch failed")
@@ -786,9 +667,8 @@ func logFamilyExpiry(expiry recommendations.FamilyExpiryReport, windowDays, look
 // purchase run: that would buy reserved capacity the account already owns.
 // isDryRun selects the behavior on error: a dry run logs a loud warning and
 // continues (nothing is bought, so reporting fidelity wins), while a purchase
-// run refuses to spend and drops these recommendations entirely, mirroring
-// the "refuse to spend rather than purchase uncapped" stance already taken
-// for --max-instances in processRegionRecommendations.
+// run refuses to spend and drops these recommendations entirely: an
+// over-purchase of reserved capacity is not reversible.
 //
 // drops accumulates per-reason drop counts for the end-of-run summary; pass nil to skip.
 //
