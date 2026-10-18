@@ -31,9 +31,12 @@ const (
 var archeraHTTPClient *http.Client
 
 var archeraOpts struct {
-	OrgID  string
-	PlanID string
-	Format string
+	OrgID          string
+	PlanID         string
+	Format         string
+	LineItemIDs    []string
+	ContractTerms  []string
+	PaymentOptions []string
 }
 
 var archeraComparisonCmd = &cobra.Command{
@@ -59,6 +62,9 @@ func init() {
 	archeraComparisonCmd.Flags().StringVar(&archeraOpts.OrgID, "org-id", "", "Archera organization UUID (default: $"+archeraEnvOrgID+")")
 	archeraComparisonCmd.Flags().StringVar(&archeraOpts.PlanID, "plan-id", "", "Archera commitment plan UUID (default: $"+archeraEnvPlanID+")")
 	archeraComparisonCmd.Flags().StringVar(&archeraOpts.Format, "format", "table", "Output format: table or json")
+	archeraComparisonCmd.Flags().StringArrayVar(&archeraOpts.LineItemIDs, "line-item-ids", nil, "Archera line-item UUIDs, comma-separated or repeated (max 200)")
+	archeraComparisonCmd.Flags().StringArrayVar(&archeraOpts.ContractTerms, "contract-terms", nil, fmt.Sprintf("Exact Archera contract terms, comma-separated or repeated (max %d)", len(insurance.ContractTerms())))
+	archeraComparisonCmd.Flags().StringArrayVar(&archeraOpts.PaymentOptions, "payment-options", nil, "Payment options: no_upfront, partial_upfront, all_upfront (comma-separated or repeated; max 3)")
 }
 
 // archeraSetting returns the flag value, else the environment value, trimmed.
@@ -79,13 +85,18 @@ func runArcheraComparison(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	req, err := archeraComparisonRequest(planID)
+	if err != nil {
+		return err
+	}
+
 	// Config and client stay local to this call; never store them in a
 	// package variable or struct.
 	client, err := insurance.NewClient(insurance.Config{APIKey: insurance.NewSecret(key), OrgID: orgID}, archeraHTTPClient)
 	if err != nil {
 		return err
 	}
-	comparison, err := client.Comparison(cmd.Context(), insurance.ComparisonRequest{PlanID: planID})
+	comparison, err := client.Comparison(cmd.Context(), req)
 	if err != nil {
 		return archeraSafeError(err, key)
 	}
@@ -94,6 +105,50 @@ func runArcheraComparison(cmd *cobra.Command, _ []string) error {
 		return renderArcheraJSON(cmd.OutOrStdout(), dto)
 	}
 	return renderArcheraTable(cmd.OutOrStdout(), dto)
+}
+
+func archeraComparisonRequest(planID string) (insurance.ComparisonRequest, error) {
+	req := insurance.ComparisonRequest{PlanID: planID}
+	filters := []struct {
+		values *[]string
+		flag   string
+		raw    []string
+		limit  int
+	}{
+		{&req.LineItemIDs, "line-item-ids", archeraOpts.LineItemIDs, 200},
+		{&req.ContractTerms, "contract-terms", archeraOpts.ContractTerms, len(insurance.ContractTerms())},
+	}
+	for _, filter := range filters {
+		values, err := archeraFilterValues(filter.flag, filter.raw, filter.limit)
+		if err != nil {
+			return req, err
+		}
+		*filter.values = values
+	}
+	payments, err := archeraFilterValues("payment-options", archeraOpts.PaymentOptions, 3)
+	if err != nil {
+		return req, err
+	}
+	for _, payment := range payments {
+		req.PaymentOptions = append(req.PaymentOptions, insurance.PaymentOption(payment))
+	}
+	return req, nil
+}
+
+func archeraFilterValues(flag string, raw []string, limit int) ([]string, error) {
+	var values []string
+	for occurrence, entry := range raw {
+		for segment, value := range strings.Split(entry, ",") {
+			if strings.TrimSpace(value) == "" {
+				return nil, fmt.Errorf("--%s occurrence %d entry %d must not be empty", flag, occurrence+1, segment+1)
+			}
+			if len(values) >= limit {
+				return nil, fmt.Errorf("--%s accepts at most %d entries", flag, limit)
+			}
+			values = append(values, value)
+		}
+	}
+	return values, nil
 }
 
 // archeraSettings reads the key, org ID and plan ID, naming (never echoing)
@@ -131,6 +186,15 @@ const archeraWithheld = "[message withheld: contained the API key]"
 func archeraSafeError(err error, key string) error {
 	key = strings.TrimSpace(key)
 	msg, suffix := err.Error(), ""
+	// The shared validator echoes rejected input; keep its validation but omit values.
+	switch {
+	case strings.HasPrefix(msg, "archera line item ID "):
+		msg = "--line-item-ids entries must be canonical UUIDs"
+	case strings.HasPrefix(msg, "unsupported contract term "):
+		msg = "--contract-terms entries must be supported Archera contract terms (exact case)"
+	case strings.HasPrefix(msg, "payment option: "):
+		msg = "--payment-options entries must be no_upfront, partial_upfront or all_upfront (exact case)"
+	}
 	var httpErr *insurance.HTTPError
 	isHTTP := errors.As(err, &httpErr)
 	if isHTTP && httpErr.RetryAfter > 0 {

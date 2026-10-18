@@ -26,7 +26,30 @@ export ARCHERA_ORG_ID=<org-uuid>
 export ARCHERA_PLAN_ID=<plan-uuid>
 ri-helper archera-comparison                 # table
 ri-helper archera-comparison --format json   # one JSON document on stdout
+ri-helper archera-comparison --line-item-ids <line-item-uuid> \
+  --contract-terms one_year_gris,three_year \
+  --payment-options no_upfront --payment-options all_upfront
 ```
+
+Optional filters narrow the vendor comparison rollups:
+
+| Flag | Values | Maximum entries |
+|------|--------|-----------------|
+| `--line-item-ids` | canonical Archera line-item UUIDs | 200 |
+| `--contract-terms` | exact, case-sensitive Archera contract-term enum values | 74 |
+| `--payment-options` | `no_upfront`, `partial_upfront`, `all_upfront` | 3 |
+
+Each filter accepts comma-separated entries, repeated flags, or both. Duplicate
+entries are preserved and count toward the limit. Explicit empty occurrences,
+empty comma segments and whitespace-only entries are errors before any request.
+Entries are not trimmed or case-normalized. Invalid UUIDs and enum values also
+fail before any request; errors do not echo rejected values.
+
+Omitting a filter sends no corresponding query parameter. The documented vendor
+defaults are all selected line items, every distinct candidate term, and
+`no_upfront` only, respectively. The CLI does not replace those defaults.
+Line-item IDs come from Archera, not platform recommendation IDs. These filters do not prove
+an exact recommendation association or economic equivalence.
 
 Errors go to stderr and the exit status is 1 for every failure. A vendor error
 shows the sanitized HTTP status and message, plus `Retry-After` when given
@@ -41,7 +64,7 @@ shows the sanitized HTTP status and message, plus `Retry-After` when given
 - Unknown values print `unknown` in the table and `null` in JSON, never `0`.
 - Money is printed as an exact decimal. `discount_rate` is shown as sent
   (0-1 basis).
-- The comparison is a hypothetical rollup for the whole plan. It is not a
+- The comparison is a hypothetical rollup for the plan, narrowed by any filters. It is not a
   bindable quote, not a guarantee, and not mapped onto recommendation rows or
   CSV output.
 - Product support is `supported` only when Archera's documentation lists the

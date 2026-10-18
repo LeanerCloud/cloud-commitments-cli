@@ -118,6 +118,10 @@ func runArchera(t *testing.T, env map[string]string, args ...string) (stdout, st
 	}
 	resetHelpFlags()
 	archeraOpts.OrgID, archeraOpts.PlanID, archeraOpts.Format = "", "", "table"
+	archeraOpts.LineItemIDs, archeraOpts.ContractTerms, archeraOpts.PaymentOptions = nil, nil, nil
+	for _, name := range []string{"org-id", "plan-id", "format", "line-item-ids", "contract-terms", "payment-options"} {
+		archeraComparisonCmd.Flags().Lookup(name).Changed = false
+	}
 	var out, errb bytes.Buffer
 	rootCmd.SetOut(&out)
 	rootCmd.SetErr(&errb)
