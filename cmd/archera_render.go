@@ -24,7 +24,7 @@ const (
 	archeraPremiumNote  = "Totals include the Archera premium. The API reports no currency, so amounts are unlabelled."
 	archeraMaxFieldSize = 256
 	archeraMaxErrorSize = 512
-	archeraMaxMoneyPrec = 100
+	archeraMaxMoneyPrec = 164
 )
 
 // archeraSanitize strips control characters (ESC, C1 and the rest of
