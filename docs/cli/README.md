@@ -1,10 +1,12 @@
 # CUDly CLI Reference
 
-This section documents the full CLI surface of the `cudly` binary. The Makefile builds it as `cudly`, while the cobra root command is named `ri-helper` (a legacy name that still appears in `--help` output and in auto-generated CSV filenames). Three cobra commands are available:
+This section documents the full CLI surface of the `cudly` binary. The Makefile builds it as `cudly`, while the cobra root command is named `ri-helper` (a legacy name that still appears in `--help` output and in auto-generated CSV filenames). The following cobra commands are available:
 
 - **root** (`ri-helper`, invoked via the `cudly` binary) - the main RI/SP analysis and purchase command
 - **configure-azure** - bootstrap Azure Service Principal credentials
 - **configure-gcp** - bootstrap GCP Service Account credentials
+- **archera-comparison** - read-only vendor comparison with optional filters
+- **archera-line-items** - [discover vendor line-item UUIDs](archera-line-items.md)
 
 ## Topic pages
 

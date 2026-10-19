@@ -157,7 +157,7 @@ Drop recommendations whose estimated savings percentage falls below this thresho
 
 **Important naming distinction:** `--min-savings-pct` is a **percentage** value (e.g. `10` means "at least 10% savings"). This is different from the GUI and API `min_savings` parameter, which filters by **dollar amount**. A value of `30` in `--min-savings-pct` means "30% savings", but `min_savings=30` in the API means "$30 in savings". Mixing up the two by copying a CLI value into the GUI filter (or vice versa) produces silent, incorrect filtering.
 
-**Refused on `--input-csv` runs.** A recommendations CSV carries no savings-percentage column, so this filter has nothing to read. Combining the two flags fails at startup rather than running with the threshold silently unenforced; drop the flag, or filter the CSV before passing it in. Teaching the CSV format to carry the column is tracked in [#1819](https://github.com/LeanerCloud/CUDly/issues/1819).
+**On `--input-csv` runs** the filter reads the `SavingsPercentage` column of the report (a percent, so `25.5` is 25.5%), which the CSV report writer emits. A CSV without that column (a report written by an older version), or a row with that cell blank, fails the run with an error naming the flag instead of treating the missing figure as 0%. Add the column or drop the flag. Dropped rows are named on stdout.
 
 ```bash
 # Only recommendations with at least 20% projected savings
@@ -179,7 +179,7 @@ break-even months     = upfront / gross monthly savings
 
 `EstimatedSavings` is already net of the amortized upfront, so the term amortization is added back before dividing. A provider-supplied break-even wins over the formula. No-upfront recommendations (upfront 0) have a break-even of 0 and always pass. A recommendation with an upfront payment whose break-even cannot be computed (negative or non-finite money, or a term other than 1 or 3 years) is dropped, with the reason in the drop summary, because the limit cannot be enforced on it. If gross monthly savings are not positive (net `EstimatedSavings` at or below `-upfront / term months`) the break-even is infinite and the recommendation is dropped. Net savings of 0 give a break-even equal to the term.
 
-**Refused on `--input-csv` runs.** A recommendations CSV carries no break-even column, so this filter has nothing to read. Combining the two flags fails at startup rather than running with the threshold silently unenforced; drop the flag, or filter the CSV before passing it in. Teaching the CSV format to carry the column is tracked in [#1819](https://github.com/LeanerCloud/CUDly/issues/1819).
+**On `--input-csv` runs** the filter reads the `BreakEvenMonths` column of the report (months; `0` for a no-upfront row), which the CSV report writer emits. A blank cell means the writer could not state a finite break-even. A CSV without the column (a report written by an older version), or a row with that cell blank, fails the run with an error naming the flag instead of treating the missing figure as passing. Add the column or drop the flag. Dropped rows are named on stdout.
 
 ```bash
 # Only commitments that break even within 18 months
@@ -199,7 +199,7 @@ The cap covers the whole run on both code paths: it is applied once to the combi
 Which recommendations survive depends on the path:
 
 - **Default (recommendation-driven) runs** apply the cap after scoring, so the surviving instances are the highest-savings-percentage ones across every service and region. Recommendations the cap reduces or drops are listed by name before the confirmation prompt and counted in the end-of-run drop summary, so a capped run never shrinks silently.
-- **`--input-csv` runs** apply the same cap but rank on a different key, because a CSV row carries no savings percentage. Rows are ordered by **savings per instance** (`EstimatedSavings / Count`), so the budget buys the rows returning the most per instance rather than the rows whose dollar total happens to be largest, and file position is irrelevant. Reduced and dropped rows are named on stdout, alongside the ranking rule that selected them.
+- **`--input-csv` runs** apply the same cap but rank on a different key, because the cap is a budget in instances and older CSVs carry no savings percentage. Rows are ordered by **savings per instance** (`EstimatedSavings / Count`), whatever `SavingsPercentage` holds, so the budget buys the rows returning the most per instance rather than the rows whose dollar total happens to be largest, and file position is irrelevant. Reduced and dropped rows are named on stdout, alongside the ranking rule that selected them.
 
   Because that ordering is the only thing deciding what gets bought, a run whose cap actually binds is **refused** when any surviving row has no usable `EstimatedSavings` value. A blank cell, or a file written without the column at all, loads as `0` and is indistinguishable from a row genuinely worth $0: capping on it would silently select by instance-type name. Populate `EstimatedSavings` on every row, or drop `--max-instances` and cap the file itself. A cap that does not bind chooses nothing and is never refused.
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestPurchaseSingleRec_RefusesInconsistentEC2ScopeBeforeAnyAWSCall(t *testin
 			result, recorder := purchaseEC2WithRecorder(t, rec)
 
 			require.Error(t, result.Error)
-			assert.Contains(t, result.Error.Error(), "AvailabilityZone")
+			assert.Contains(t, strings.ToLower(result.Error.Error()), "availability zone")
 			assert.Empty(t, recorder.actions, "no AWS call may precede the refusal")
 		})
 	}
