@@ -181,7 +181,9 @@ func rdsExpiryCase(name string) rdsExpiryScenario {
 				{class: "db.r6g.large", engine: "mysql", count: 4, endDays: 363, startedDaysAgo: 2},
 			},
 			recs: one("db.r6g.large", 8), want: []int{0}, parent: []int{3},
-			logLine: "16 normalized units of RIs expiring within 30 days considered against family coverage; 16 units of replacement RIs started in the last 30 days credited back",
+			// No logLine: since go#533 ExpiringNU is the deduction actually applied,
+			// which is 0 here once the replacements are credited, so the
+			// "considered against family coverage" line is not printed.
 		}
 	case "control-replacement-outside-lookback":
 		// Same inventory but the replacements started 45 days ago, outside the
