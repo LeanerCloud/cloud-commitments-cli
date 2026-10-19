@@ -577,8 +577,9 @@ func applyRegionFilters(
 //
 // expiringCommitments (when non-empty and cfg.RebuyWindowDays > 0) reduces
 // ExistingCoveragePct further by the share of pool demand attributable to
-// RIs expiring within the window, so --target-coverage recommends
-// replacements before the cliff. Doesn't run if either input is empty.
+// RIs expiring within the window, net of replacement RIs started inside the
+// coverage lookback (so a re-run does not buy them again), so --target-coverage
+// recommends replacements before the cliff. Doesn't run if either input is empty.
 // RDS recs sized by the family-NU pass (target-coverage mode) ignore that
 // per-rec adjustment and instead get the same commitments and window through
 // ApplyFamilyNUSizingRDSWithExpiryOptions, which deducts expiring normalized units
@@ -592,7 +593,9 @@ func applyRegionFilters(
 func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment, drops *common.DropSummary) []common.Recommendation {
 	recommendations.ApplyCoverageMapToRecommendations(recs, coverageMap)
 	if cfg.RebuyWindowDays > 0 && len(expiringCommitments) > 0 {
-		n, missingDemand := recommendations.AdjustExistingCoverageForExpiringCommitmentsWithCoverage(recs, expiringCommitments, cfg.RebuyWindowDays, coverageMap)
+		n, missingDemand := recommendations.AdjustExistingCoverageForExpiringCommitmentsWithCoverageOptions(
+			recs, expiringCommitments, coverageMap,
+			recommendations.PoolExpiryOptions{WindowDays: cfg.RebuyWindowDays, CoverageLookbackDays: coverageLookbackDays(cfg)})
 		if n > 0 {
 			AppLogger.Printf("  ⏰ Treating %d recs as partially uncovered (RIs expiring within %d days)\n", n, cfg.RebuyWindowDays)
 		}

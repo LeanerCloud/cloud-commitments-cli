@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `--target-coverage` with `--rebuy-window-days` no longer buys replacement EC2 and
+  other non-RDS RIs again when they were already bought inside the coverage
+  lookback: the expiring RIs are netted against those replacements (#2235).
 - Recommendations with no account ID or name are now reported in the drop summary
   when an account filter (`--include-accounts` or `--exclude-accounts`) removes
   them (#1613).
