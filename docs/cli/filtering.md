@@ -135,10 +135,10 @@ Threshold filters drop individual recommendations that fall below a quality or s
 ### --min-count
 
 ```text
---min-count <int>   Minimum instance count (0 = no filter)
+--min-count <int>   Minimum instance count (0 = no filter; does not apply to Savings Plans)
 ```
 
-Drop recommendations where the adjusted instance count (after coverage scaling) is below this number. Useful for ignoring one-off or very small recommendations that are not worth the operational overhead.
+Drop recommendations where the adjusted instance count (after coverage scaling) is below this number. Useful for ignoring one-off or very small recommendations that are not worth the operational overhead. Savings Plans are priced in dollars per hour, not instances, so the floor does not apply to them.
 
 The floor applies on both paths, including `--input-csv`: a row already below it is dropped, and a row `--max-instances` would truncate below it is dropped rather than purchased short. On `--input-csv` runs it is re-checked after existing matching commitments are deducted, so a row whose remaining count falls under the floor is dropped rather than purchased at the smaller size.
 
@@ -189,10 +189,10 @@ cudly --services ec2 --max-break-even-months 18
 ### --max-instances
 
 ```text
---max-instances <int>   Hard cap on total instances purchased (0 = no limit)
+--max-instances <int>   Hard cap on total instances purchased (0 = no limit; does not apply to Savings Plans)
 ```
 
-Cap the total number of instances purchased across all recommendations after coverage scaling. Applied as a final cut after all other filters. This is a safety net to prevent unexpectedly large batch purchases, not a primary sizing control.
+Cap the total number of instances purchased across all recommendations after coverage scaling. Applied as a final cut after all other filters. This is a safety net to prevent unexpectedly large batch purchases, not a primary sizing control. It does not apply to Savings Plans: they are priced in dollars per hour, so they neither count against the cap nor get reduced or dropped by it.
 
 The cap covers the whole run on both code paths: it is applied once to the combined set of recommendations, never once per service or per region.
 

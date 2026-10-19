@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `--max-instances` and `--min-count` no longer apply to Savings Plans, whose
+  Count of 1 is not an instance count: a Savings Plan neither uses up the
+  instance cap nor is dropped by the floor (#1613).
 - `configure-azure --client-secret` is deprecated (it still works): omit it and
   enter the secret at the interactive prompt (#1613).
 - The `configure-azure` help no longer shows `--client-secret` in its example;

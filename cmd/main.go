@@ -134,7 +134,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeEngines, "exclude-engines", []string{}, "Exclude these engines (comma-separated)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeAccounts, "include-accounts", []string{}, "Only include recommendations for these accounts, matched exactly (case-insensitive) on account name or ID (comma-separated)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeAccounts, "exclude-accounts", []string{}, "Exclude recommendations for these accounts, matched exactly (case-insensitive) on account name or ID; a value that only partly matches account names stops the run (comma-separated)")
-	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit)")
+	rootCmd.Flags().Int32Var(&toolCfg.MaxInstances, "max-instances", 0, "Maximum total number of instances to purchase (0 = no limit); does not apply to Savings Plans")
 	rootCmd.Flags().Int32Var(&toolCfg.OverrideCount, "override-count", 0, "Override recommendation count with fixed number for all selected RIs (0 = use recommendation or coverage)")
 	rootCmd.Flags().StringVar(&toolCfg.ValidationProfile, "validation-profile", "", "AWS profile to use for validating running instances (if different from main profile)")
 	rootCmd.Flags().BoolVar(&toolCfg.IncludeExtendedSupport, "include-extended-support", false, "Include instances running on extended support engine versions (by default they are excluded)")
@@ -150,7 +150,7 @@ func init() {
 	rootCmd.Flags().StringVar(&toolCfg.IdempotencyWindow, "idempotency-window", "24h", "Lookback window for duplicate purchase detection")
 	rootCmd.Flags().Float64Var(&toolCfg.MinSavingsPct, "min-savings-pct", 0, "Minimum savings percentage to include a recommendation (0 = no filter)")
 	rootCmd.Flags().IntVar(&toolCfg.MaxBreakEvenMonths, "max-break-even-months", 0, "Maximum break-even period in months (0 = no filter)")
-	rootCmd.Flags().IntVar(&toolCfg.MinCount, "min-count", 0, "Minimum instance count to include a recommendation (0 = no filter)")
+	rootCmd.Flags().IntVar(&toolCfg.MinCount, "min-count", 0, "Minimum instance count to include a recommendation (0 = no filter); does not apply to Savings Plans")
 	rootCmd.Flags().IntVar(&toolCfg.CoverageLookbackDays, "coverage-lookback-days", 30,
 		"Number of calendar days of historical demand fed to GetReservationCoverage "+
 			"when computing the existing-RI coverage map for --target-coverage sizing. "+

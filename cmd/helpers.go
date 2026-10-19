@@ -146,6 +146,44 @@ func CalculateTotalInstances(recs []common.Recommendation) int {
 	return total
 }
 
+// isSavingsPlan reports whether rec is a Savings Plan, whose Count is a
+// placeholder 1 rather than a number of instances.
+func isSavingsPlan(rec common.Recommendation) bool {
+	return rec.CommitmentType == common.CommitmentSavingsPlan
+}
+
+// splitSavingsPlans separates Savings Plans from instance-based recommendations,
+// keeping each group's order.
+func splitSavingsPlans(recs []common.Recommendation) (sps, others []common.Recommendation) {
+	for i := range recs {
+		if isSavingsPlan(recs[i]) {
+			sps = append(sps, recs[i])
+		} else {
+			others = append(others, recs[i])
+		}
+	}
+	return sps, others
+}
+
+// mergeKeepingOrder returns the entries of original that survive, in original
+// order: every Savings Plan, plus the leading len(keptOthers) instance-based
+// entries replaced by their (possibly reduced) kept versions. keptOthers must be
+// a prefix-ordered result of the instance-based entries.
+func mergeKeepingOrder(original, keptOthers []common.Recommendation) []common.Recommendation {
+	out := make([]common.Recommendation, 0, len(original))
+	next := 0
+	for i := range original {
+		switch {
+		case isSavingsPlan(original[i]):
+			out = append(out, original[i])
+		case next < len(keptOthers):
+			out = append(out, keptOthers[next])
+			next++
+		}
+	}
+	return out
+}
+
 // ApplyCoverage delegates to recfilter.ApplyCoverage, wiring AppLogger as the
 // logging sink. Substantive documentation lives on recfilter.ApplyCoverage.
 func ApplyCoverage(recs []common.Recommendation, coverage float64) []common.Recommendation {
@@ -202,6 +240,9 @@ func applySizing(recs []common.Recommendation, cfg Config, coverage float64, dro
 // path (#1830). The count-linear fields that are not money (ProjectedCoverage,
 // ProjectedUtilization, Redshift NumberOfNodes) are re-derived from the new
 // Count by refreshCountLinear (#1845).
+//
+// Savings Plans are exempt: their Count is always 1 and is not an instance
+// count, so they pass through unchanged and consume no budget.
 func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []common.Recommendation {
 	if maxInstances <= 0 {
 		return recs
@@ -212,6 +253,10 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 
 	for _rvc := range recs {
 		rec := recs[_rvc]
+		if isSavingsPlan(rec) {
+			result = append(result, rec)
+			continue
+		}
 		if remaining <= 0 {
 			break
 		}
