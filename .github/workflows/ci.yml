@@ -72,9 +72,13 @@ jobs:
           # Exclude _test.go files to stay consistent with .golangci.yml, which
           # excludes gocyclo on test files (test helpers/table-driven tests are
           # allowed higher complexity). Production code is still gated at >10.
-          COMPLEXITY_ISSUES=$(gocyclo -over 10 -ignore "_test\.go" . 2>&1 || true)
-          if [ -n "$COMPLEXITY_ISSUES" ]; then
-            echo "❌ Found functions with cyclomatic complexity over 10:"
+          # No `|| true`: a non-zero exit (offenders, crash, missing binary) fails
+          # the step. gocyclo exits 0 on a bad path (error on stderr), so any
+          # output also fails; a clean run prints nothing.
+          RC=0
+          COMPLEXITY_ISSUES=$(gocyclo -over 10 -ignore "_test\.go" . 2>&1) || RC=$?
+          if [ "$RC" -ne 0 ] || [ -n "$COMPLEXITY_ISSUES" ]; then
+            echo "❌ gocyclo failed or found functions with cyclomatic complexity over 10:"
             echo "$COMPLEXITY_ISSUES"
             echo ""
             echo "⚠️  Please refactor these functions to reduce complexity."
@@ -439,6 +443,8 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # Non-gating on purpose: Snyk is an external service, so its outages or
+      # rate limits must not block merges.
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/golang@b98d498629f1c368650224d6d212bf7dfa89e4bf # 0.4.0
         continue-on-error: true
