@@ -128,7 +128,7 @@ func fetchPlatformPlan(ctx context.Context, origin *url.URL, id string, key insu
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return errors.New("platform plan redirects are refused")
 	}
-	response, err := client.Do(req)
+	response, err := client.Do(req) //nolint:gosec // G704: operator-supplied platform origin validated by platformPlanOrigin; redirects refused
 	if err != nil {
 		return platformPlanSummary{}, errors.New("platform plan request failed")
 	}
