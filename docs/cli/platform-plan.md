@@ -1,6 +1,6 @@
 # Saved platform plan summary
 
-`ri-helper platform-plan get <id> [--format table|json]` reads one saved
+`cudly platform-plan get <id> [--format table|json]` reads one saved
 platform plan. The default format is table. The ID is the platform plan UUID,
 not an Archera organization, plan or line-item ID or a provider commitment ID.
 

@@ -28,6 +28,7 @@ func TestPlatformPlanRootSummary(t *testing.T) {
 			assert.Empty(t, sinks)
 			assert.NotContains(t, out, "unlisted")
 			if format == "json" {
+				assert.Equal(t, []string{"id", "name", "ramp_type", "updated_at", "next_execution_date", "last_execution_date", "current_step", "total_steps", "enabled", "auto_purchase"}, platformPlanJSONKeys(t, out))
 				var got map[string]any
 				require.NoError(t, json.Unmarshal([]byte(out), &got))
 				assert.Equal(t, map[string]any{"id": platformPlanTestID, "name": "Weekly synthetic", "enabled": true, "auto_purchase": false, "ramp_type": "weekly", "current_step": float64(2), "total_steps": float64(7), "updated_at": "2026-10-01T12:34:56+02:00", "next_execution_date": "2026-11-02T03:04:05Z", "last_execution_date": nil}, got)
@@ -37,6 +38,23 @@ func TestPlatformPlanRootSummary(t *testing.T) {
 			assert.NotContains(t, out, platformPlanTestKey)
 		})
 	}
+}
+
+// platformPlanJSONKeys returns the top-level keys in wire order; maps lose it.
+func platformPlanJSONKeys(t *testing.T, raw string) []string {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(raw))
+	_, err := dec.Token()
+	require.NoError(t, err)
+	var keys []string
+	for dec.More() {
+		k, err := dec.Token()
+		require.NoError(t, err)
+		keys = append(keys, k.(string))
+		var skip json.RawMessage
+		require.NoError(t, dec.Decode(&skip))
+	}
+	return keys
 }
 
 func TestPlatformPlanZeroHTTP(t *testing.T) {
@@ -174,6 +192,10 @@ func TestPlatformPlanContextControlsAndRedirects(t *testing.T) {
 		callback := false
 		original := &http.Client{Timeout: time.Hour, CheckRedirect: func(*http.Request, []*http.Request) error { callback = true; return nil }, Transport: platformPlanTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
+			if calls > 1 {
+				t.Errorf("redirect to %s was followed", r.URL)
+				return nil, errors.New("unexpected redirect request")
+			}
 			return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{location}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 		})}
 		platformPlanHTTPClient = original

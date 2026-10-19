@@ -101,6 +101,11 @@ func platformPlanBoundary(t *testing.T) func() {
 	var visit func(*cobra.Command)
 	visit = func(c *cobra.Command) {
 		v := reflect.ValueOf(c).Elem()
+		for _, name := range []string{"outWriter", "errWriter", "args"} {
+			if !v.FieldByName(name).IsValid() {
+				t.Fatalf("cobra.Command has no field %q; update platformPlanBoundary", name)
+			}
+		}
 		ctx := c.Context()
 		out, errOut := c.OutOrStdout(), c.ErrOrStderr()
 		if v.FieldByName("outWriter").IsNil() {
