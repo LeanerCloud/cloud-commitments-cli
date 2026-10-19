@@ -340,6 +340,20 @@ func TestFilterAndAdjustRecommendations_NameExcludeOnCSVRowsWithoutNamesFails(t 
 	assert.Empty(t, recs)
 }
 
+func TestFilterAndAdjustRecommendations_PartialExcludeOnCSVRowsFails(t *testing.T) {
+	captureAppLog(t)
+	rows := []common.Recommendation{
+		{Service: common.ServiceRDS, Region: "us-east-1", Account: testCallerAccount, AccountName: "prod-main", ResourceType: "db.t3.small", Count: 2},
+		{Service: common.ServiceRDS, Region: "us-east-1", Account: testOtherAcct, AccountName: "dev", ResourceType: "db.t3.small", Count: 2},
+	}
+
+	recs, err := filterAndAdjustRecommendations(context.Background(), rows, 100, Config{ExcludeAccounts: []string{"prod"}, IncludeExtendedSupport: true})
+
+	require.Error(t, err, "a partial exclude must be refused on replay, not silently excluded nothing")
+	assert.Contains(t, err.Error(), `matches no account exactly`)
+	assert.Empty(t, recs)
+}
+
 func TestFetchAllRecs_ExcludeAccountsExactInAnotherBatchIsNotAmbiguous(t *testing.T) {
 	captureAppLog(t)
 	rec := func(region, account string) common.Recommendation {

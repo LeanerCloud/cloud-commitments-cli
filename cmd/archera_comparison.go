@@ -80,7 +80,7 @@ func runArcheraComparison(cmd *cobra.Command, _ []string) error {
 	if format != "table" && format != "json" {
 		return errors.New("--format must be table or json")
 	}
-	key, orgID, planID, err := archeraSettings()
+	key, orgID, planID, err := archeraSettings(archeraOpts.OrgID, archeraOpts.PlanID)
 	if err != nil {
 		return err
 	}
@@ -153,16 +153,16 @@ func archeraFilterValues(flag string, raw []string, limit int) ([]string, error)
 
 // archeraSettings reads the key, org ID and plan ID, naming (never echoing)
 // the first missing setting. The key is returned to RunE only.
-func archeraSettings() (key, orgID, planID string, err error) {
+func archeraSettings(orgFlag, planFlag string) (key, orgID, planID string, err error) {
 	key = strings.TrimSpace(os.Getenv(archeraEnvAPIKey))
 	if key == "" {
 		return "", "", "", fmt.Errorf("%s is not set (read from the environment only)", archeraEnvAPIKey)
 	}
-	orgID = archeraSetting(archeraOpts.OrgID, archeraEnvOrgID)
+	orgID = archeraSetting(orgFlag, archeraEnvOrgID)
 	if orgID == "" {
 		return "", "", "", fmt.Errorf("archera org ID is not set (--org-id or %s)", archeraEnvOrgID)
 	}
-	planID = archeraSetting(archeraOpts.PlanID, archeraEnvPlanID)
+	planID = archeraSetting(planFlag, archeraEnvPlanID)
 	if planID == "" {
 		return "", "", "", fmt.Errorf("archera plan ID is not set (--plan-id or %s)", archeraEnvPlanID)
 	}
