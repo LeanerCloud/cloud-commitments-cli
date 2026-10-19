@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,4 +127,146 @@ func TestArcheraLineItemsWindowsAndComparisonReuse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestArcheraLineItemsRejectsBeforeRequestAndDefaultOff(t *testing.T) {
+	rec := setupArchera(t, func(http.ResponseWriter, *http.Request) { t.Error("unexpected request") })
+	for _, args := range [][]string{
+		{"--limit=0"}, {"--limit=201"}, {"--limit=-1"}, {"--limit=1.5"}, {"--limit=9223372036854775808"},
+		{"--offset=-1"}, {"--offset=1.5"}, {"--offset=9223372036854775808"}, {"--format=xml"},
+		{"--org-id=bad"}, {"--plan-id=bad"}, {"--limit=" + archeraTestKey}, {archeraTestKey},
+	} {
+		out, stderr, err := runListing(t, fullEnv(), args...)
+		require.Error(t, err)
+		assert.Empty(t, out)
+		assert.NotContains(t, stderr+err.Error(), archeraTestKey)
+	}
+	_, _, err := runListing(t, nil)
+	require.ErrorContains(t, err, "ARCHERA_API_KEY")
+	for _, setting := range []string{archeraEnvOrgID, archeraEnvPlanID} {
+		env := fullEnv()
+		delete(env, setting)
+		_, _, err = runListing(t, env)
+		require.ErrorContains(t, err, setting)
+	}
+	out, _, err := runListing(t, nil, "--help")
+	require.NoError(t, err)
+	for _, flag := range []string{"--org-id", "--plan-id", "--format", "--offset", "--limit"} {
+		assert.Contains(t, out, flag)
+	}
+	rootCmd.SetArgs([]string{"configure-gcp", "--help"})
+	require.NoError(t, rootCmd.Execute())
+	resetHelpFlags()
+	assert.Empty(t, rec.requests)
+}
+
+func TestArcheraLineItemsLateFailuresNeverPrintPartialRows(t *testing.T) {
+	for _, failure := range []string{"http", "decode", "metadata", "duplicate", "size", "cancel", "429", "redirect"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			archeraLineItemsCmd.SetContext(ctx)
+			t.Cleanup(func() { archeraLineItemsCmd.SetContext(context.Background()) })
+			rec := setupArchera(t, listingHandler(t, 101, func(w http.ResponseWriter, _ *http.Request) {
+				switch failure {
+				case "http":
+					http.Error(w, archeraTestKey, http.StatusInternalServerError)
+				case "decode":
+					_, _ = w.Write([]byte("[{}]"))
+				case "metadata":
+					w.Header().Set("X-Pagination", "{}")
+					_, _ = w.Write([]byte("[]"))
+				case "duplicate":
+					_, _ = w.Write([]byte("[" + listingWire(t, 101) + "]"))
+				case "size":
+					_, _ = w.Write([]byte("[" + listingWire(t, 1) + "]" + strings.Repeat(" ", 8<<20)))
+				case "cancel":
+					cancel()
+				case "429":
+					w.Header().Set("Retry-After", "2")
+					w.WriteHeader(http.StatusTooManyRequests)
+				case "redirect":
+					w.Header().Set("Location", "https://api.archera.ai/redirect")
+					w.WriteHeader(http.StatusFound)
+				}
+			}))
+			out, stderr, err := runListing(t, fullEnv(), "--format=json", "--limit=1")
+			require.Error(t, err)
+			assert.Empty(t, out)
+			assert.NotContains(t, stderr+err.Error(), archeraTestKey)
+			assert.Len(t, rec.requests, 2)
+			if failure == "429" {
+				assert.Contains(t, err.Error(), "retry after 2s")
+			}
+			if failure == "redirect" {
+				assert.Contains(t, err.Error(), "302")
+			}
+		})
+	}
+}
+
+type listingTrip func(*http.Request) (*http.Response, error)
+
+func (f listingTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestArcheraLineItemsAggregateDeadline(t *testing.T) {
+	setupArchera(t, listingHandler(t, 101, nil))
+	base := archeraHTTPClient.Transport
+	var first time.Time
+	archeraHTTPClient.Transport = listingTrip(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		require.True(t, ok)
+		assert.LessOrEqual(t, time.Until(deadline), 30*time.Second)
+		if first.IsZero() {
+			first = deadline
+		} else {
+			assert.Equal(t, first, deadline)
+		}
+		return base.RoundTrip(r)
+	})
+	_, _, err := runListing(t, fullEnv(), "--format=json", "--limit=1")
+	require.NoError(t, err)
+}
+
+func TestArcheraLineItemsPrivacyAndTable(t *testing.T) {
+	var logs bytes.Buffer
+	oldLog, oldSlog := log.Writer(), slog.Default()
+	log.SetOutput(&logs)
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { log.SetOutput(oldLog); slog.SetDefault(oldSlog) })
+	for _, format := range []string{"json", "table"} {
+		rec := setupArchera(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-Pagination", `{"total":1,"total_pages":1,"page":1,"first_page":1,"last_page":1}`)
+			wire := strings.Replace(listingWire(t, 1), `"contract-type"`, mustJSON(t, archeraTestKey+"\x1b[31m"+strings.Repeat("x", 500)), 1)
+			wire = strings.Replace(wire, "9007199254740993", "0", 1)
+			wire = strings.Replace(wire, "0.1e-100", "0", 1)
+			_, _ = w.Write([]byte("[" + wire + "]"))
+		})
+		out, stderr, err := runListing(t, fullEnv(), "--format", format)
+		require.NoError(t, err)
+		assert.NotContains(t, out+stderr+logs.String(), archeraTestKey)
+		assert.NotContains(t, out, "\x1b")
+		assert.Contains(t, out, "[redacted]")
+		assert.NotContains(t, out, strings.Repeat("x", 257))
+		require.Len(t, rec.requests, 1)
+		if format == "json" {
+			var dto archeraListingPage
+			require.NoError(t, json.Unmarshal([]byte(out), &dto))
+			assert.Equal(t, "0", dto.LineItems[0].SelectedQuantity)
+			assert.Equal(t, "0", dto.LineItems[0].SelectedCommitment)
+		} else {
+			assert.Contains(t, out, "Total 1; offset 0; limit 100")
+			assert.Contains(t, out, "QUANTITY")
+		}
+	}
+	env := fullEnv()
+	env[archeraEnvAPIKey] = "00000001-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	setupArchera(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Pagination", `{"total":1,"total_pages":1,"page":1,"first_page":1,"last_page":1}`)
+		_, _ = w.Write([]byte("[" + listingWire(t, 1) + "]"))
+	})
+	out, stderr, err := runListing(t, env, "--format=json")
+	require.Error(t, err)
+	assert.Empty(t, out)
+	assert.NotContains(t, stderr+logs.String()+err.Error(), env[archeraEnvAPIKey])
 }
