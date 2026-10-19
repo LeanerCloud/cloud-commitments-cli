@@ -131,6 +131,6 @@ Before any real purchase run:
 2. Check that `--audit-log` points to a readable, writable, durable location.
 3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
-5. Consider `--max-instances` as a final safety cap for a first run.
+5. Consider `--max-instances` as a final safety cap for a first run. It limits instance-based reservations only; Savings Plans are exempt, so it does not cap their hourly commitment spend.
 6. Set `--idempotency-window` to cover the time since the earlier run (e.g. `72h` for a re-run two days later), and note that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward.
 7. If an AI agent or other automation drives `cudly`, have it hand off the dry-run recommendation to a human, who reviews the totals and confirms `--purchase` at a terminal. See [Automation and AI agents](#automation-and-ai-agents).
