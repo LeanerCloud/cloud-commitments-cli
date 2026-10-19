@@ -23,6 +23,7 @@ type reservationExpiryScenario struct {
 	rows, expiry, endDays, count      int
 	average, demand, target, existing float64
 	missing, filtered                 bool
+	replacedDays, replacedCount       int
 }
 
 func reservationExpiryCase(name string) reservationExpiryScenario {
@@ -31,6 +32,11 @@ func reservationExpiryCase(name string) reservationExpiryScenario {
 	case "pool-demand":
 	case "outside-window":
 		s.endDays, s.count, s.existing = 180, 6, 60
+	case "replaced-inside-lookback":
+		// Replacements bought 5 days ago are inside the 30-day coverage
+		// lookback, so the expiring RIs net to zero and the run must not
+		// re-buy them (cli#2235).
+		s.count, s.existing, s.replacedDays, s.replacedCount = 6, 60, 5, 18
 	case "missing-demand-two-each-six-total":
 		s.average, s.demand, s.count, s.existing, s.missing = 10, 0, 2, 60, true
 	case "filtered-subset":
@@ -47,7 +53,7 @@ func reservationExpiryCase(name string) reservationExpiryScenario {
 }
 
 func TestReservationExpiryCommand(t *testing.T) {
-	for _, name := range []string{"pool-demand", "outside-window", "missing-demand-two-each-six-total", "filtered-subset", "exact-boundary", "below-boundary"} {
+	for _, name := range []string{"pool-demand", "outside-window", "replaced-inside-lookback", "missing-demand-two-each-six-total", "filtered-subset", "exact-boundary", "below-boundary"} {
 		t.Run(name, func(t *testing.T) { runCompletenessScenario(t, "ec2", "explicit", name) })
 	}
 }
@@ -189,7 +195,7 @@ func (p *completenessProxy) reservationExpiryResponse(host, op string, body []by
 		case "DescribeInstanceTypes":
 			return 200, "text/xml", `<DescribeInstanceTypesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><instanceTypeSet><item><instanceType>m5.large</instanceType><vCpuInfo><defaultVCpus>2</defaultVCpus></vCpuInfo><memoryInfo><sizeInMiB>8192</sizeInMiB></memoryInfo></item></instanceTypeSet></DescribeInstanceTypesResponse>`
 		case "DescribeReservedInstances":
-			return 200, "text/xml", fmt.Sprintf(`<DescribeReservedInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><reservedInstancesSet><item><reservedInstancesId>expiry-fixture</reservedInstancesId><instanceType>m5.large</instanceType><instanceCount>%d</instanceCount><state>active</state><start>%s</start><end>%s</end></item></reservedInstancesSet></DescribeReservedInstancesResponse>`, s.expiry, time.Now().AddDate(-1, 0, 0).UTC().Format(time.RFC3339), time.Now().AddDate(0, 0, s.endDays).UTC().Format(time.RFC3339))
+			return 200, "text/xml", reservationExpiryReservedInstances(s)
 		}
 	}
 	if host == "rds.us-east-1.amazonaws.com" && (op == "DescribeDBInstances" || op == "DescribeDBMajorEngineVersions") {
@@ -206,6 +212,23 @@ func (p *completenessProxy) reservationExpiryResponse(host, op string, body []by
 	}
 	p.t.Errorf("unexpected expiry operation %s %s", host, op)
 	return 403, "text/plain", "fixture rejected operation"
+}
+
+// reservationExpiryReservedInstances renders the owned EC2 RIs the fixture
+// reports: the expiring RI that --rebuy-window-days acts on, plus a
+// replacement bought inside the coverage lookback when the scenario asks for
+// one.
+func reservationExpiryReservedInstances(s reservationExpiryScenario) string {
+	item := func(id string, count int, start, end time.Time) string {
+		return fmt.Sprintf(`<item><reservedInstancesId>%s</reservedInstancesId><instanceType>m5.large</instanceType><instanceCount>%d</instanceCount><state>active</state><start>%s</start><end>%s</end></item>`,
+			id, count, start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))
+	}
+	now := time.Now()
+	items := item("expiry-fixture", s.expiry, now.AddDate(-1, 0, 0), now.AddDate(0, 0, s.endDays))
+	if s.replacedCount > 0 {
+		items += item("replacement-fixture", s.replacedCount, now.AddDate(0, 0, -s.replacedDays), now.AddDate(0, 0, 400))
+	}
+	return fmt.Sprintf(`<DescribeReservedInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><reservedInstancesSet>%s</reservedInstancesSet></DescribeReservedInstancesResponse>`, items)
 }
 
 func (p *completenessProxy) reservationExpiryCoverage(body []byte) string {

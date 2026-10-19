@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Savings Plans purchases now send the hourly commitment truncated to 5 decimals
+  (at least 2 shown) instead of rounded to cents, and accept amounts from 0.001
+  to 1,000,000, so a 0.001 to 0.004 commitment is no longer rejected (library
+  bump, #2235).
+- `--target-coverage` with `--rebuy-window-days` no longer buys replacement EC2 and
+  other non-RDS RIs again when they were already bought inside the coverage
+  lookback: the expiring RIs are netted against those replacements (#2235).
 - `--min-savings-pct` and `--max-break-even-months` now apply on `--input-csv`
   runs instead of being refused. The CSV report gains `SavingsPercentage` and
   `BreakEvenMonths` columns; replaying a report that lacks a column a set flag

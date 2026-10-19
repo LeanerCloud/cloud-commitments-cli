@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/csv"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -298,21 +299,18 @@ func TestValidatePurchasePreconditions(t *testing.T) {
 	}
 }
 
-// TestValidatePurchasePreconditions_RejectsCommitmentThatRoundsToZero covers
-// issue #2163: the library sends the hourly commitment as "%.2f", so a positive
-// value below 0.005 would reach CreateSavingsPlan as "0.00".
-func TestValidatePurchasePreconditions_RejectsCommitmentThatRoundsToZero(t *testing.T) {
+// TestValidatePurchasePreconditions_CommitmentBounds mirrors the library's
+// spcommitment.Normalize bounds (0.001..1e6, positive, finite).
+func TestValidatePurchasePreconditions_CommitmentBounds(t *testing.T) {
 	withCommitment := func(c float64) common.Recommendation {
 		rec := parserShapedSP()
 		rec.Details = &common.SavingsPlanDetails{PlanType: "Compute", HourlyCommitment: c}
 		return rec
 	}
-	for _, c := range []float64{0.001, 0.004, 0.00499} {
-		err := validatePurchasePreconditions(withCommitment(c), "", defaultTestAccount)
-		require.Error(t, err, "commitment %v rounds to 0.00 and must be rejected", c)
-		assert.Contains(t, err.Error(), "0.00", "commitment %v", c)
+	for _, c := range []float64{0.0009, 0.00099, 0, -1, 1000000.1, math.NaN(), math.Inf(1)} {
+		assert.Error(t, validatePurchasePreconditions(withCommitment(c), "", defaultTestAccount), "commitment %v", c)
 	}
-	for _, c := range []float64{0.005, 0.01, 1.5} {
+	for _, c := range []float64{0.001, 0.004, 0.005, 1.239, 1.2345678, 1000000} {
 		assert.NoError(t, validatePurchasePreconditions(withCommitment(c), "", defaultTestAccount), "commitment %v", c)
 	}
 }
