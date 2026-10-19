@@ -360,3 +360,8 @@ func TestCollectAzureCredentials_PromptWording(t *testing.T) {
 	assert.Contains(t, out, "Enter the credentials of an existing Azure Service Principal:")
 	assert.NotContains(t, out, "output above")
 }
+
+// The help example must not teach passing the secret on the command line.
+func TestConfigureAzureHelp_NoClientSecretFlagExample(t *testing.T) {
+	assert.NotContains(t, configureAzureCmd.Long, "--client-secret")
+}

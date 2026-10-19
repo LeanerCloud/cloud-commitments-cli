@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The `configure-azure` help no longer shows `--client-secret` in its example;
+  the client secret is read from the interactive prompt (#1613).
 - `configure-azure` and `configure-gcp` now store credentials in the secret whose
   name matches exactly instead of the first prefix match from Secrets Manager
   (which could be `<name>-old`), and fail when two secrets share the name (#1613).

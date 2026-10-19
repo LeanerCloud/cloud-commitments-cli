@@ -97,8 +97,9 @@ var configureAzureCmd = &cobra.Command{
 
 This command stores your Azure credentials in AWS Secrets Manager for use by CUDly.
 
-You can provide credentials via flags or interactively:
-  cudly configure-azure --stack-name my-cudly --tenant-id xxx --client-id xxx --client-secret xxx --subscription-id xxx
+You can provide credentials via flags or interactively (the client secret is
+read from a prompt, so it stays out of shell history and process listings):
+  cudly configure-azure --stack-name my-cudly --tenant-id xxx --client-id xxx --subscription-id xxx
   cudly configure-azure --stack-name my-cudly --interactive
 
 To create an Azure Service Principal manually:
