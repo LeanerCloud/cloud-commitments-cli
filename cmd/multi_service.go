@@ -373,10 +373,11 @@ const (
 	// rankBySavingsPercentage is the recommendation-driven path: scorer.Score
 	// sorts on SavingsPercentage, an intensive rate, before the cap runs.
 	rankBySavingsPercentage rankingRule = "highest savings-percentage recommendations first"
-	// rankBySavingsPerInstance is the --input-csv path: a CSV row carries no
-	// savings percentage, so sortBySavingsPerInstance derives the rate from
-	// the EstimatedSavings and Count columns it does carry.
-	rankBySavingsPerInstance rankingRule = "highest savings-per-instance rows first (a CSV row carries no savings percentage)"
+	// rankBySavingsPerInstance is the --input-csv path: the cap is a budget in
+	// instances, and a CSV may lack the savings percentage (older reports), so
+	// sortBySavingsPerInstance derives the rate from the EstimatedSavings and
+	// Count columns every CSV carries.
+	rankBySavingsPerInstance rankingRule = "highest savings-per-instance rows first (EstimatedSavings / Count, not savings percentage)"
 )
 
 // capBinds reports whether --max-instances will actually remove instances from
@@ -704,7 +705,7 @@ func prepareCSVPurchaseRun(ctx context.Context, cfg Config, csvModeCoverage floa
 	}
 
 	AppLogger.Printf("📄 Reading recommendations from CSV: %s\n", cfg.CSVInput)
-	recs, err = loadRecommendationsFromCSV(cfg.CSVInput)
+	recs, err = loadCSVRecommendations(cfg.CSVInput, csvThresholdNeedsFor(cfg))
 	if err != nil {
 		return nil, aws.Config{}, "", fmt.Errorf("failed to read CSV file: %w", err)
 	}

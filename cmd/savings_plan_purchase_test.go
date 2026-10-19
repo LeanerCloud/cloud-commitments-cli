@@ -399,8 +399,9 @@ func TestCSVWriter_AppendsDetailColumnsWithoutReorderingExistingOnes(t *testing.
 	rows, err := csv.NewReader(f).ReadAll()
 	require.NoError(t, err)
 	header := rows[0]
-	n := len(header) - len(csvDetailColumns)
-	assert.Equal(t, csvDetailColumns, header[n:])
+	n := len(header) - len(csvDetailColumns) - len(csvThresholdColumns)
+	assert.Equal(t, csvDetailColumns, header[n:n+len(csvDetailColumns)])
+	assert.Equal(t, csvThresholdColumns, header[n+len(csvDetailColumns):])
 	assert.Equal(t, "Service", header[0])
 	assert.Equal(t, "ProjectedCoverage", header[n-1])
 	for _, row := range rows {

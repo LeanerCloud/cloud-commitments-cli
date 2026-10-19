@@ -33,6 +33,12 @@ func determineCSVCoverage(cfg Config) float64 {
 
 // loadRecommendationsFromCSV reads and returns recommendations from a CSV file.
 func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error) {
+	return loadCSVRecommendations(csvPath, csvThresholdNeeds{})
+}
+
+// loadCSVRecommendations is loadRecommendationsFromCSV for a run whose flags
+// need threshold figures from the file (see csvThresholdNeeds).
+func loadCSVRecommendations(csvPath string, need csvThresholdNeeds) ([]common.Recommendation, error) {
 	file, err := os.Open(csvPath) // #nosec G304 -- CLI tool: csvPath is an operator-supplied command-line argument
 	if err != nil {
 		return nil, fmt.Errorf("failed to open CSV file: %w", err)
@@ -58,9 +64,12 @@ func loadRecommendationsFromCSV(csvPath string) ([]common.Recommendation, error)
 	if err != nil {
 		return nil, err
 	}
+	if colErr := requireThresholdColumns(colIdx, need); colErr != nil {
+		return nil, colErr
+	}
 
 	// Parse all records
-	parsed, err := parseCSVRecords(reader, colIdx)
+	parsed, err := parseCSVRecords(reader, colIdx, need)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +134,7 @@ func buildColumnIndexMap(header []string) (map[string]int, error) {
 }
 
 // parseCSVRecords reads and parses all CSV records.
-func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recommendation, error) {
+func parseCSVRecords(reader *csv.Reader, colIdx map[string]int, need csvThresholdNeeds) ([]common.Recommendation, error) {
 	var recs []common.Recommendation
 
 	for {
@@ -149,7 +158,7 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 			continue
 		}
 
-		rec, err := parseCSVRecord(record, colIdx)
+		rec, err := parseCSVRecord(record, colIdx, need)
 		if err != nil {
 			line, _ := reader.FieldPos(0)
 			return nil, fmt.Errorf("CSV line %d: %w", line, err)
@@ -162,7 +171,7 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int) ([]common.Recomm
 }
 
 // parseCSVRecord parses a single CSV record into a Recommendation.
-func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendation, error) {
+func parseCSVRecord(record []string, colIdx map[string]int, need csvThresholdNeeds) (common.Recommendation, error) {
 	rec := common.Recommendation{Provider: common.ProviderAWS}
 
 	// Parse string fields
@@ -191,6 +200,10 @@ func parseCSVRecord(record []string, colIdx map[string]int) (common.Recommendati
 	err = parseCSVFloat(record, colIdx, "EstimatedSavings", &rec.EstimatedSavings)
 	if err != nil {
 		return rec, err
+	}
+
+	if cellErr := parseCSVThresholds(record, colIdx, need, &rec); cellErr != nil {
+		return rec, cellErr
 	}
 
 	// Details come from the Engine/Deployment columns and the appended detail
@@ -320,7 +333,7 @@ func writeMultiServiceCSV(w io.Writer, results []common.PurchaseResult) error {
 		"ExistingCoverage", "ProjectedCoverage",
 	}
 	// Appended, never reordered: existing readers look columns up by name.
-	header := slices.Concat(baseHeader, csvDetailColumns)
+	header := slices.Concat(baseHeader, csvDetailColumns, csvThresholdColumns)
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
@@ -370,7 +383,7 @@ func writeMultiServiceCSV(w io.Writer, results []common.PurchaseResult) error {
 			formatExistingCoverage(rec),
 			formatPercentOrBlank(rec.ProjectedCoverage),
 		}
-		row := slices.Concat(baseRow, detailCells(rec))
+		row := slices.Concat(baseRow, detailCells(rec), thresholdCells(rec))
 		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("failed to write CSV row: %w", err)
 		}
@@ -432,7 +445,7 @@ func buildTotalRow(results []common.PurchaseResult) []string {
 		"", "", "", "", // CommitmentID, Success, Error, Timestamp
 		"", "", // ExistingCoverage, ProjectedCoverage
 	}
-	return slices.Concat(totals, make([]string, len(csvDetailColumns))) // detail columns do not aggregate
+	return slices.Concat(totals, make([]string, len(csvDetailColumns)+len(csvThresholdColumns))) // detail and threshold columns do not aggregate
 }
 
 // formatIntOrBlank renders an int as its decimal string when non-zero, ""

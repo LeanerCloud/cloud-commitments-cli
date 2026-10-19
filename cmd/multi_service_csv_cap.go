@@ -20,18 +20,14 @@ import (
 // --min-count was never consulted, so a row the cap truncated below the floor
 // was purchased short.
 //
-// Only MinCount is enforced here. A CSV row carries no savings percentage and
-// no break-even figure (writeMultiServiceCSVReport emits neither column and
-// parseCSVRecord reads neither), so both fields load as zero and gating on
-// them would reject every row of every file. --min-savings-pct and
-// --max-break-even-months are therefore refused up front by
-// validateCSVModeFilterFlags rather than accepted and ignored here; #1819
-// tracks teaching the CSV format to carry those columns.
+// --min-savings-pct and --max-break-even-months are enforced here too, on the
+// SavingsPercentage and BreakEvenMonths columns the report writer emits. The
+// loader refuses a file that lacks a column a set flag needs (see
+// csvThresholdNeeds), so a gate never reads a coerced zero.
 //
-// scorer.Score's own ordering is useless here: SavingsPercentage is uniformly
-// zero on loaded rows, so it resolves on EstimatedSavings, a whole-row dollar
-// total, while --max-instances is a budget in instances. Ranking a total
-// against a per-instance budget spends the whole budget on whichever row is
+// scorer.Score's own ordering is useless here: it sorts on SavingsPercentage and
+// then EstimatedSavings, a whole-row dollar total, while --max-instances is a
+// budget in instances. Ranking a total against a per-instance budget spends the whole budget on whichever row is
 // merely biggest, not on the rows that return the most per instance bought.
 // sortBySavingsPerInstance therefore re-orders the survivors on the rate
 // derived from the two columns a CSV does carry, which is the greedy the flag
@@ -39,7 +35,7 @@ import (
 // best-value rows, names every row it reduces or drops, and drops rather than
 // shortens anything truncated below --min-count.
 func scoreAndLimitCSVRecs(recs []common.Recommendation, cfg Config) ([]common.Recommendation, error) {
-	passed := applyMinCountFloor(recs, cfg.MinCount)
+	passed := applyThresholdGates(applyMinCountFloor(recs, cfg.MinCount), cfg)
 	if err := requireRankingSignal(passed, cfg); err != nil {
 		return nil, err
 	}
@@ -63,6 +59,23 @@ func applyMinCountFloor(recs []common.Recommendation, minCount int) []common.Rec
 	for i := range scored.Filtered {
 		f := scored.Filtered[i]
 		AppLogger.Printf("🔒 --min-count dropped %s %s %s: %s\n",
+			f.Recommendation.Service, f.Recommendation.Region, f.Recommendation.ResourceType, f.FilterReason)
+	}
+	return scored.Passed
+}
+
+// applyThresholdGates drops recommendations that fail --min-savings-pct or
+// --max-break-even-months and names each drop on stdout with scorer.Score's own
+// reason, so the CSV path and the recommendation-driven path reject on the
+// identical predicates. With both at 0 it returns recs untouched.
+func applyThresholdGates(recs []common.Recommendation, cfg Config) []common.Recommendation {
+	if cfg.MinSavingsPct <= 0 && cfg.MaxBreakEvenMonths <= 0 {
+		return recs
+	}
+	scored := scorer.Score(recs, scorer.Config{MinSavingsPct: cfg.MinSavingsPct, MaxBreakEvenMonths: cfg.MaxBreakEvenMonths})
+	for i := range scored.Filtered {
+		f := scored.Filtered[i]
+		AppLogger.Printf("🔒 --min-savings-pct/--max-break-even-months dropped %s %s %s: %s\n",
 			f.Recommendation.Service, f.Recommendation.Region, f.Recommendation.ResourceType, f.FilterReason)
 	}
 	return scored.Passed
