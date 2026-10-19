@@ -27,8 +27,9 @@ import (
 //
 // scorer.Score's own ordering is useless here: it sorts on SavingsPercentage and
 // then EstimatedSavings, a whole-row dollar total, while --max-instances is a
-// budget in instances. Ranking a total against a per-instance budget spends the whole budget on whichever row is
-// merely biggest, not on the rows that return the most per instance bought.
+// budget in instances. Ranking a total against a per-instance budget spends the
+// whole budget on whichever row is merely biggest, not on the rows that return
+// the most per instance bought.
 // sortBySavingsPerInstance therefore re-orders the survivors on the rate
 // derived from the two columns a CSV does carry, which is the greedy the flag
 // implies, and applyGlobalInstanceLimit consumes that order: the cap keeps the

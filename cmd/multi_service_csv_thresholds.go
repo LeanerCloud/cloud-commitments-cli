@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 )
@@ -79,7 +80,7 @@ func parseCSVThresholds(record []string, colIdx map[string]int, need csvThreshol
 }
 
 func parseThresholdCell(record []string, colIdx map[string]int, column string, required bool, flag string, target *float64) error {
-	if getCSVField(record, colIdx, column) == "" {
+	if strings.TrimSpace(getCSVField(record, colIdx, column)) == "" {
 		if required {
 			return fmt.Errorf("column %q is blank, so %s cannot be applied to this row", column, flag)
 		}

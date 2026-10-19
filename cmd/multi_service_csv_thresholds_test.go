@@ -158,6 +158,34 @@ func TestCSVThresholdHeaderStaysStrict(t *testing.T) {
 	assert.Contains(t, err.Error(), "CSV header missing required columns: Count")
 }
 
+// TestCSVThresholdWhitespaceCellIsBlank pins that a whitespace-only cell is
+// blank: refused when its flag is set, ignored (left 0) when it is not.
+func TestCSVThresholdWhitespaceCellIsBlank(t *testing.T) {
+	const row = "rds,us-east-1,db.t3.small,postgres,2,1yr,all-upfront,111111111111,100,%s,%s\n"
+	for _, blank := range []string{" ", "\t"} {
+		for _, col := range []struct {
+			name, flag string
+			cells      [2]string
+			need       csvThresholdNeeds
+		}{
+			{csvSavingsPctColumn, "--min-savings-pct", [2]string{blank, "3"}, csvThresholdNeeds{savingsPct: true}},
+			{csvBreakEvenColumn, "--max-break-even-months", [2]string{"10", blank}, csvThresholdNeeds{breakEven: true}},
+		} {
+			path := writeTestRecommendationsCSV(t, thresholdCSVHeader+strings.Replace(strings.Replace(row, "%s", col.cells[0], 1), "%s", col.cells[1], 1))
+
+			_, err := loadCSVRecommendations(path, col.need)
+			require.Error(t, err, "%q in %s", blank, col.name)
+			assert.Contains(t, err.Error(), col.name)
+			assert.Contains(t, err.Error(), col.flag)
+			assert.Contains(t, err.Error(), "CSV line 2")
+
+			recs, err := loadCSVRecommendations(path, csvThresholdNeeds{})
+			require.NoError(t, err, "%q in %s with no flag", blank, col.name)
+			require.Len(t, recs, 1)
+		}
+	}
+}
+
 // TestCSVThresholdOrderingStaysOnSavingsPerInstance pins that populating
 // SavingsPercentage does not re-rank --max-instances: the cap still buys the
 // best savings-per-instance row, not the highest percentage.

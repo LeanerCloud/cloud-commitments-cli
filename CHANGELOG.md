@@ -17,8 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   runs instead of being refused. The CSV report gains `SavingsPercentage` and
   `BreakEvenMonths` columns; replaying a report that lacks a column a set flag
   needs (or has it blank) fails with an error naming the flag, never reading the
-  missing figure as 0. `--max-instances` still ranks on savings per instance
-  (#1819).
+  missing figure as 0. When present, the `SavingsPercentage` and
+  `BreakEvenMonths` columns are now parsed strictly (an invalid value fails the
+  load) even when the threshold flags are unset. `--max-instances` still ranks
+  on savings per instance (#1819).
 - Recommendations with no account ID or name are now reported in the drop summary
   when an account filter (`--include-accounts` or `--exclude-accounts`) removes
   them (#1613).
