@@ -137,6 +137,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Bumped `cloud-commitments-go` (pkg and the aws, azure and gcp providers) to
+  `cfe8ac29`. User-visible effects: recommendations reported in a non-USD
+  currency are skipped at ingestion and the skip is reported; RDS SQL Server
+  RIs are sized per instance size; GCP no longer emits Cloud SQL and Memorystore
+  CUD recommendations from the performance recommenders; Azure Savings Plan
+  purchases refuse a malformed idempotency token (#1613).
 - BREAKING: `--input-csv` now requires `Term` and `PaymentOption` columns in
   addition to `Service`, `Region`, `ResourceType` and `Count`. `Term` must be
   `1yr` or `3yr` and `PaymentOption` must be `all-upfront`, `partial-upfront`

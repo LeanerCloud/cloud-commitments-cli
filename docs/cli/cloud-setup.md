@@ -177,11 +177,10 @@ Scope notes:
   billing account, folder or organization, because the pinned client never
   queries those parents. Billing-account roles such as `roles/billing.viewer`
   are not needed for this call.
-- Other services: the GCP provider also queries Cloud SQL and Memorystore
-  recommenders (`google.cloudsql.instance.PerformanceRecommender`,
-  `google.memorystore.redis.PerformanceRecommender`). The wizard provisions
-  nothing for them; those calls return a permission error, which is reported
-  as a warning for that service while other services continue.
+- Other services: the GCP provider no longer queries the Cloud SQL and
+  Memorystore recommenders. Those commitments are spend-based and scoped to a
+  billing account, so they are handled only on explicit request, and the wizard
+  provisions nothing for them.
 
 Rerunning the wizard does not remove broad grants from older installations.
 
