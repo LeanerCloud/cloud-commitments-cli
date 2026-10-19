@@ -108,3 +108,11 @@ func TestScoreLimitAndDisplay_MinCountKeepsSavingsPlan(t *testing.T) {
 	}
 	assert.ElementsMatch(t, []common.CommitmentType{common.CommitmentSavingsPlan, common.CommitmentReservedInstance}, types)
 }
+
+func TestApplyInstanceLimit_SavingsPlanAfterBudgetSpent(t *testing.T) {
+	got := ApplyInstanceLimit([]common.Recommendation{mkRI("a", 3), mkRI("b", 2), mkSP()}, 3)
+
+	require.Len(t, got, 2)
+	assert.Equal(t, "a", got[0].ResourceType)
+	assert.True(t, isSavingsPlan(got[1]))
+}

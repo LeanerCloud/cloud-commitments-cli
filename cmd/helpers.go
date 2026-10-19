@@ -240,7 +240,8 @@ func applySizing(recs []common.Recommendation, cfg Config, coverage float64, dro
 // Count by refreshCountLinear (#1845).
 //
 // Savings Plans are exempt: their Count is always 1 and is not an instance
-// count, so they pass through unchanged and consume no budget.
+// count, so they pass through unchanged, wherever they sit in recs, and consume
+// no budget.
 func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []common.Recommendation {
 	if maxInstances <= 0 {
 		return recs
@@ -256,7 +257,7 @@ func ApplyInstanceLimit(recs []common.Recommendation, maxInstances int32) []comm
 			continue
 		}
 		if remaining <= 0 {
-			break
+			continue // keep scanning: later Savings Plans still pass through
 		}
 		adjusted := rec
 		// rec.Count > remaining and remaining >= 1 together imply rec.Count
