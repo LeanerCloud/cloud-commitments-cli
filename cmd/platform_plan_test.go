@@ -189,7 +189,7 @@ func TestPlatformPlanContextControlsAndRedirects(t *testing.T) {
 func TestPlatformPlanAcceptedSuccessPrivacy(t *testing.T) {
 	platformPlanEnv(t)
 	for _, format := range []string{"table", "json"} {
-		for _, name := range []string{platformPlanTestKey, strings.Repeat("x", 700) + platformPlanTestKey, strings.Join(strings.Split(platformPlanTestKey, ""), "\u200b"), strings.Join(strings.Split(platformPlanTestKey, ""), "\x01"), strings.Join(strings.Split(platformPlanTestKey, ""), "\u0301"), strings.Join(strings.Split(platformPlanTestKey, ""), " * "), "ＳＹＮＴＨＥＴＩＣ-zqKey-VX98"} {
+		for _, name := range platformPlanKeyVariants() {
 			t.Run(format+" name", func(t *testing.T) {
 				encoded, _ := json.Marshal(name)
 				body := strings.Replace(platformPlanFixture, `"Weekly synthetic"`, string(encoded), 1)
@@ -226,5 +226,21 @@ func TestPlatformPlanAcceptedSuccessPrivacy(t *testing.T) {
 			assert.NotContains(t, out, "\u001b")
 			assert.NotContains(t, out, "\u202e")
 		}
+	}
+}
+
+func platformPlanKeyVariants() []string {
+	interleave := func(sep string) string {
+		return strings.Join(strings.Split(platformPlanTestKey, ""), sep)
+	}
+	fullWidth := "\uff33\uff39\uff2e\uff34\uff28\uff25\uff34\uff29\uff23-zqKey-VX98"
+	return []string{
+		platformPlanTestKey,
+		strings.Repeat("x", 700) + platformPlanTestKey,
+		interleave("\u200b"),
+		interleave("\x01"),
+		interleave("\u0301"),
+		interleave(" * "),
+		fullWidth,
 	}
 }
