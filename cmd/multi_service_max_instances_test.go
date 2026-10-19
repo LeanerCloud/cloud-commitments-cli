@@ -466,7 +466,7 @@ func csvRecsFromHeader(t *testing.T, header, rows string) []common.Recommendatio
 	require.NotEmpty(t, recs)
 	for i := range recs {
 		require.Zero(t, recs[i].SavingsPercentage,
-			"a CSV row carries no savings percentage; the ordering under test must come from EstimatedSavings")
+			"SavingsPercentage must stay zero here; the ordering under test ranks on EstimatedSavings / Count")
 	}
 	return recs
 }

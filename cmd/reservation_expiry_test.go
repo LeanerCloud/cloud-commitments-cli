@@ -50,6 +50,41 @@ func TestReservationExpirySizing(t *testing.T) {
 	}
 }
 
+// A --target-coverage run must not re-buy replacements already bought inside
+// the coverage lookback (cli#2235): the lagged coverage average only partly
+// holds them, so the expiring RIs are netted against the replacements.
+func TestReservationExpiryCreditsReplacementsInsideLookback(t *testing.T) {
+	coverage := recommendations.PoolCoverageMap{"us-east-1:m5.large": {Pct: 60, AvgInstancesPerHour: 90}}
+	replacement := func(startDaysAgo int) common.Commitment {
+		c := reservationExpiryCommitments(18, 400)[0]
+		c.StartDate = time.Now().AddDate(0, 0, -startDaysAgo)
+		return c
+	}
+	for _, tc := range []struct {
+		name         string
+		lookbackDays int
+		startDaysAgo int
+		wantCount    int
+		wantExisting float64
+	}{
+		{"replaced-inside-lookback", 30, 5, 6, 60},
+		{"default-lookback-when-unset", 0, 5, 6, 60},
+		{"replaced-outside-lookback", 30, 45, 12, 40},
+		{"lookback-narrower-than-purchase", 3, 5, 12, 40},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{TargetCoverage: 80, RebuyWindowDays: 30, CoverageLookbackDays: tc.lookbackDays}
+			commitments := append(reservationExpiryCommitments(18, 15), replacement(tc.startDaysAgo))
+			got := applyCoverageAndOverrides(reservationExpiryRecommendations([]float64{30, 30, 30}), cfg, coverage, commitments, nil)
+			require.Len(t, got, 3)
+			for _, rec := range got {
+				assert.Equal(t, tc.wantCount, rec.Count)
+				assert.InDelta(t, tc.wantExisting, rec.ExistingCoveragePct, 1e-12)
+			}
+		})
+	}
+}
+
 func TestReservationExpiryMissingDemand(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

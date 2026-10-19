@@ -10,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -53,6 +54,7 @@ func archeraComparisonFixture() string {
 type archeraRecorder struct {
 	mu       sync.Mutex
 	requests []*http.Request
+	newConns int
 	hits     map[string]int
 }
 
@@ -79,12 +81,20 @@ func (a *archeraTestTransport) RoundTrip(r *http.Request) (*http.Response, error
 func setupArchera(t *testing.T, handler http.HandlerFunc) *archeraRecorder {
 	t.Helper()
 	rec := &archeraRecorder{hits: map[string]int{}}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.mu.Lock()
 		rec.hits[r.URL.Path]++
 		rec.mu.Unlock()
 		handler(w, r)
 	}))
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateNew {
+			rec.mu.Lock()
+			rec.newConns++
+			rec.mu.Unlock()
+		}
+	}
+	srv.Start()
 	t.Cleanup(srv.Close)
 	target, err := url.Parse(srv.URL)
 	require.NoError(t, err)
@@ -100,7 +110,7 @@ func okHandler(w http.ResponseWriter, _ *http.Request) {
 
 // resetHelpFlags clears the sticky --help flag cobra leaves set after a help run.
 func resetHelpFlags() {
-	for _, c := range []*cobra.Command{rootCmd, archeraComparisonCmd, configureGCPCmd} {
+	for _, c := range []*cobra.Command{rootCmd, archeraComparisonCmd, archeraLineItemsCmd, configureGCPCmd} {
 		if f := c.Flags().Lookup("help"); f != nil {
 			_ = f.Value.Set("false")
 			f.Changed = false
@@ -109,6 +119,11 @@ func resetHelpFlags() {
 }
 
 func runArchera(t *testing.T, env map[string]string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	return runArcheraCommand(t, "archera-comparison", env, args...)
+}
+
+func runArcheraCommand(t *testing.T, command string, env map[string]string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	for _, k := range []string{archeraEnvAPIKey, archeraEnvOrgID, archeraEnvPlanID} {
 		t.Setenv(k, "")
@@ -122,10 +137,15 @@ func runArchera(t *testing.T, env map[string]string, args ...string) (stdout, st
 	for _, name := range []string{"org-id", "plan-id", "format", "line-item-ids", "contract-terms", "payment-options"} {
 		archeraComparisonCmd.Flags().Lookup(name).Changed = false
 	}
+	archeraListingOpts.OrgID, archeraListingOpts.PlanID, archeraListingOpts.Format = "", "", "table"
+	archeraListingOpts.Offset, archeraListingOpts.Limit = 0, 100
+	for _, name := range []string{"org-id", "plan-id", "format", "offset", "limit"} {
+		archeraLineItemsCmd.Flags().Lookup(name).Changed = false
+	}
 	var out, errb bytes.Buffer
 	rootCmd.SetOut(&out)
 	rootCmd.SetErr(&errb)
-	rootCmd.SetArgs(append([]string{"archera-comparison"}, args...))
+	rootCmd.SetArgs(append([]string{command}, args...))
 	t.Cleanup(func() { rootCmd.SetOut(nil); rootCmd.SetErr(nil); rootCmd.SetArgs(nil) })
 	realOut, realErr := captureRealStd(t, func() { err = rootCmd.Execute() })
 	// Anything the command wrote to the real process streams is returned with

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,7 +77,7 @@ func archeraReadableKeyFragment(out string) string {
 // forArcheraErrorPaths drives every error path with msg and calls check with
 // each result. pads are the padding lengths swept across the pkg's 200-byte
 // HTTP cut.
-func forArcheraErrorPaths(t *testing.T, echo string, pads []int, check func(path, got string)) {
+func forArcheraErrorPaths(t *testing.T, echo string, pads []int, check func(path, got string)) *archeraRecorder {
 	t.Helper()
 	env := map[string]string{archeraEnvAPIKey: " " + archeraLongKey + "\t", archeraEnvOrgID: archeraTestOrg, archeraEnvPlanID: archeraTestPlan}
 	done := func(path string, out, errOut string, err error) {
@@ -85,9 +85,24 @@ func forArcheraErrorPaths(t *testing.T, echo string, pads []int, check func(path
 		require.Error(t, err, path)
 		check(path, out+errOut+err.Error())
 	}
+	// One server serves every request of the call: a server per pad would hold
+	// one fresh loopback connection each until the test ends (#2259).
+	var mu sync.Mutex
+	var handler http.HandlerFunc
+	rec := setupArchera(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		h := handler
+		mu.Unlock()
+		h(w, r)
+	})
+	serve := func(h http.HandlerFunc) {
+		mu.Lock()
+		handler = h
+		mu.Unlock()
+	}
 	for _, pad := range pads {
 		msg := "bad key " + strings.Repeat("p", pad) + echo
-		setupArchera(t, func(w http.ResponseWriter, _ *http.Request) {
+		serve(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Retry-After", "7")
 			w.WriteHeader(401)
 			b, _ := json.Marshal(map[string]string{"message": msg})
@@ -97,7 +112,7 @@ func forArcheraErrorPaths(t *testing.T, echo string, pads []int, check func(path
 		done(fmt.Sprintf("http pad %d", pad), out, errOut, err)
 	}
 	body := strings.Replace(archeraComparisonFixture(), `"payment_option":"no_upfront"`, `"payment_option":`+mustJSON(t, echo), 1)
-	setupArchera(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
+	serve(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
 	out, errOut, err := runArchera(t, env)
 	done("decode", out, errOut, err)
 	msg := "bad key " + echo
@@ -106,11 +121,31 @@ func forArcheraErrorPaths(t *testing.T, echo string, pads []int, check func(path
 		"deadline":  fmt.Errorf("%s: %w", msg, context.DeadlineExceeded),
 		"canceled":  fmt.Errorf("%s: %w", msg, context.Canceled),
 	} {
-		setupArchera(t, okHandler)
 		archeraHTTPClient = &http.Client{Transport: archeraFailingTransport{err: wrapped}}
 		out, errOut, err := runArchera(t, env)
 		done(kind, out, errOut, err)
 	}
+	return rec
+}
+
+// Every request of one forArcheraErrorPaths call reuses a keep-alive loopback
+// connection. A server per request opened one connection each, held until the
+// test ended, which exhausted sockets and made timing tests flake (#2259).
+func TestArcheraErrorPathHarnessReusesConnections(t *testing.T) {
+	var pads []int
+	for pad := 0; pad < 40; pad++ {
+		pads = append(pads, pad)
+	}
+	rec := forArcheraErrorPaths(t, "echo", pads, func(string, string) {})
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	total := 0
+	for _, n := range rec.hits {
+		total += n
+	}
+	require.Equal(t, len(pads)+1, total)
+	t.Logf("requests=%d newConns=%d", total, rec.newConns)
+	assert.LessOrEqual(t, rec.newConns, 3)
 }
 
 func TestArcheraLongKeyNeverReadableOnAnyPath(t *testing.T) {
@@ -180,20 +215,27 @@ func TestArcheraKeyGapBound(t *testing.T) {
 	assert.NotContains(t, three, archeraWithheld)
 }
 
-// The matcher is linear and looks only at what could be displayed: a hostile
-// 1 MB rejected value must not stall the command.
+// A hostile 1 MB rejected value costs a bounded amount of work, proved by what
+// the output shows, not by wall clock. End to end, the pkg never echoes a value
+// that is not an identifier, so the value is replaced by its length. At the
+// CLI, the matcher reads only archeraMaxErrorSize + archeraCheckSlack bytes: the
+// key, split by an invisible character, sits after 1 MB of key-alphabet text,
+// beyond the window, so the message is cut and not withheld. A matcher that
+// read the whole message would find the key and withhold it.
 func TestArcheraHostileLargeDecodeValueIsBounded(t *testing.T) {
 	const n = 1 << 20
-	value := strings.Repeat("p", n/2) + strings.Repeat("r", n/2)
-	body := strings.Replace(archeraComparisonFixture(), `"payment_option":"no_upfront"`, `"payment_option":`+mustJSON(t, value), 1)
+	filler := strings.Repeat("p", n/2) + strings.Repeat("r", n/2)
+	body := strings.Replace(archeraComparisonFixture(), `"payment_option":"no_upfront"`, `"payment_option":`+mustJSON(t, filler), 1)
 	setupArchera(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
 	env := map[string]string{archeraEnvAPIKey: archeraLongKey, archeraEnvOrgID: archeraTestOrg, archeraEnvPlanID: archeraTestPlan}
-	start := time.Now()
 	_, _, err := runArchera(t, env)
-	elapsed := time.Since(start)
 	require.Error(t, err)
-	assert.LessOrEqual(t, len(err.Error()), archeraMaxErrorSize)
-	assert.Less(t, elapsed, time.Second)
+	assert.Contains(t, err.Error(), fmt.Sprintf("(%d bytes, not shown)", n))
+	assert.NotContains(t, err.Error(), "pppp")
+
+	hostile := filler + archeraSplitEverywhere(archeraLongKey, "\u2800")
+	got := archeraSafeError(errors.New(hostile), archeraLongKey).Error()
+	assert.Equal(t, strings.Repeat("p", archeraMaxErrorSize), got)
 }
 
 // Only text that could be displayed (plus a small slack for a key cut by the

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +18,15 @@ import (
 // regions and are not supported for Savings Plan purchases.
 const spAPIRegion = "us-east-1"
 
-// spCommitmentFormat is how the library formats HourlyCommitment for the
-// CreateSavingsPlan call (savingsplans/client.go). A positive value that
-// formats as "0.00" would be sent as a zero commitment, so preconditions
-// reject it.
-const spCommitmentFormat = "%.2f"
+// Hourly commitment bounds accepted by the library's CreateSavingsPlan path.
+// Cross-repo mirror: providers/aws/internal/spcommitment.Normalize in
+// cloud-commitments-go is the source of truth (it also truncates the sent
+// amount to 5 decimals). The CLI repeats the bounds so a dry run and the
+// confirmation prompt reject a bad amount before any purchase starts.
+const (
+	spMinHourlyCommitment = 0.001
+	spMaxHourlyCommitment = 1000000.0
+)
 
 // savingsPlanRowKey identifies one Savings Plan purchase. Two rows with the
 // same key buy the same plan twice.
@@ -146,11 +151,11 @@ func validateSavingsPlanPreconditions(rec common.Recommendation) error {
 	if d.PlanType == "" {
 		return fmt.Errorf("%s recommendation is missing the plan type", rec.Service)
 	}
-	if d.HourlyCommitment <= 0 {
-		return fmt.Errorf("%s recommendation has no positive hourly commitment (got %v)", rec.Service, d.HourlyCommitment)
+	if math.IsNaN(d.HourlyCommitment) || math.IsInf(d.HourlyCommitment, 0) || d.HourlyCommitment <= 0 {
+		return fmt.Errorf("%s recommendation has no positive finite hourly commitment (got %v)", rec.Service, d.HourlyCommitment)
 	}
-	if fmt.Sprintf(spCommitmentFormat, d.HourlyCommitment) == "0.00" {
-		return fmt.Errorf("%s recommendation's hourly commitment %v would be sent as 0.00; it must be at least 0.005", rec.Service, d.HourlyCommitment)
+	if d.HourlyCommitment < spMinHourlyCommitment || d.HourlyCommitment > spMaxHourlyCommitment {
+		return fmt.Errorf("%s recommendation's hourly commitment %v must be between %g and %g", rec.Service, d.HourlyCommitment, spMinHourlyCommitment, spMaxHourlyCommitment)
 	}
 	if rec.Service == common.ServiceSavingsPlansEC2Instance {
 		return validateEC2InstanceSPOffering(d)
