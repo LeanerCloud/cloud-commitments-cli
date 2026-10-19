@@ -152,17 +152,15 @@ func isSavingsPlan(rec common.Recommendation) bool {
 	return rec.CommitmentType == common.CommitmentSavingsPlan
 }
 
-// splitSavingsPlans separates Savings Plans from instance-based recommendations,
-// keeping each group's order.
-func splitSavingsPlans(recs []common.Recommendation) (sps, others []common.Recommendation) {
+// withoutSavingsPlans returns the instance-based recommendations, in order.
+func withoutSavingsPlans(recs []common.Recommendation) []common.Recommendation {
+	var others []common.Recommendation
 	for i := range recs {
-		if isSavingsPlan(recs[i]) {
-			sps = append(sps, recs[i])
-		} else {
+		if !isSavingsPlan(recs[i]) {
 			others = append(others, recs[i])
 		}
 	}
-	return sps, others
+	return others
 }
 
 // mergeKeepingOrder returns the entries of original that survive, in original

@@ -389,7 +389,7 @@ const (
 // conditions drift apart, either a run is refused for a cap that changes
 // nothing, or an unrankable run reaches the cap after all.
 func capBinds(recs []common.Recommendation, cfg Config) bool {
-	_, others := splitSavingsPlans(recs)
+	others := withoutSavingsPlans(recs)
 	return cfg.MaxInstances > 0 && CalculateTotalInstances(others) > int(cfg.MaxInstances)
 }
 
@@ -421,7 +421,7 @@ func applyGlobalInstanceLimit(passed []common.Recommendation, cfg Config, rule r
 	// Savings Plans are exempt from the cap and the post-cap floor: their Count
 	// is a placeholder 1, not an instance count. The report and the floor see
 	// only the instance-based rows, whose capped result is a prefix of its input.
-	_, others := splitSavingsPlans(passed)
+	others := withoutSavingsPlans(passed)
 	totalBefore := CalculateTotalInstances(others)
 	limited := ApplyInstanceLimit(others, cfg.MaxInstances)
 	limited, belowMin := dropTruncatedBelowMinCount(limited, cfg.MinCount)
