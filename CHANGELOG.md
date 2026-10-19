@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The RDS engine-version scan now stops on cancellation and fails with an error
+  naming the region after 200 pages of `DescribeDBInstances` instead of paging
+  without bound (#1613).
 - `configure-azure` no longer creates the Entra app, client secret and role
   assignment when you press Enter at the create-service-principal prompt; Enter
   now skips, as in the GCP wizard (#1613).

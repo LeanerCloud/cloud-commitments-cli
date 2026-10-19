@@ -99,6 +99,17 @@ const maxConcurrentRegionQueries = 10
 // 20 pages x ~100 records/page = ~2000 records, enough for any engine list (issue #692).
 const maxEngineVersionPages = 20
 
+// maxInstancePages caps DescribeDBInstances pagination per region. A page holds
+// 100 instances by default, so 200 pages covers 20k instances per region, far
+// above the RDS per-account instance quota, and bounds a non-terminating marker.
+const maxInstancePages = 200
+
+// RDSInstancesClient is the subset of the RDS API needed by
+// queryRDSInstancesPaged, extracted so tests can inject a fake.
+type RDSInstancesClient interface {
+	DescribeDBInstances(ctx context.Context, params *awsrds.DescribeDBInstancesInput, optFns ...func(*awsrds.Options)) (*awsrds.DescribeDBInstancesOutput, error)
+}
+
 // RDSMajorVersionsClient is the subset of the RDS API needed by
 // queryMajorEngineVersionsWithClient, extracted so tests can inject a mock.
 type RDSMajorVersionsClient interface {
@@ -153,10 +164,20 @@ func queryRDSInstancesInRegions(ctx context.Context, awsCfg aws.Config, regions 
 func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) error {
 	regionCfg := awsCfg.Copy()
 	regionCfg.Region = regionName
-	rdsClient := awsrds.NewFromConfig(regionCfg)
+	return queryRDSInstancesPaged(ctx, awsrds.NewFromConfig(regionCfg), regionName, instanceVersions, mu)
+}
 
+// queryRDSInstancesPaged pages through DescribeDBInstances, failing loudly on a
+// canceled ctx or when maxInstancePages is reached rather than truncating.
+func queryRDSInstancesPaged(ctx context.Context, rdsClient RDSInstancesClient, regionName string, instanceVersions map[string][]InstanceEngineVersion, mu *sync.Mutex) error {
 	var marker *string
-	for {
+	for pageIdx := 0; ; pageIdx++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if pageIdx >= maxInstancePages {
+			return fmt.Errorf("RDS instance pagination cap reached after %d pages in %s", maxInstancePages, regionName)
+		}
 		localVersions, nextMarker, err := queryRDSInstancesPage(ctx, rdsClient, marker, regionName)
 		if err != nil {
 			return fmt.Errorf("failed to describe RDS instances in %s: %w", regionName, err)
@@ -177,7 +198,7 @@ func queryRDSInstancesInRegion(ctx context.Context, awsCfg aws.Config, regionNam
 }
 
 // queryRDSInstancesPage queries a single page of RDS instances.
-func queryRDSInstancesPage(ctx context.Context, rdsClient *awsrds.Client, marker *string, regionName string) (versions map[string][]InstanceEngineVersion, nextMarker *string, err error) {
+func queryRDSInstancesPage(ctx context.Context, rdsClient RDSInstancesClient, marker *string, regionName string) (versions map[string][]InstanceEngineVersion, nextMarker *string, err error) {
 	input := &awsrds.DescribeDBInstancesInput{Marker: marker}
 	output, err := rdsClient.DescribeDBInstances(ctx, input)
 	if err != nil {
