@@ -771,6 +771,10 @@ func runToolFromCSV(ctx context.Context, cfg Config) error {
 // them, and writes the report and summary for whatever ran. A non-nil error
 // is errAuditTrailLost and/or errPurchasesFailed.
 func runCSVPurchases(ctx context.Context, awsCfg aws.Config, recs []common.Recommendation, isDryRun bool, cfg Config, runID string) error {
+	// Purchase IDs label the sizing via cfg.Coverage (effectiveSizingPct);
+	// pin it to the coverage the CSV sizing used so the label cannot drift (#2248).
+	cfg.Coverage = determineCSVCoverage(cfg)
+
 	// Create account alias cache for lookup
 	accountCache := NewAccountAliasCache(awsCfg)
 
