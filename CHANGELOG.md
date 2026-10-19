@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `configure-azure --client-secret` is deprecated (it still works): omit it and
+  enter the secret at the interactive prompt (#1613).
 - The `configure-azure` help no longer shows `--client-secret` in its example;
   the client secret is read from the interactive prompt (#1613).
 - `configure-azure` and `configure-gcp` now store credentials in the secret whose

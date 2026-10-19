@@ -365,3 +365,9 @@ func TestCollectAzureCredentials_PromptWording(t *testing.T) {
 func TestConfigureAzureHelp_NoClientSecretFlagExample(t *testing.T) {
 	assert.NotContains(t, configureAzureCmd.Long, "--client-secret")
 }
+
+func TestConfigureAzure_ClientSecretFlagDeprecated(t *testing.T) {
+	flag := configureAzureCmd.Flags().Lookup("client-secret")
+	require.NotNil(t, flag)
+	assert.NotEmpty(t, flag.Deprecated)
+}

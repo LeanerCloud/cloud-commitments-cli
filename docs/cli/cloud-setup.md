@@ -31,7 +31,7 @@ cudly configure-azure [flags]
 | `--profile` | (AWS default chain) | AWS profile to use when writing to Secrets Manager. |
 | `--tenant-id` | | Azure AD Tenant ID (UUID format). |
 | `--client-id` | | Azure Service Principal Client ID (UUID format). |
-| `--client-secret` | | Azure Service Principal Client Secret. Read securely from stdin if omitted. |
+| `--client-secret` | | Deprecated: a secret on the command line leaks into shell history and process listings. Omit it and enter it at the interactive Client Secret prompt. The flag still works. |
 | `--subscription-id` | | Azure Subscription ID (UUID format). |
 | `--interactive` / `-i` | `false` | Prompt for all credential fields interactively, even if some are provided as flags. |
 | `--skip-setup` | `false` | Skip the guided Azure CLI steps (az login, az account list, az ad sp create-for-rbac). Use when you already have a Service Principal and just want to store the credentials. |
@@ -53,7 +53,7 @@ If step 3 creates the Service Principal, its credentials (including the subscrip
 ### Non-interactive usage
 
 ```bash
-# Provide all credentials as flags (--client-secret is read from a variable to avoid shell history)
+# Provide all credentials as flags (--client-secret is deprecated; it is read from a variable to avoid shell history)
 AZURE_SECRET="$(cat /run/secrets/azure-client-secret)"
 cudly configure-azure \
   --stack-name prod-cudly \
