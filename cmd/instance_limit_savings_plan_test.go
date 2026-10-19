@@ -102,7 +102,7 @@ func assertSameRelativeOrder(t *testing.T, in, got []common.Recommendation) {
 func TestScoreLimitAndDisplay_MinCountKeepsSavingsPlan(t *testing.T) {
 	result := scoreLimitAndDisplay([]common.Recommendation{mkSP(), mkRI("a", 3)}, Config{MinCount: 2}, nil)
 
-	var types []common.CommitmentType
+	types := make([]common.CommitmentType, 0, len(result.Passed))
 	for _, r := range result.Passed {
 		types = append(types, r.CommitmentType)
 	}
@@ -115,4 +115,41 @@ func TestApplyInstanceLimit_SavingsPlanAfterBudgetSpent(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, "a", got[0].ResourceType)
 	assert.True(t, isSavingsPlan(got[1]))
+}
+
+func mkNamedSP(name string) common.Recommendation {
+	r := mkSP()
+	r.ResourceType = name
+	return r
+}
+
+// mixedOrderInput interleaves Savings Plans with instance rows.
+func mixedOrderInput() []common.Recommendation {
+	return []common.Recommendation{
+		mkNamedSP("S1"), mkRI("a", 3), mkNamedSP("S2"), mkRI("b", 2),
+		mkNamedSP("S3"), mkRI("c", 5), mkNamedSP("S4"),
+	}
+}
+
+func resourceTypes(recs []common.Recommendation) []string {
+	out := make([]string, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, r.ResourceType)
+	}
+	return out
+}
+
+func TestMixedSavingsPlanOrder_Exact(t *testing.T) {
+	t.Run("cap 4", func(t *testing.T) {
+		got := applyGlobalInstanceLimit(mixedOrderInput(), Config{MaxInstances: 4}, rankBySavingsPercentage, nil)
+		assert.Equal(t, []string{"S1", "a", "S2", "b", "S3", "S4"}, resourceTypes(got))
+	})
+	t.Run("cap 4 min-count 2", func(t *testing.T) {
+		got := applyGlobalInstanceLimit(mixedOrderInput(), Config{MaxInstances: 4, MinCount: 2}, rankBySavingsPercentage, nil)
+		assert.Equal(t, []string{"S1", "a", "S2", "S3", "S4"}, resourceTypes(got))
+	})
+	t.Run("min-count floor 3", func(t *testing.T) {
+		got := applyMinCountFloor(mixedOrderInput(), 3)
+		assert.Equal(t, []string{"S1", "a", "S2", "S3", "c", "S4"}, resourceTypes(got))
+	})
 }
