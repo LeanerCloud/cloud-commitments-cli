@@ -110,7 +110,7 @@ To create an Azure Service Principal manually:
 func init() {
 	rootCmd.AddCommand(configureAzureCmd)
 
-	configureAzureCmd.Flags().StringVar(&azureOpts.StackName, "stack-name", "cudly", "CUDly CloudFormation stack name")
+	configureAzureCmd.Flags().StringVar(&azureOpts.StackName, "stack-name", "cudly", "Name of the CUDly deployment; prefixes the AWS Secrets Manager secret (<stack-name>-AzureCredentials)")
 	configureAzureCmd.Flags().StringVar(&azureOpts.Profile, "profile", "", "AWS profile to use")
 	configureAzureCmd.Flags().StringVar(&azureOpts.TenantID, "tenant-id", "", "Azure AD Tenant ID")
 	configureAzureCmd.Flags().StringVar(&azureOpts.ClientID, "client-id", "", "Azure Service Principal Client ID")

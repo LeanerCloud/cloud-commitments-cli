@@ -85,7 +85,7 @@ Or run interactively to create a new service account:
 func init() {
 	rootCmd.AddCommand(configureGCPCmd)
 
-	configureGCPCmd.Flags().StringVar(&gcpOpts.StackName, "stack-name", "cudly", "CUDly CloudFormation stack name")
+	configureGCPCmd.Flags().StringVar(&gcpOpts.StackName, "stack-name", "cudly", "Name of the CUDly deployment; prefixes the AWS Secrets Manager secret (<stack-name>-GCPCredentials)")
 	configureGCPCmd.Flags().StringVar(&gcpOpts.Profile, "profile", "", "AWS profile to use")
 	configureGCPCmd.Flags().StringVarP(&gcpOpts.CredentialsFile, "credentials-file", "f", "", "Path to GCP service account JSON key file")
 	configureGCPCmd.Flags().StringVar(&gcpOpts.ProjectID, "project-id", "", "GCP Project ID (overrides value in credentials file)")

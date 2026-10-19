@@ -200,11 +200,9 @@ func printSuccessRate(success, failed int) {
 }
 
 // archeraSignupURL is the Archera signup link with CUDly attribution. Now an
-// alias for the shared constant in pkg/common, which the MCP server's
-// post-purchase offer reads too, so the link and the two disclosures below
-// are written once rather than once per binary. Kept identical to the
-// frontend's ARCHERA_SIGNUP_URL (frontend/src/archera.ts), which cannot
-// import Go.
+// alias for the shared constant in pkg/common, so the link and the two
+// disclosures below are written once. Kept identical to the frontend's
+// ARCHERA_SIGNUP_URL (frontend/src/archera.ts), which cannot import Go.
 const archeraSignupURL = common.ArcheraSignupURL
 
 // printFinalMessage prints the final message based on mode and results.
