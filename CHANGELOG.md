@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `configure-azure` no longer creates the Entra app, client secret and role
+  assignment when you press Enter at the create-service-principal prompt; Enter
+  now skips, as in the GCP wizard (#1613).
 - Savings Plans purchases now send the hourly commitment truncated to 5 decimals
   (at least 2 shown) instead of rounded to cents, and accept amounts from 0.001
   to 1,000,000, so a 0.001 to 0.004 commitment is no longer rejected (library

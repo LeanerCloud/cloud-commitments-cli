@@ -179,6 +179,26 @@ func TestAzureWizard_SkipCreateSP_ReturnsNil(t *testing.T) {
 	assert.Nil(t, created)
 }
 
+// TestAzureWizard_EmptyInputSkipsCreateSP checks that pressing Enter at the
+// create-SP prompt skips (the default), so no Entra app, password or role
+// assignment is created by accident.
+func TestAzureWizard_EmptyInputSkipsCreateSP(t *testing.T) {
+	stubAzureSPConstructors(t, nil)
+	newAzureSPProvisionerFn = func(_ string) (azureSPProvisioner, error) {
+		t.Fatal("provisioner must not be built on empty input")
+		return nil, nil
+	}
+
+	var created *AzureCredentials
+	var err error
+	captureAllOutput(t, func() {
+		created, err = azureStepCreateServicePrincipal(context.Background(),
+			bufio.NewReader(strings.NewReader("\n")), testSubID)
+	})
+	require.NoError(t, err)
+	assert.Nil(t, created)
+}
+
 // TestAzureWizard_FailureAfterCreate_NoSecretInError covers the rollback path
 // and the post-create recovery hint: neither error text nor output may carry
 // the secret.

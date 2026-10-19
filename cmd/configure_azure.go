@@ -527,14 +527,16 @@ func azureStepCreateServicePrincipal(ctx context.Context, reader *bufio.Reader, 
 	fmt.Printf("%q role at subscription scope, via the Microsoft Graph SDK.\n", azureSPRoleName)
 	fmt.Println()
 	fmt.Printf("Create service principal %q with role %q at /subscriptions/%s?\n", azureSPName, azureSPRoleName, subscriptionID)
-	fmt.Printf("[R]un, [S]kip? ")
+	fmt.Printf("[r]un, [S]kip (default)? ")
 
 	choice, err := readTrimmedLine(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read service-principal choice: %w", err)
 	}
+	// Creating an Entra app, password and role assignment is not harmless, so
+	// Enter skips, like the GCP wizard.
 	choice = strings.ToLower(choice)
-	if choice != "r" && choice != "run" && choice != "" {
+	if choice != "r" && choice != "run" {
 		fmt.Println("Skipping Create Service Principal")
 		fmt.Println()
 		fmt.Println("Provide the appId, client secret and tenant ID for an existing")
