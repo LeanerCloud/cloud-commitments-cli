@@ -10,6 +10,7 @@ import (
 	"log"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -53,6 +54,7 @@ func archeraComparisonFixture() string {
 type archeraRecorder struct {
 	mu       sync.Mutex
 	requests []*http.Request
+	newConns int
 	hits     map[string]int
 }
 
@@ -79,12 +81,20 @@ func (a *archeraTestTransport) RoundTrip(r *http.Request) (*http.Response, error
 func setupArchera(t *testing.T, handler http.HandlerFunc) *archeraRecorder {
 	t.Helper()
 	rec := &archeraRecorder{hits: map[string]int{}}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.mu.Lock()
 		rec.hits[r.URL.Path]++
 		rec.mu.Unlock()
 		handler(w, r)
 	}))
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateNew {
+			rec.mu.Lock()
+			rec.newConns++
+			rec.mu.Unlock()
+		}
+	}
+	srv.Start()
 	t.Cleanup(srv.Close)
 	target, err := url.Parse(srv.URL)
 	require.NoError(t, err)
