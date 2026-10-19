@@ -646,8 +646,8 @@ func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverag
 // warned about rather than read as "no expiry".
 func logFamilyExpiry(expiry recommendations.FamilyExpiryReport, windowDays, lookbackDays int) {
 	if expiry.ExpiringNU > 0 {
-		// The exact deduction is capped by the covered and active NU per family
-		// (go#342); report the inputs rather than claim a net figure.
+		// ExpiringNU is the deduction actually applied after the per-family
+		// covered/active caps (go#342, go#533), so nothing is logged when it is 0.
 		AppLogger.Printf("  ⏰ RDS family sizing: %.0f normalized units of RIs expiring within %d days considered against family coverage; %.0f units of replacement RIs started in the last %d days credited back\n", expiry.ExpiringNU, windowDays, expiry.ReplacementNU, lookbackDays)
 	}
 	if expiry.Unusable > 0 {

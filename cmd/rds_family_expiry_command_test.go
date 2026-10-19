@@ -68,6 +68,8 @@ type rdsExpiryScenario struct {
 	unusable int
 	// logLine, when set, must appear in the run log.
 	logLine string
+	// absentLogLine, when set, must NOT appear in the run log.
+	absentLogLine string
 	// parent documents the count the commit before the fix produced.
 	parent []int
 }
@@ -181,9 +183,10 @@ func rdsExpiryCase(name string) rdsExpiryScenario {
 				{class: "db.r6g.large", engine: "mysql", count: 4, endDays: 363, startedDaysAgo: 2},
 			},
 			recs: one("db.r6g.large", 8), want: []int{0}, parent: []int{3},
-			// No logLine: since go#533 ExpiringNU is the deduction actually applied,
-			// which is 0 here once the replacements are credited, so the
-			// "considered against family coverage" line is not printed.
+			// Since go#533 ExpiringNU is the deduction actually applied. The
+			// replacements cancel the expiring RIs here, so it is 0 and the
+			// "considered against family coverage" line must not be printed.
+			absentLogLine: "normalized units of RIs expiring within 30 days considered against family coverage",
 		}
 	case "control-replacement-outside-lookback":
 		// Same inventory but the replacements started 45 days ago, outside the
@@ -221,6 +224,9 @@ func assertRDSExpiryCSV(t *testing.T, output, name, logs string) {
 	s := rdsExpiryCase(name)
 	if s.logLine != "" {
 		require.Contains(t, logs, s.logLine)
+	}
+	if s.absentLogLine != "" {
+		require.NotContains(t, logs, s.absentLogLine)
 	}
 	data, err := os.ReadFile(output)
 	if countNonZero(s.want) == 0 {
