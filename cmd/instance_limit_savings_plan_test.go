@@ -59,6 +59,7 @@ func TestApplyGlobalInstanceLimit_SavingsPlanExempt(t *testing.T) {
 				}
 			}
 			assert.Equal(t, tt.wantRIs, ris)
+			assertSameRelativeOrder(t, tt.recs, got)
 			assert.Equal(t, tt.wantSP, sp)
 			assert.Len(t, got, tt.wantSize)
 		})
@@ -69,6 +70,7 @@ func TestApplyMinCountFloor_SavingsPlanExempt(t *testing.T) {
 	got := applyMinCountFloor([]common.Recommendation{mkRI("a", 1), mkSP(), mkRI("b", 5)}, 3)
 
 	require.Len(t, got, 2)
+	assert.Equal(t, []string{"Compute", "b"}, []string{got[0].ResourceType, got[1].ResourceType}, "input order kept")
 	var sps, ris int
 	for _, r := range got {
 		if isSavingsPlan(r) {
@@ -80,4 +82,17 @@ func TestApplyMinCountFloor_SavingsPlanExempt(t *testing.T) {
 	}
 	assert.Equal(t, 1, sps)
 	assert.Equal(t, 1, ris)
+}
+
+// assertSameRelativeOrder checks got is a subsequence of in by ResourceType.
+func assertSameRelativeOrder(t *testing.T, in, got []common.Recommendation) {
+	t.Helper()
+	i := 0
+	for _, g := range got {
+		for i < len(in) && in[i].ResourceType != g.ResourceType {
+			i++
+		}
+		require.Less(t, i, len(in), "output order differs from input order")
+		i++
+	}
 }

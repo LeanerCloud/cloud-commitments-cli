@@ -57,14 +57,23 @@ func applyMinCountFloor(recs []common.Recommendation, minCount int) []common.Rec
 		return recs
 	}
 	// Savings Plans carry a placeholder Count of 1, so the floor does not apply.
-	sps, others := splitSavingsPlans(recs)
-	scored := scorer.Score(others, scorer.Config{MinCount: minCount})
-	for i := range scored.Filtered {
-		f := scored.Filtered[i]
-		AppLogger.Printf("🔒 --min-count dropped %s %s %s: %s\n",
-			f.Recommendation.Service, f.Recommendation.Region, f.Recommendation.ResourceType, f.FilterReason)
+	// Rows are scored one at a time so the output keeps the input order
+	// (scorer.Score sorts its Passed list).
+	var kept []common.Recommendation
+	for i := range recs {
+		if isSavingsPlan(recs[i]) {
+			kept = append(kept, recs[i])
+			continue
+		}
+		scored := scorer.Score(recs[i:i+1], scorer.Config{MinCount: minCount})
+		for j := range scored.Filtered {
+			f := scored.Filtered[j]
+			AppLogger.Printf("🔒 --min-count dropped %s %s %s: %s\n",
+				f.Recommendation.Service, f.Recommendation.Region, f.Recommendation.ResourceType, f.FilterReason)
+		}
+		kept = append(kept, scored.Passed...)
 	}
-	return append(scored.Passed, sps...)
+	return kept
 }
 
 // applyThresholdGates drops recommendations that fail --min-savings-pct or
