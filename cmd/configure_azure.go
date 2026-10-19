@@ -144,13 +144,9 @@ func storeAzureCredentials(ctx context.Context, store SecretsStore, stackName st
 	// Build expected secret name pattern
 	secretName := fmt.Sprintf("%s-AzureCredentials", stackName)
 
-	// Try to find the actual secret ARN by listing secrets
-	arns, err := store.ListSecrets(ctx, secretName)
-
-	// Use the ARN if found, otherwise use the name (will fail if secret doesn't exist)
-	secretID := secretName
-	if err == nil && len(arns) > 0 {
-		secretID = arns[0]
+	secretID, err := resolveSecretID(ctx, store, secretName)
+	if err != nil {
+		return err
 	}
 
 	// Marshal credentials to JSON

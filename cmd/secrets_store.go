@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -64,4 +66,35 @@ func (s *AWSSecretsStore) UpdateSecret(ctx context.Context, secretID, secretValu
 
 	_, err := s.client.UpdateSecret(ctx, input)
 	return err
+}
+
+// secretARNSuffixLen is the "-" plus six random characters Secrets Manager
+// appends to a secret's name in its ARN.
+const secretARNSuffixLen = 7
+
+// resolveSecretID returns the ARN of the secret named exactly name. The
+// ListSecrets name filter is a prefix match with unspecified order, so
+// "<name>" also matches "<name>-old"; only ARNs whose secret name equals name
+// count. With no exact match (or a failed listing) it returns name itself, so
+// UpdateSecret reports a missing secret; more than one exact match is an error.
+func resolveSecretID(ctx context.Context, store SecretsStore, name string) (string, error) {
+	arns, err := store.ListSecrets(ctx, name)
+	if err != nil {
+		return name, nil
+	}
+	var exact []string
+	for _, arn := range arns {
+		_, secretName, ok := strings.Cut(arn, ":secret:")
+		if ok && len(secretName) > secretARNSuffixLen && secretName[:len(secretName)-secretARNSuffixLen] == name {
+			exact = append(exact, arn)
+		}
+	}
+	switch len(exact) {
+	case 0:
+		return name, nil
+	case 1:
+		return exact[0], nil
+	default:
+		return "", fmt.Errorf("found %d secrets named %q: %v", len(exact), name, exact)
+	}
 }

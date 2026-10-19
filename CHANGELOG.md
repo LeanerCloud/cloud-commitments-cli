@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `configure-azure` and `configure-gcp` now store credentials in the secret whose
+  name matches exactly instead of the first prefix match from Secrets Manager
+  (which could be `<name>-old`), and fail when two secrets share the name (#1613).
 - The RDS engine-version scan now stops on cancellation and fails with an error
   naming the region after 200 pages of `DescribeDBInstances` instead of paging
   without bound (#1613).

@@ -121,13 +121,9 @@ func storeGCPCredentials(ctx context.Context, store SecretsStore, stackName, cre
 	// Build expected secret name pattern
 	secretName := fmt.Sprintf("%s-GCPCredentials", stackName)
 
-	// Try to find the actual secret ARN by listing secrets
-	arns, err := store.ListSecrets(ctx, secretName)
-
-	// Use the ARN if found, otherwise use the name (will fail if secret doesn't exist)
-	secretID := secretName
-	if err == nil && len(arns) > 0 {
-		secretID = arns[0]
+	secretID, err := resolveSecretID(ctx, store, secretName)
+	if err != nil {
+		return err
 	}
 
 	// Store credentials in Secrets Manager (using the original JSON format)
