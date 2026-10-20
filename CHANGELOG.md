@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `archera-comparison` command: a read-only, default-off comparison of an
   Archera commitment plan (table or JSON). See `docs/cli/archera-comparison.md`
   (#2156).
+- `--ri-account-scope` flag (`linked` default, `payer`) for Reserved Instance
+  recommendations, mirroring `--sp-account-scope` (#2181).
 
 ### Fixed
 
@@ -17,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `--min-count` floor no longer drives the tally negative (which panicked in
   `DropSummary.Add`), and removed zero-Count entries are now counted and named
   (#1742).
+- `--target-coverage` RDS recommendations now report a `ProjectedCoverage` that
+  matches the final count after `--max-instances`, `--count-override` or the
+  duplicate-RI check lowered it, instead of the pre-cap family value (#2214).
 - `--max-instances` and `--min-count` no longer apply to Savings Plans, whose
   Count of 1 is not an instance count: a Savings Plan neither uses up the
   instance cap nor is dropped by the floor (#1613).

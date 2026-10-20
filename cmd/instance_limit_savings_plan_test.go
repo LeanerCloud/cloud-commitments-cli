@@ -101,7 +101,7 @@ func assertSameRelativeOrder(t *testing.T, in, got []common.Recommendation) {
 // scoreLimitAndDisplay hands MinCount to scorer.Score, which must exempt
 // Savings Plans (Count 1 is a placeholder) at the pinned library version.
 func TestScoreLimitAndDisplay_MinCountKeepsSavingsPlan(t *testing.T) {
-	result := scoreLimitAndDisplay([]common.Recommendation{mkSP(), mkRI("a", 3)}, Config{MinCount: 2}, nil)
+	result := scoreLimitAndDisplay([]common.Recommendation{mkSP(), mkRI("a", 3)}, Config{MinCount: 2}, nil, nil)
 
 	types := make([]common.CommitmentType, 0, len(result.Passed))
 	for _, r := range result.Passed {
