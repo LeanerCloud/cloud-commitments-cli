@@ -113,7 +113,7 @@ linters:
       # Suppressed per-file rather than per-line so #nosec G204 can lead the comment.
       - linters:
           - noctx
-        path: (cmd/configure_gcp|cmd/configure_azure)\.go
+        path: cmd/configure_(gcp|azure)(_exec|_setup)?\.go
       # noctx: http.Get and net.Listen in test helpers appropriately use the
       # background context; threading a test context through every helper would
       # add noise without improving test correctness.
