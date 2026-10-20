@@ -78,7 +78,7 @@
 ^cmd/multi_service(_helpers)?\.go:[0-9]+:[[:space:]]*AppLogger\.Printf\("(\\n)?(━)+\\n"\)$
 ^cmd/configure_gcp_test\.go:[0-9]+:// --- addMemberToPolicyBinding -+$
 ^cmd/configure_test\.go:[0-9]+:[[:space:]]*assert\.Equal\(t, "-----BEGIN PRIVAT[E] KEY-----\\n\.\.\.", creds\.PrivateKey\)$
-^cmd/configure_test\.go:[0-9]+:[[:space:]]*"private_key": "-----BEGIN PRIVAT[E] KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----\\n",$
+^cmd/configure(_gcp_store)?_test\.go:[0-9]+:[[:space:]]*"private_key": "-----BEGIN PRIVAT[E] KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----\\n",$
 ^cmd/configure_gcp_test\.go:[0-9]+:[[:space:]]*keyMaterial := \[\]byte\(`\{"type":"service_account","project_id":"proj","client_email":"sa@proj\.iam\.gserviceaccount\.com","private_key":"-----BEGIN PRIVAT[E] KEY-----\\nx\\n-----END PRIVATE KEY-----\\n"\}`\)$
 
 # Synthetic 12-digit account-ID fixtures (sequential or repeated-digit
