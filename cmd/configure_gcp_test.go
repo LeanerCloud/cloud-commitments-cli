@@ -73,10 +73,10 @@ func TestAddMemberToPolicyBinding_CreatesMissingBinding(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, changed, "adding a member to an absent role must create the binding and report a change")
-	require.Len(t, policy.Bindings, 2)
-	newBinding := policy.Bindings[1]
-	assert.Equal(t, "roles/billing.projectManager", newBinding.Role)
-	assert.Equal(t, []string{member}, newBinding.Members)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{"user:existing@example.com"}},
+		{Role: "roles/billing.projectManager", Members: []string{member}},
+	}, policy.Bindings)
 }
 
 // TestAddMemberToPolicyBinding_PreservesConditionalBindings is the regression
@@ -196,8 +196,7 @@ func TestAddMemberToPolicyBinding_OnlyConditionalAccessErrors(t *testing.T) {
 
 	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "has only conditional access to roles/viewer")
+	require.EqualError(t, err, member+" has only conditional access to roles/viewer; review the existing IAM condition before granting unconditional access")
 	assert.False(t, changed)
 	assert.Equal(t, []*cloudresourcemanager.Binding{
 		{Role: "roles/viewer", Members: []string{member}, Condition: cond},
@@ -244,6 +243,30 @@ func TestAddMemberToPolicyBinding_UnconditionalAmongConditional(t *testing.T) {
 	assert.Equal(t, []*cloudresourcemanager.Binding{
 		{Role: "roles/viewer", Members: []string{"user:c1@example.com"}, Condition: cond1},
 		{Role: "roles/viewer", Members: []string{member}},
+	}, policy.Bindings)
+}
+
+// TestAddMemberToPolicyBinding_ConditionalThenUnconditionalIsNoOp verifies a
+// member already holding the role unconditionally is a no-op without error even
+// when it also appears in an earlier conditional binding of the same role.
+func TestAddMemberToPolicyBinding_ConditionalThenUnconditionalIsNoOp(t *testing.T) {
+	t.Parallel()
+	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
+	cond := &cloudresourcemanager.Expr{Title: "temp", Expression: `request.time < timestamp("2030-01-01T00:00:00Z")`}
+	policy := &cloudresourcemanager.Policy{
+		Bindings: []*cloudresourcemanager.Binding{
+			{Role: "roles/viewer", Members: []string{member}, Condition: cond},
+			{Role: "roles/viewer", Members: []string{"user:u@example.com", member}},
+		},
+	}
+
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
+
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{member}, Condition: cond},
+		{Role: "roles/viewer", Members: []string{"user:u@example.com", member}},
 	}, policy.Bindings)
 }
 
