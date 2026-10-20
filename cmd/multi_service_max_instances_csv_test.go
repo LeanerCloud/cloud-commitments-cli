@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
@@ -171,4 +172,131 @@ rds,us-east-1,db.t3.medium,postgres,6,100.00,1yr,all-upfront,123456789012
 	assert.Equal(t, 6, got[0].Count)
 	assert.Contains(t, out, "--min-count dropped")
 	assert.Contains(t, out, "db.t3.small")
+}
+
+// TestRunToolFromCSVEnforcesMinCountAndCap drives the guards end to end
+// through the real --input-csv entry point and asserts on the purchase report,
+// in both directions: the guards bind when they should, and a legitimate run
+// under the same flags still purchases every row at its full count.
+func TestRunToolFromCSVEnforcesMinCountAndCap(t *testing.T) {
+	origCfg := toolCfg
+	t.Cleanup(func() { toolCfg = origCfg })
+	isolateAWSEnv(t)
+
+	// Worst-value row first, so file order and savings order disagree.
+	csvPath := writeTestRecommendationsCSV(t, csvFixtureHeader+
+		`rds,us-east-1,db.t3.small,postgres,6,10.00,1yr,all-upfront,123456789012
+rds,us-east-1,db.t3.medium,postgres,6,500.00,1yr,all-upfront,123456789012
+rds,us-east-1,db.t3.large,postgres,6,100.00,1yr,all-upfront,123456789012
+`)
+
+	tests := []struct {
+		name         string
+		wantRows     []string
+		maxInstances int32
+		minCount     int
+	}{
+		{
+			// Budget 10 across rows of 6: the best row takes 6, the next is
+			// truncated to 4, and 4 is under the floor, so it is dropped.
+			// A file-ordered cap would instead buy db.t3.small at 6.
+			name:         "cap and floor bind",
+			maxInstances: 10,
+			minCount:     5,
+			wantRows:     []string{"db.t3.medium@6"},
+		},
+		{
+			// Same floor, cap above the natural total: nothing is dropped and
+			// every row is purchased at its CSV count. A guard that
+			// over-blocks is as wrong as one that never fires.
+			name:         "legitimate run purchases every row",
+			maxInstances: 100,
+			minCount:     5,
+			wantRows:     []string{"db.t3.small@6", "db.t3.medium@6", "db.t3.large@6"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reportPath := filepath.Join(t.TempDir(), "report.csv")
+			toolCfg.CSVInput = csvPath
+			toolCfg.CSVOutput = reportPath
+			toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
+			toolCfg.ActualPurchase = false
+			toolCfg.Coverage = 100.0
+			toolCfg.TargetCoverage = 0
+			toolCfg.OverrideCount = 0
+			toolCfg.MaxInstances = tt.maxInstances
+			toolCfg.MinCount = tt.minCount
+
+			require.NoError(t, runToolFromCSV(context.Background(), toolCfg))
+
+			header, rows := readPurchaseReport(t, reportPath)
+			assert.ElementsMatch(t, tt.wantRows, reportRowPairs(t, header, rows))
+		})
+	}
+}
+
+// reportRowPairs pairs each purchase-report row's ResourceType with its Count.
+// Asserting the two columns independently would pass a result that put the
+// right counts against the wrong rows, which is precisely what a wrong
+// selection order produces.
+func reportRowPairs(t *testing.T, header []string, rows [][]string) []string {
+	t.Helper()
+	types := reportColumn(t, header, rows, "ResourceType")
+	counts := reportColumn(t, header, rows, "Count")
+	require.Len(t, counts, len(types))
+
+	pairs := make([]string, 0, len(types))
+	for i := range types {
+		pairs = append(pairs, types[i]+"@"+counts[i])
+	}
+	return pairs
+}
+
+// TestCSVCapRanksBySavingsPerInstance pins the ranking key the cap consumes.
+//
+// --max-instances is a budget in instances, so the rows worth keeping are the
+// ones returning the most savings per instance bought. Ranking on the
+// EstimatedSavings column directly ranks a whole-row dollar total against a
+// per-instance budget: the fixture's bulk row is larger in total ($600) and
+// worse per instance ($6) than the rich row ($500 total, $83 each), so a
+// total-ranked cap spends the entire 10-instance budget on bulk for about $60
+// of real value and drops rich outright.
+//
+// Every earlier fixture in this file uses equal counts, where ranking by total
+// and ranking by rate are indistinguishable. The counts here are deliberately
+// unequal, which is the only way to tell the two rules apart.
+func TestCSVCapRanksBySavingsPerInstance(t *testing.T) {
+	isolateAWSEnv(t)
+	const maxInstances = 10
+
+	recs := csvRecsFrom(t, `rds,us-east-1,db.bulk.large,postgres,100,600.00,1yr,all-upfront,123456789012
+rds,us-east-1,db.rich.large,postgres,6,500.00,1yr,all-upfront,123456789012
+`)
+
+	var (
+		got []common.Recommendation
+		err error
+	)
+	out := captureAppOutput(t, func() {
+		got, err = filterAndAdjustRecommendations(context.Background(), recs, 100.0, Config{MaxInstances: maxInstances})
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, maxInstances, CalculateTotalInstances(got),
+		"the cap total is respected by both the right and the wrong ranking, and is asserted only to keep the fixture honest")
+
+	// The substance: ORDER, and the count each row is bought at. The
+	// best-value row must be taken whole before the bulk row gets the
+	// remainder.
+	require.Len(t, got, 2)
+	assert.Equal(t, "db.rich.large", got[0].ResourceType,
+		"the budget must go to the highest savings-per-instance row first; got %s", got[0].ResourceType)
+	assert.Equal(t, 6, got[0].Count)
+	assert.Equal(t, "db.bulk.large", got[1].ResourceType)
+	assert.Equal(t, maxInstances-6, got[1].Count, "the bulk row takes only the remaining budget")
+
+	assert.Contains(t, out, "savings-per-instance",
+		"the cap must name the ranking rule it applied, not claim a savings percentage a CSV row does not carry")
 }
