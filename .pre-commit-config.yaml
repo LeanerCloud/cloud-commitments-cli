@@ -48,7 +48,7 @@ repos:
       - id: detect-private-key
         name: Detect private keys
         # Only these test fixtures embed PEM-shaped dummy keys; any other file is scanned.
-        exclude: '^(cmd/configure_test\.go|cmd/configure_gcp_test\.go)$'
+        exclude: '^(cmd/configure_test\.go|cmd/configure_gcp_test\.go|cmd/configure_gcp_store_test\.go)$'
       - id: check-case-conflict
         name: Check for case conflicts
 
