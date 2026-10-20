@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -114,4 +115,14 @@ func TestAWSSecretsStore_ListSecretsHonorsCanceledContext(t *testing.T) {
 	fake := &fakeSecretsClient{loop: true}
 	_, err := (&AWSSecretsStore{client: fake}).ListSecrets(ctx, wantedName)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestResolveSecretID_ListErrorFails(t *testing.T) {
+	m := NewMockSecretsStore()
+	m.listSecretsFunc = func(context.Context, string) ([]string, error) { return nil, errors.New("AccessDenied") }
+	_, err := resolveSecretID(context.Background(), m, wantedName)
+	require.ErrorContains(t, err, "AccessDenied")
+	creds := AzureCredentials{TenantID: testTenantID, ClientID: testSPAppID, ClientSecret: testSPSecret, SubscriptionID: testSubID}
+	require.Error(t, storeAzureCredentials(context.Background(), m, "cudly", creds))
+	assert.Empty(t, m.updatedSecrets)
 }

@@ -93,12 +93,13 @@ const secretARNSuffixLen = 7
 // resolveSecretID returns the ARN of the secret named exactly name. The
 // ListSecrets name filter is a prefix match with unspecified order, so
 // "<name>" also matches "<name>-old"; only ARNs whose secret name equals name
-// count. With no exact match (or a failed listing) it returns name itself, so
-// UpdateSecret reports a missing secret; more than one exact match is an error.
+// count. With no exact match from a successful listing it returns name itself,
+// so UpdateSecret reports a missing secret; a failed listing and more than one
+// exact match are errors, so a denied lookup cannot pass as success.
 func resolveSecretID(ctx context.Context, store SecretsStore, name string) (string, error) {
 	arns, err := store.ListSecrets(ctx, name)
 	if err != nil {
-		return name, nil
+		return "", fmt.Errorf("listing secrets named %q: %w", name, err)
 	}
 	var exact []string
 	for _, arn := range arns {
