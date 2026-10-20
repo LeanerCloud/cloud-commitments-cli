@@ -10,10 +10,12 @@ import (
 
 // csvDetailColumns are the report columns that carry the fields of a
 // recommendation's polymorphic Details that Engine/Deployment cannot: Savings
-// Plan identity and EC2 tenancy and scope. They are appended after the
-// original columns so existing readers, which look columns up by name, keep
-// working. The writer and csvDetails below must stay in step.
-var csvDetailColumns = []string{"PlanType", "HourlyCommitment", "InstanceFamily", "OfferingID", "DetailsRegion", "Tenancy", "Scope"}
+// Plan identity and EC2 tenancy, scope and Availability Zone. They are
+// appended after the original columns so existing readers, which look columns
+// up by name, keep working. The writer and csvDetails below must stay in step.
+// AvailabilityZone is set only for zonal EC2 rows: the library buys a zonal RI
+// in that AZ and refuses one without it (#2174).
+var csvDetailColumns = []string{"PlanType", "HourlyCommitment", "InstanceFamily", "OfferingID", "DetailsRegion", "Tenancy", "Scope", "AvailabilityZone"}
 
 // detailCells renders rec.Details for csvDetailColumns, in that order.
 func detailCells(rec common.Recommendation) []string {
@@ -29,10 +31,10 @@ func detailCells(rec common.Recommendation) []string {
 		}
 	case *common.ComputeDetails:
 		if d != nil {
-			cells[5], cells[6] = d.Tenancy, d.Scope
+			cells[5], cells[6], cells[7] = d.Tenancy, d.Scope, d.AvailabilityZone
 		}
 	case common.ComputeDetails:
-		cells[5], cells[6] = d.Tenancy, d.Scope
+		cells[5], cells[6], cells[7] = d.Tenancy, d.Scope, d.AvailabilityZone
 	}
 	return cells
 }
@@ -75,6 +77,10 @@ func csvDetails(rec common.Recommendation, record []string, colIdx map[string]in
 			Platform:     engine,
 			Tenancy:      getCSVField(record, colIdx, "Tenancy"),
 			Scope:        getCSVField(record, colIdx, "Scope"),
+			// Blank for regional rows and for CSVs written before the column
+			// existed; validatePurchasePreconditions refuses a zonal row
+			// without it, as the library does.
+			AvailabilityZone: getCSVField(record, colIdx, "AvailabilityZone"),
 		}, nil
 	}
 	return nil, nil

@@ -115,12 +115,38 @@ func validatePurchasePreconditions(rec common.Recommendation, region, callerAcco
 	case common.IsSavingsPlan(rec.Service):
 		return validateSavingsPlanPreconditions(rec)
 	case rec.Service == common.ServiceEC2:
-		d, ok := rec.Details.(*common.ComputeDetails)
-		if !ok || d == nil {
-			return fmt.Errorf("EC2 recommendation for %s has no compute details (platform, tenancy, scope)", rec.ResourceType)
+		return validateEC2Preconditions(rec)
+	}
+	return nil
+}
+
+func validateEC2Preconditions(rec common.Recommendation) error {
+	d, ok := rec.Details.(*common.ComputeDetails)
+	if !ok || d == nil {
+		return fmt.Errorf("EC2 recommendation for %s has no compute details (platform, tenancy, scope)", rec.ResourceType)
+	}
+	if d.Platform == "" || d.Tenancy == "" || d.Scope == "" {
+		return fmt.Errorf("EC2 recommendation for %s is missing platform, tenancy or scope (got %q, %q, %q)", rec.ResourceType, d.Platform, d.Tenancy, d.Scope)
+	}
+	return validateEC2AvailabilityZone(rec.ResourceType, d)
+}
+
+// validateEC2AvailabilityZone mirrors the library's zonal check
+// (buildEC2OfferingQuery): a zonal RI is bought in the recommendation's AZ, so
+// a zonal rec without one is refused, and a regional rec that names an AZ is
+// contradictory. Scope spellings match the library's parseEC2Scope. Without
+// this a dry run of a zonal CSV row with no AvailabilityZone reported success
+// while the real run refused it (#2174).
+func validateEC2AvailabilityZone(resourceType string, d *common.ComputeDetails) error {
+	az := strings.TrimSpace(d.AvailabilityZone)
+	switch strings.ToLower(d.Scope) {
+	case "availability-zone", "availability zone":
+		if az == "" {
+			return fmt.Errorf("EC2 recommendation for %s has zonal scope but no AvailabilityZone; a zonal RI is bought in a specific availability zone, so re-export the CSV with the AvailabilityZone column or re-fetch the recommendation", resourceType)
 		}
-		if d.Platform == "" || d.Tenancy == "" || d.Scope == "" {
-			return fmt.Errorf("EC2 recommendation for %s is missing platform, tenancy or scope (got %q, %q, %q)", rec.ResourceType, d.Platform, d.Tenancy, d.Scope)
+	case "region":
+		if az != "" {
+			return fmt.Errorf("EC2 recommendation for %s has regional scope but AvailabilityZone %q; a regional RI has no availability zone, so clear the AvailabilityZone or re-fetch the recommendation", resourceType, az)
 		}
 	}
 	return nil

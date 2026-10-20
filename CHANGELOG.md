@@ -56,6 +56,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
   `BreakEvenMonths` columns are now parsed strictly (an invalid value fails the
   load) even when the threshold flags are unset. `--max-instances` still ranks
   on savings per instance (#1819).
+- Zonal EC2 rows now keep their Availability Zone through the CSV report and
+  `--input-csv`: reports gain an `AvailabilityZone` column, appended after
+  `Scope` (blank for regional rows and other services). A dry run now refuses a
+  zonal EC2 row without an AZ, or a regional row that names one, the same way
+  the real run does, instead of reporting success. A zonal row from a CSV
+  written before this column existed is refused until its AZ is added (#2174).
 - Recommendations with no account ID or name are now reported in the drop summary
   when an account filter (`--include-accounts` or `--exclude-accounts`) removes
   them (#1613).
