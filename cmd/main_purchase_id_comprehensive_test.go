@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGeneratePurchaseIDComprehensiveMoved(t *testing.T) {
+func TestGeneratePurchaseIDComprehensive(t *testing.T) {
 	// Use a test coverage value
 	testCoverage := 75.0
 
