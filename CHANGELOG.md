@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `--max-instances` drop summary: a zero-Count recommendation swept out by the
+  `--min-count` floor no longer drives the tally negative (which panicked in
+  `DropSummary.Add`), and removed zero-Count entries are now counted and named
+  (#1742).
 - `--max-instances` and `--min-count` no longer apply to Savings Plans, whose
   Count of 1 is not an instance count: a Savings Plan neither uses up the
   instance cap nor is dropped by the floor (#1613).
