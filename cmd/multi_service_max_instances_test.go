@@ -103,7 +103,7 @@ func TestMaxInstancesCapsWholeRunAcrossServicesAndRegions(t *testing.T) {
 	require.Equal(t, naturalTotal, CalculateTotalInstances(allRecs),
 		"fetch stage must not apply the cap per region")
 
-	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops)
+	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops, nil)
 
 	total := CalculateTotalInstances(scored.Passed)
 	assert.LessOrEqual(t, total, maxInstances,
@@ -176,7 +176,7 @@ func TestMaxInstancesKeepsHighestSavingsNotFirstFetched(t *testing.T) {
 	awsStub.requireDuplicateChecks(t, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 	require.Len(t, allRecs, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 
-	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops)
+	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops, nil)
 
 	// The total is respected under either placement, so it proves nothing on
 	// its own here. It is asserted only to keep the fixture honest.
@@ -246,7 +246,7 @@ func TestMaxInstancesNeverPurchasesBelowMinCount(t *testing.T) {
 	awsStub.requireDuplicateChecks(t, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 	require.Len(t, allRecs, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 
-	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops)
+	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops, nil)
 
 	// The property under test. Every purchased recommendation honors the
 	// floor; none is bought at a truncated count below it.
@@ -333,7 +333,7 @@ func TestMaxInstancesNotAppliedWhenUnset(t *testing.T) {
 		maxInstancesFixtureServices, engineVersionData{}, toolCfg, nil)
 	awsStub.requireDuplicateChecks(t, len(maxInstancesFixtureServices)*len(maxInstancesFixtureRegions))
 
-	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops)
+	scored := scoreLimitAndDisplay(allRecs, toolCfg, drops, nil)
 
 	pairs := len(maxInstancesFixtureServices) * len(maxInstancesFixtureRegions)
 	assert.Len(t, scored.Passed, pairs)
