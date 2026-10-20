@@ -203,3 +203,181 @@ func TestAdjustRecommendationForExcludedVersions_ScalesMoneyWithCount(t *testing
 	}
 	assert.InDelta(t, 30.0, monthly, 0.001, "the input's pointer is not mutated")
 }
+
+func TestAdjustRecommendationForExcludedVersions(t *testing.T) {
+	tests := []struct {
+		versionInfo      map[string]MajorEngineVersionInfo
+		instanceVersions map[string][]InstanceEngineVersion
+		name             string
+		recommendation   common.Recommendation
+		expectedCount    int
+		expectedAdjusted bool
+	}{
+		{
+			name: "No running instances - recommendation unchanged",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				ResourceType: "db.r5.large",
+				Count:        10,
+				Details: &common.DatabaseDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo:      createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{},
+			expectedCount:    10,
+			expectedAdjusted: false,
+		},
+		{
+			name: "Exclude 1 MySQL 5.7 instance in extended support",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				ResourceType: "db.r5.large",
+				Count:        10,
+				Details: &common.DatabaseDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+					{Engine: "aurora-mysql", EngineVersion: "8.0.mysql_aurora.3.04.0", InstanceClass: "db.r5.large", Region: "us-east-1"},
+					{Engine: "aurora-mysql", EngineVersion: "8.0.mysql_aurora.3.04.0", InstanceClass: "db.r5.large", Region: "us-east-1"},
+				},
+			},
+			expectedCount:    9, // 10 - 1 MySQL 5.7 instance in extended support
+			expectedAdjusted: true,
+		},
+		{
+			name: "Exclude all MySQL 5.7 instances in extended support",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "eu-west-2",
+				ResourceType: "db.t3.small",
+				Count:        2,
+				Details: &common.DatabaseDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.t3.small": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.2", InstanceClass: "db.t3.small", Region: "eu-west-2"},
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.2", InstanceClass: "db.t3.small", Region: "eu-west-2"},
+				},
+			},
+			expectedCount:    0, // All excluded (both in extended support)
+			expectedAdjusted: true,
+		},
+		{
+			name: "Different engine - no adjustment",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				ResourceType: "db.r5.large",
+				Count:        5,
+				Details: &common.DatabaseDetails{
+					Engine: "Aurora PostgreSQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "us-east-1"},
+				},
+			},
+			expectedCount:    5, // Different engine, no adjustment
+			expectedAdjusted: false,
+		},
+		{
+			name: "Different region - no adjustment",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-east-1",
+				ResourceType: "db.r5.large",
+				Count:        5,
+				Details: &common.DatabaseDetails{
+					Engine: "Aurora MySQL",
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.11.1", InstanceClass: "db.r5.large", Region: "eu-west-2"},
+				},
+			},
+			expectedCount:    5, // Different region, no adjustment
+			expectedAdjusted: false,
+		},
+		{
+			name: "MySQL (not Aurora) with standard mysql engine name",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "eu-west-2",
+				ResourceType: "db.r5.4xlarge",
+				Count:        8,
+				Details: &common.DatabaseDetails{
+					Engine: "MySQL",
+				},
+			},
+			versionInfo: map[string]MajorEngineVersionInfo{
+				"mysql:5.7": {
+					Engine:             "mysql",
+					MajorEngineVersion: "5.7",
+					SupportedEngineLifecycles: []EngineLifecycleInfo{
+						{
+							LifecycleSupportName:      string(rdstypes.LifecycleSupportNameOpenSourceRdsExtendedSupport),
+							LifecycleSupportStartDate: time.Now().AddDate(0, -6, 0),
+							LifecycleSupportEndDate:   time.Now().AddDate(3, 0, 0),
+						},
+					},
+				},
+			},
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r5.4xlarge": {
+					{Engine: "mysql", EngineVersion: "5.7.44", InstanceClass: "db.r5.4xlarge", Region: "eu-west-2"},
+					{Engine: "mysql", EngineVersion: "8.0.35", InstanceClass: "db.r5.4xlarge", Region: "eu-west-2"},
+				},
+			},
+			expectedCount:    7, // 8 - 1 MySQL 5.7 instance in extended support
+			expectedAdjusted: true,
+		},
+		{
+			name: "Engine name normalization - spaces vs hyphens",
+			recommendation: common.Recommendation{
+				Service:      common.ServiceRDS,
+				Region:       "us-west-2",
+				ResourceType: "db.r6g.large",
+				Count:        3,
+				Details: &common.DatabaseDetails{
+					Engine: "Aurora MySQL", // Space in name
+				},
+			},
+			versionInfo: createTestVersionInfo(),
+			instanceVersions: map[string][]InstanceEngineVersion{
+				"db.r6g.large": {
+					{Engine: "aurora-mysql", EngineVersion: "5.7.mysql_aurora.2.12.0", InstanceClass: "db.r6g.large", Region: "us-west-2"}, // Hyphen in name
+				},
+			},
+			expectedCount:    2, // Should match despite space vs hyphen
+			expectedAdjusted: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := adjustRecommendationForExcludedVersions(tt.recommendation, tt.instanceVersions, tt.versionInfo)
+
+			assert.Equal(t, tt.expectedCount, result.Count, "Instance count mismatch")
+
+			if tt.expectedAdjusted {
+				assert.NotEqual(t, tt.recommendation.Count, result.Count, "Count should have been adjusted")
+			} else {
+				assert.Equal(t, tt.recommendation.Count, result.Count, "Count should not have been adjusted")
+			}
+		})
+	}
+}
