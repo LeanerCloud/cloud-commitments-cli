@@ -163,11 +163,13 @@ func requireRankingSignal(recs []common.Recommendation, cfg Config) error {
 		return nil
 	}
 
+	// Savings Plans are exempt from the cap, so they are never ranked.
+	others := withoutSavingsPlans(recs)
 	unrankable := make([]string, 0)
-	for i := range recs {
-		if recs[i].EstimatedSavings <= 0 {
+	for i := range others {
+		if others[i].EstimatedSavings <= 0 {
 			unrankable = append(unrankable, fmt.Sprintf("%s %s %s",
-				recs[i].Service, recs[i].Region, recs[i].ResourceType))
+				others[i].Service, others[i].Region, others[i].ResourceType))
 		}
 	}
 	if len(unrankable) == 0 {
@@ -184,5 +186,5 @@ func requireRankingSignal(recs []common.Recommendation, cfg Config) error {
 		"--max-instances=%d has to choose which of %d recommendations to buy, but %d row(s) of %s carry no usable EstimatedSavings value: %s%s. "+
 			"A blank or missing EstimatedSavings cell is indistinguishable from $0 of savings, so capping on it would pick by instance-type name rather than by value. "+
 			"Populate EstimatedSavings for every row, or drop --max-instances and cap the file itself",
-		cfg.MaxInstances, len(recs), len(unrankable), cfg.CSVInput, strings.Join(named, ", "), suffix)
+		cfg.MaxInstances, len(others), len(unrankable), cfg.CSVInput, strings.Join(named, ", "), suffix)
 }
