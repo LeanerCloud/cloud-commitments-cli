@@ -78,14 +78,14 @@
 ^cmd/multi_service(_helpers)?\.go:[0-9]+:[[:space:]]*AppLogger\.Printf\("(\\n)?(━)+\\n"\)$
 ^cmd/configure_gcp_test\.go:[0-9]+:// --- addMemberToPolicyBinding -+$
 ^cmd/configure_test\.go:[0-9]+:[[:space:]]*assert\.Equal\(t, "-----BEGIN PRIVAT[E] KEY-----\\n\.\.\.", creds\.PrivateKey\)$
-^cmd/configure(_gcp_store)?_test\.go:[0-9]+:[[:space:]]*"private_key": "-----BEGIN PRIVAT[E] KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----\\n",$
+^cmd/configure_gcp_store_test\.go:[0-9]+:[[:space:]]*"private_key": "-----BEGIN PRIVAT[E] KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----\\n",$
 ^cmd/configure_gcp_test\.go:[0-9]+:[[:space:]]*keyMaterial := \[\]byte\(`\{"type":"service_account","project_id":"proj","client_email":"sa@proj\.iam\.gserviceaccount\.com","private_key":"-----BEGIN PRIVAT[E] KEY-----\\nx\\n-----END PRIVATE KEY-----\\n"\}`\)$
 
 # Synthetic 12-digit account-ID fixtures (sequential or repeated-digit
 # blocks, none a real account) that the AWS account-ID detector flags in Go
 # test tables. Each entry pins the path, the placeholder digits and the
 # whole line, so anything else on the line is still scanned.
-^cmd/(helpers_test|multi_service_filters_test|multi_service_test|multi_service_csv_report_test|multi_service_purchase_loop_test|helpers_account_alias_test|multi_service_should_include_test)\.go:[0-9]+:[[:space:]]*(accountID|Account):[[:space:]]*"(123456789012|999888777666|111222333444)",$
-^cmd/multi_service_(helpers|account_names)_test\.go:[0-9]+:[[:space:]]*\{Account: "(123456789012|210987654321|111222333444|555666777888)", AccountName: ""\},( // Same account - should use cache)?$
+^cmd/(multi_service_filters_test|multi_service_csv_report_test|helpers_account_alias_test|multi_service_should_include_test)\.go:[0-9]+:[[:space:]]*(accountID|Account):[[:space:]]*"(123456789012|999888777666|111222333444)",$
+^cmd/multi_service_account_names_test\.go:[0-9]+:[[:space:]]*\{Account: "(123456789012|210987654321|111222333444|555666777888)", AccountName: ""\},( // Same account - should use cache)?$
 ^cmd/savings_plan_purchase_test\.go:[0-9]+:[[:space:]]*(Service: common\.ServiceSavingsPlansCompute, )?(Count: 1, )?Account: "11111111111[1]", Term: "1yr", PaymentOption: "no-upfront",$
 ^cmd/savings_plan_purchase_test\.go:[0-9]+:[[:space:]]*"account": func\(r \*common\.Recommendation\) \{ r\.Account = "22222222222[2]" \},$
