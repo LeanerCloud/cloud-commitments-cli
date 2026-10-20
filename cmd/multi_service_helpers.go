@@ -484,6 +484,7 @@ func fetchRecommendationsForRegion(
 		IncludeSPTypes: cfg.IncludeSPTypes,
 		ExcludeSPTypes: cfg.ExcludeSPTypes,
 		SPAccountScope: cfg.SPAccountScope,
+		RIAccountScope: cfg.RIAccountScope,
 	}
 	// For Savings Plans, region is only the endpoint the account-level call is
 	// signed in (spAPIRegion), not a filter. The provider folds params.Region

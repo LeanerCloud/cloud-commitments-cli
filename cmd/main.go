@@ -49,6 +49,7 @@ type Config struct {
 	PaymentOption     string
 	CSVOutput         string
 	SPAccountScope    string
+	RIAccountScope    string
 	// RecLookbackPeriod controls the LookbackPeriodInDays passed to
 	// GetReservationPurchaseRecommendation. Valid values: "7d", "30d", "60d"
 	// (recommendations.DefaultRecLookbackPeriod is the shared default).
@@ -143,6 +144,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&toolCfg.IncludeSPTypes, "include-sp-types", []string{}, "Only include these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
 	rootCmd.Flags().StringSliceVar(&toolCfg.ExcludeSPTypes, "exclude-sp-types", []string{}, "Exclude these Savings Plan types (comma-separated: Compute, EC2Instance, SageMaker, Database)")
 
+	rootCmd.Flags().StringVar(&toolCfg.RIAccountScope, "ri-account-scope", "linked", "Cost Explorer account scope for Reserved Instance recommendations: linked or payer (payer applies to a management account)")
 	rootCmd.Flags().StringVar(&toolCfg.SPAccountScope, "sp-account-scope", "linked", "Cost Explorer account scope for Savings Plan recommendations: linked or payer (payer applies to a management account)")
 
 	// Purchase pipeline flags

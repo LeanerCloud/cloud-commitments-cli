@@ -75,6 +75,7 @@ All flags belong to the root command unless noted otherwise.
 | `--exclude-accounts` | (none) | Exclude recommendations for these accounts, matched exactly (case-insensitive) on account name or ID. A value that only partly matches account names stops the run. |
 | `--include-sp-types` | (all) | Only include these Savings Plan types: `Compute`, `EC2Instance`, `SageMaker`, `Database`. |
 | `--exclude-sp-types` | (none) | Exclude these Savings Plan types. |
+| `--ri-account-scope` | `linked` | Cost Explorer account scope for Reserved Instance recommendations: `linked` or `payer`. A management account may only get recommendations at `payer` scope. |
 | `--sp-account-scope` | `linked` | Cost Explorer account scope for Savings Plan recommendations: `linked` or `payer`. A management account may only get recommendations at `payer` scope. |
 | `--include-extended-support` | `false` | By default, instances running engine versions in AWS Extended Support are excluded because Extended Support surcharges can erase RI savings. Pass this flag to include them. |
 

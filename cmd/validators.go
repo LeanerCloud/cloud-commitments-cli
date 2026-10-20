@@ -43,7 +43,10 @@ func validateFlags(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	return validateSPAccountScope()
+	if err := validateSPAccountScope(); err != nil {
+		return err
+	}
+	return validateRIAccountScope()
 }
 
 // validateSPAccountScope validates --sp-account-scope. Empty means linked.
@@ -53,6 +56,15 @@ func validateSPAccountScope() error {
 		return nil
 	}
 	return fmt.Errorf("invalid sp-account-scope %q: must be linked or payer", toolCfg.SPAccountScope)
+}
+
+// validateRIAccountScope validates --ri-account-scope. Empty means linked.
+func validateRIAccountScope() error {
+	switch strings.ToLower(toolCfg.RIAccountScope) {
+	case "", "linked", "payer":
+		return nil
+	}
+	return fmt.Errorf("invalid ri-account-scope %q: must be linked or payer", toolCfg.RIAccountScope)
 }
 
 func validateServices(cmd *cobra.Command) error {
