@@ -497,26 +497,32 @@ func reportInstanceLimit(before, after []common.Recommendation, belowMinCount, t
 		maxInstances, len(before), totalBefore)
 	AppLogger.Printf("   Keeping the %s. The following are reduced or dropped:\n", rule)
 
+	// after is a prefix of before, so membership is positional: every entry past
+	// len(after) was removed, whatever its Count (a zero-Count entry equals its
+	// own "kept" count of 0 and must still be counted as removed).
 	reduced, dropped := 0, 0
 	for i := range before {
 		rec := before[i]
-		kept := 0
-		if i < len(after) {
-			kept = after[i].Count
-		}
-		switch {
-		case kept == rec.Count:
-			continue
-		case kept > 0:
-			reduced++
-			AppLogger.Printf("   • reduced: %s %s %s %d → %d instances\n", rec.Service, rec.Region, rec.ResourceType, rec.Count, kept)
-		default:
+		if i >= len(after) {
 			dropped++
 			AppLogger.Printf("   • dropped: %s %s %s (%d instances)\n", rec.Service, rec.Region, rec.ResourceType, rec.Count)
+			continue
+		}
+		if kept := after[i].Count; kept != rec.Count {
+			reduced++
+			AppLogger.Printf("   • reduced: %s %s %s %d → %d instances\n", rec.Service, rec.Region, rec.ResourceType, rec.Count, kept)
 		}
 	}
 
-	drops.Add(common.DropMaxInstances, dropped-belowMinCount)
+	// The floor only removes entries from the tail of what the cap kept, so
+	// they are a subset of the removed entries. DropSummary.Add panics on a
+	// negative count; surface the broken invariant with context instead.
+	budgetDropped := dropped - belowMinCount
+	if budgetDropped < 0 {
+		panic(fmt.Sprintf("reportInstanceLimit: %d recommendations attributed to --min-count-after-cap but only %d were removed (before=%d, after=%d)",
+			belowMinCount, dropped, len(before), len(after)))
+	}
+	drops.Add(common.DropMaxInstances, budgetDropped)
 	AppLogger.Printf("   Proceeding with %d instances across %d recommendations (%d reduced, %d dropped).\n",
 		CalculateTotalInstances(after), len(after), reduced, dropped)
 }
