@@ -75,7 +75,7 @@
 # bracketed letter in PRIVAT[E] for the same self-scan reason as above.
 ^(SECURITY\.md|\.github/workflows/README\.md):[0-9]+:\|[-| ]+\|$
 ^cmd/[a-z_]+\.go:[0-9]+:[[:space:]]*(fmt|AppLogger)\.Println\("-+"\)$
-^cmd/multi_service(_helpers|_csv_run)?\.go:[0-9]+:[[:space:]]*AppLogger\.Printf\("(\\n)?(━)+\\n"\)$
+^cmd/multi_service(_helpers|_csv_run|_fetch_all)?\.go:[0-9]+:[[:space:]]*AppLogger\.Printf\("(\\n)?(━)+\\n"\)$
 ^cmd/configure_gcp_test\.go:[0-9]+:// --- addMemberToPolicyBinding -+$
 ^cmd/configure_test\.go:[0-9]+:[[:space:]]*assert\.Equal\(t, "-----BEGIN PRIVAT[E] KEY-----\\n\.\.\.", creds\.PrivateKey\)$
 ^cmd/configure_gcp_store_test\.go:[0-9]+:[[:space:]]*"private_key": "-----BEGIN PRIVAT[E] KEY-----\\nMIIEvQIBADANBg\.\.\.\\n-----END PRIVATE KEY-----\\n",$
