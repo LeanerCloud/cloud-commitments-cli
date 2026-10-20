@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -146,4 +150,127 @@ func TestRunToolFromCSV_EmptyFile(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read CSV file")
 	assert.Contains(t, err.Error(), "failed to read CSV header")
+}
+
+func TestRunToolFromCSV_WithMaxInstances(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
+
+	// EstimatedSavings is populated because a binding --max-instances has to
+	// rank the rows it chooses between. A file without that column is refused
+	// rather than capped by name; that case is covered by
+	// TestCSVCapRefusesRowsWithoutARankingSignal.
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,EstimatedSavings,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,10,100.00,1yr,all-upfront,123456789012
+rds,us-east-1,db.t3.medium,mysql,10,200.00,1yr,all-upfront,123456789012
+rds,us-east-1,db.t3.large,postgres,10,300.00,1yr,all-upfront,123456789012
+`)
+
+	reportPath := filepath.Join(t.TempDir(), "report.csv")
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = reportPath
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
+	toolCfg.ActualPurchase = false
+	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.OverrideCount = 0
+	toolCfg.MaxInstances = 15 // Should limit total instances to 15
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
+
+	header, rows := readPurchaseReport(t, reportPath)
+	total := 0
+	for _, raw := range reportColumn(t, header, rows, "Count") {
+		n, convErr := strconv.Atoi(raw)
+		require.NoError(t, convErr)
+		total += n
+	}
+	assert.Positive(t, total, "some instances must survive the max-instances cap")
+	assert.LessOrEqual(t, total, 15, "purchased instance total must respect --max-instances")
+}
+
+func TestRunToolFromCSV_WithOverrideCount(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
+
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,10,1yr,all-upfront,123456789012
+rds,us-east-1,db.t3.medium,mysql,5,1yr,all-upfront,123456789012
+`)
+
+	reportPath := filepath.Join(t.TempDir(), "report.csv")
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = reportPath
+	toolCfg.AuditLog = filepath.Join(t.TempDir(), "audit.jsonl")
+	toolCfg.ActualPurchase = false
+	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.MaxInstances = 0
+	toolCfg.OverrideCount = 3 // Override each recommendation to count=3
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
+
+	header, rows := readPurchaseReport(t, reportPath)
+	counts := reportColumn(t, header, rows, "Count")
+	require.Len(t, counts, 2, "both recommendations must reach the purchase loop")
+	for _, raw := range counts {
+		assert.Equal(t, "3", raw, "--override-count must replace every recommendation count")
+	}
+}
+
+// TestRunToolFromCSV_WritesAuditRecordsOnDryRun reproduces #1609 through the
+// public --input-csv entry point: before the fix, processPurchaseLoop never
+// wrote an audit record at all, on a dry run or a real purchase. A dry run is
+// used here (rather than ActualPurchase=true with invalid credentials)
+// because #1941 made the duplicate check fail closed on a real purchase run:
+// with no valid AWS credentials the check now refuses the region before ever
+// reaching a purchase attempt, and writes no audit record at all by design
+// (see TestCheckDuplicates_ErrorOnPurchaseRun_DropsRecsRatherThanFallingBack)
+// -- so there is no way to drive an un-mocked real-purchase attempt through
+// this entry point in a test. A dry run still exercises the exact wiring
+// #1609 fixes (prepareCSVPurchaseRun's runID -> processPurchaseLoop ->
+// writePurchaseAuditRecord), since the duplicate check only warns and
+// continues on a dry run rather than refusing.
+// TestProcessPurchaseLoop_WritesAuditRecordForRealPurchase below covers the
+// "success"/"error" statuses a real purchase attempt gets audited with.
+func TestRunToolFromCSV_WritesAuditRecordsOnDryRun(t *testing.T) {
+	origCfg := toolCfg
+	defer func() { toolCfg = origCfg }()
+	isolateAWSEnv(t)
+
+	csvPath := writeTestRecommendationsCSV(t, `Service,Region,ResourceType,Engine,Count,Term,PaymentOption,Account
+rds,us-east-1,db.t3.small,postgres,2,1yr,all-upfront,111111111111
+`)
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+
+	toolCfg.CSVInput = csvPath
+	toolCfg.CSVOutput = filepath.Join(t.TempDir(), "report.csv")
+	toolCfg.AuditLog = auditPath
+	toolCfg.ActualPurchase = false
+	toolCfg.Coverage = 100.0
+	toolCfg.TargetCoverage = 0
+	toolCfg.MaxInstances = 0
+	toolCfg.OverrideCount = 0
+
+	err := runToolFromCSV(context.Background(), toolCfg)
+	require.NoError(t, err)
+
+	data, readErr := os.ReadFile(auditPath) // #nosec G304 -- test-owned tempdir path
+	require.NoError(t, readErr, "a purchase run through --input-csv must write an audit log")
+	require.NotEmpty(t, data, "the audit log must not be empty -- an empty file would make the next length check pass vacuously")
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.Len(t, lines, 1, "one audit record per recommendation")
+
+	var rec map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &rec))
+	assert.NotEmpty(t, rec["run_id"], "the audit record must carry a run ID grouping the CSV run")
+	assert.Equal(t, common.PurchaseSourceCLI, rec["source"])
+	assert.Equal(t, "db.t3.small", rec["resource_type"])
+	assert.Equal(t, true, rec["dry_run"])
+	assert.Equal(t, "skipped", rec["status"])
 }
