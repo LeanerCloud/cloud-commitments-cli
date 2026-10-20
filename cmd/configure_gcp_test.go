@@ -122,6 +122,131 @@ func TestAddMemberToPolicyBinding_PreservesConditionalBindings(t *testing.T) {
 		"the conditional binding's members must be untouched")
 }
 
+// TestAddMemberToPolicyBinding_EmptyPolicyCreatesBinding verifies an empty
+// policy with no bindings gets exactly one new binding holding only the
+// requested member.
+func TestAddMemberToPolicyBinding_EmptyPolicyCreatesBinding(t *testing.T) {
+	t.Parallel()
+	policy := &cloudresourcemanager.Policy{}
+	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
+
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
+
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{member}},
+	}, policy.Bindings)
+}
+
+// TestAddMemberToPolicyBinding_MultipleBindingsSameRole verifies that with
+// several unconditional bindings of one role the member is appended to the last
+// one, earlier ones and other roles stay untouched, and a member already present
+// in any of them is a no-op.
+func TestAddMemberToPolicyBinding_MultipleBindingsSameRole(t *testing.T) {
+	t.Parallel()
+	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
+	newPolicy := func() *cloudresourcemanager.Policy {
+		return &cloudresourcemanager.Policy{
+			Bindings: []*cloudresourcemanager.Binding{
+				{Role: "roles/viewer", Members: []string{"user:a@example.com"}},
+				{Role: "roles/editor", Members: []string{"user:e@example.com"}},
+				{Role: "roles/viewer", Members: []string{"user:b@example.com"}},
+			},
+		}
+	}
+
+	policy := newPolicy()
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{"user:a@example.com"}},
+		{Role: "roles/editor", Members: []string{"user:e@example.com"}},
+		{Role: "roles/viewer", Members: []string{"user:b@example.com", member}},
+	}, policy.Bindings)
+
+	// Member already in the first of the two bindings: no change anywhere.
+	policy = newPolicy()
+	policy.Bindings[0].Members = append(policy.Bindings[0].Members, member)
+	changed, err = addMemberToPolicyBinding(policy, member, "roles/viewer")
+	require.NoError(t, err)
+	require.False(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{"user:a@example.com", member}},
+		{Role: "roles/editor", Members: []string{"user:e@example.com"}},
+		{Role: "roles/viewer", Members: []string{"user:b@example.com"}},
+	}, policy.Bindings)
+}
+
+// TestAddMemberToPolicyBinding_OnlyConditionalAccessErrors verifies that a
+// member bound to the role only through a conditional binding is rejected with
+// an error instead of being silently granted unconditional access, and that the
+// policy is left unchanged.
+func TestAddMemberToPolicyBinding_OnlyConditionalAccessErrors(t *testing.T) {
+	t.Parallel()
+	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
+	cond := &cloudresourcemanager.Expr{Title: "temp", Expression: `request.time < timestamp("2030-01-01T00:00:00Z")`}
+	policy := &cloudresourcemanager.Policy{
+		Bindings: []*cloudresourcemanager.Binding{
+			{Role: "roles/viewer", Members: []string{member}, Condition: cond},
+			{Role: "roles/viewer", Members: []string{"user:other@example.com"}},
+		},
+	}
+
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "has only conditional access to roles/viewer")
+	assert.False(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{member}, Condition: cond},
+		{Role: "roles/viewer", Members: []string{"user:other@example.com"}},
+	}, policy.Bindings, "policy must not be modified on error")
+}
+
+// TestAddMemberToPolicyBinding_UnconditionalAmongConditional verifies the
+// member is appended to the unconditional binding of the role even when
+// conditional bindings of the same role surround it, and that a role with only
+// conditional bindings gets a new unconditional binding instead of widening one.
+func TestAddMemberToPolicyBinding_UnconditionalAmongConditional(t *testing.T) {
+	t.Parallel()
+	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
+	cond1 := &cloudresourcemanager.Expr{Title: "c1", Expression: `request.time < timestamp("2030-01-01T00:00:00Z")`}
+	cond2 := &cloudresourcemanager.Expr{Title: "c2", Expression: `resource.name.startsWith("projects/_/buckets/prod-")`}
+
+	policy := &cloudresourcemanager.Policy{
+		Version: 3,
+		Bindings: []*cloudresourcemanager.Binding{
+			{Role: "roles/viewer", Members: []string{"user:c1@example.com"}, Condition: cond1},
+			{Role: "roles/viewer", Members: []string{"user:u@example.com"}},
+			{Role: "roles/viewer", Members: []string{"user:c2@example.com"}, Condition: cond2},
+		},
+	}
+	changed, err := addMemberToPolicyBinding(policy, member, "roles/viewer")
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{"user:c1@example.com"}, Condition: cond1},
+		{Role: "roles/viewer", Members: []string{"user:u@example.com", member}},
+		{Role: "roles/viewer", Members: []string{"user:c2@example.com"}, Condition: cond2},
+	}, policy.Bindings)
+
+	policy = &cloudresourcemanager.Policy{
+		Version: 3,
+		Bindings: []*cloudresourcemanager.Binding{
+			{Role: "roles/viewer", Members: []string{"user:c1@example.com"}, Condition: cond1},
+		},
+	}
+	changed, err = addMemberToPolicyBinding(policy, member, "roles/viewer")
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Equal(t, []*cloudresourcemanager.Binding{
+		{Role: "roles/viewer", Members: []string{"user:c1@example.com"}, Condition: cond1},
+		{Role: "roles/viewer", Members: []string{member}},
+	}, policy.Bindings)
+}
+
 // --- writeServiceAccountKey (key-creation rollback) ---------------------------
 
 // mockGCPKeyProvisioner is a configurable gcpKeyProvisioner used to assert the
