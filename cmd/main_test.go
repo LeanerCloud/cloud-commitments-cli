@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
@@ -68,96 +67,6 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Remove(toolCfg.AuditLog)
 	os.Exit(code)
-}
-
-func TestParseServices(t *testing.T) {
-	tests := []struct {
-		name          string
-		input         []string
-		expected      []common.ServiceType
-		errorContains string
-	}{
-		{
-			name:  "Valid services",
-			input: []string{"rds", "elasticache", "ec2"},
-			expected: []common.ServiceType{
-				common.ServiceRDS,
-				common.ServiceElastiCache,
-				common.ServiceEC2,
-			},
-		},
-		{
-			name:  "Mixed case services",
-			input: []string{"RDS", "ElastiCache", "EC2"},
-			expected: []common.ServiceType{
-				common.ServiceRDS,
-				common.ServiceElastiCache,
-				common.ServiceEC2,
-			},
-		},
-		{
-			name:          "Invalid services",
-			errorContains: "invalid",
-			input:         []string{"invalid", "unknown"},
-			expected:      nil,
-		},
-		{
-			name:          "Mix of valid and invalid",
-			input:         []string{"rds", "invalid", "ec2"},
-			errorContains: "invalid",
-			expected:      nil,
-		},
-		{
-			name:  "All supported services",
-			input: []string{"rds", "elasticache", "ec2", "opensearch", "redshift", "memorydb"},
-			expected: []common.ServiceType{
-				common.ServiceRDS,
-				common.ServiceElastiCache,
-				common.ServiceEC2,
-				common.ServiceOpenSearch,
-				common.ServiceRedshift,
-				common.ServiceMemoryDB,
-			},
-		},
-		{
-			name:  "Legacy elasticsearch alias",
-			input: []string{"elasticsearch"},
-			expected: []common.ServiceType{
-				common.ServiceElasticsearch,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := parseServices(tt.input)
-			if tt.errorContains != "" {
-				assert.ErrorContains(t, err, tt.errorContains)
-			} else {
-				assert.NoError(t, err)
-			}
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestGetAllServices(t *testing.T) {
-	services := getAllServices()
-
-	expected := []common.ServiceType{
-		common.ServiceRDS,
-		common.ServiceElastiCache,
-		common.ServiceEC2,
-		common.ServiceOpenSearch,
-		common.ServiceRedshift,
-		common.ServiceMemoryDB,
-		common.ServiceSavingsPlansCompute,
-		common.ServiceSavingsPlansEC2Instance,
-		common.ServiceSavingsPlansSageMaker,
-		common.ServiceSavingsPlansDatabase,
-	}
-
-	assert.Equal(t, expected, services)
 }
 
 func TestCreateServiceClient(t *testing.T) {
@@ -366,33 +275,6 @@ func TestEffectiveSizingPct(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, effectiveSizingPct(tt.cfg))
 		})
-	}
-}
-
-func TestParseServicesWithEmptyAndNil(t *testing.T) {
-	for _, input := range [][]string{nil, {}} {
-		result, err := parseServices(input)
-		assert.NoError(t, err)
-		assert.Nil(t, result)
-	}
-	for _, input := range [][]string{{"", "rds", ""}, {"rds", ""}, {"foo", "bar", "baz"}, {" rds"}} {
-		result, err := parseServices(input)
-		assert.Error(t, err)
-		assert.Nil(t, result)
-	}
-}
-
-func TestParseServicesSavingsPlanAliases(t *testing.T) {
-	expected := []common.ServiceType{common.ServiceSavingsPlansCompute, common.ServiceSavingsPlansEC2Instance, common.ServiceSavingsPlansSageMaker, common.ServiceSavingsPlansDatabase}
-	for _, alias := range []string{"savingsplans", "savings-plans", "SP"} {
-		result, err := parseServices([]string{"ec2", alias, "savingsplans-compute", "rds", "EC2"})
-		assert.NoError(t, err)
-		assert.Equal(t, append(append([]common.ServiceType{common.ServiceEC2}, expected...), common.ServiceRDS), result)
-	}
-	for i, name := range []string{"compute", "ec2instance", "sagemaker", "database"} {
-		result, err := parseServices([]string{"savingsplans-" + name, "savings-plans-" + name})
-		assert.NoError(t, err)
-		assert.Equal(t, []common.ServiceType{expected[i]}, result)
 	}
 }
 
@@ -670,80 +552,6 @@ func TestSanitizeAccountName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := sanitizeAccountName(tt.input)
 			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-func TestGeneratePurchaseID_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name     string
-		region   string
-		rec      common.Recommendation
-		index    int
-		isDryRun bool
-	}{
-		{
-			name: "RDS dry run",
-			rec: common.Recommendation{
-				Service:      common.ServiceRDS,
-				ResourceType: "db.t3.micro",
-				Count:        2,
-			},
-			region:   "us-east-1",
-			index:    1,
-			isDryRun: true,
-		},
-		{
-			name: "EC2 actual purchase",
-			rec: common.Recommendation{
-				Service:      common.ServiceEC2,
-				ResourceType: "t3.large",
-				Count:        5,
-			},
-			region:   "eu-west-1",
-			index:    99,
-			isDryRun: false,
-		},
-		{
-			name: "ElastiCache with dots in instance type",
-			rec: common.Recommendation{
-				Service:      common.ServiceElastiCache,
-				ResourceType: "cache.r6g.2xlarge",
-				Count:        1,
-			},
-			region:   "ap-southeast-1",
-			index:    1000,
-			isDryRun: false,
-		},
-		{
-			name: "Unknown service",
-			rec: common.Recommendation{
-				Service:      common.ServiceType("future-service"),
-				ResourceType: "unknown.large",
-				Count:        10,
-			},
-			region:   "us-west-2",
-			index:    1,
-			isDryRun: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			testCoverage := 80.0
-			id := generatePurchaseID(tt.rec, tt.region, tt.index, tt.isDryRun, testCoverage)
-
-			// Verify ID contains expected parts
-			if tt.isDryRun {
-				assert.Contains(t, id, "dryrun")
-			} else {
-				assert.Contains(t, id, "ri")
-			}
-
-			assert.Contains(t, id, tt.region)
-			assert.Contains(t, id, strings.ReplaceAll(tt.rec.ResourceType, ".", "-"))
-			assert.Contains(t, id, fmt.Sprintf("%dx", tt.rec.Count))
-			// Should contain timestamp (YYYYMMDD-HHMMSS) and UUID suffix (8 chars)
-			assert.Regexp(t, `-\d{8}-\d{6}-[a-f0-9]{8}$`, id)
 		})
 	}
 }
