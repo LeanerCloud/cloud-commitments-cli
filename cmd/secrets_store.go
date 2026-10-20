@@ -20,8 +20,18 @@ type SecretsStore interface {
 
 // AWSSecretsStore implements SecretsStore using AWS Secrets Manager.
 type AWSSecretsStore struct {
-	client *secretsmanager.Client
+	client secretsListUpdater
 }
+
+// secretsListUpdater is the subset of the Secrets Manager client the store uses.
+type secretsListUpdater interface {
+	ListSecrets(ctx context.Context, in *secretsmanager.ListSecretsInput, opts ...func(*secretsmanager.Options)) (*secretsmanager.ListSecretsOutput, error)
+	UpdateSecret(ctx context.Context, in *secretsmanager.UpdateSecretInput, opts ...func(*secretsmanager.Options)) (*secretsmanager.UpdateSecretOutput, error)
+}
+
+// maxSecretListPages caps ListSecrets pagination; a name filter matching more
+// than this many pages is a bug or a runaway token, not a real account.
+const maxSecretListPages = 200
 
 // NewAWSSecretsStore creates a new AWS Secrets Manager store.
 func NewAWSSecretsStore(client *secretsmanager.Client) *AWSSecretsStore {
@@ -41,20 +51,28 @@ func (s *AWSSecretsStore) ListSecrets(ctx context.Context, filter string) ([]str
 		},
 	}
 
-	result, err := s.client.ListSecrets(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-
-	arns := make([]string, 0, len(result.SecretList))
-	for _rvc := range result.SecretList {
-		secret := result.SecretList[_rvc]
-		if secret.ARN != nil {
-			arns = append(arns, *secret.ARN)
+	var arns []string
+	for page := 0; ; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
+		if page >= maxSecretListPages {
+			return nil, fmt.Errorf("ListSecrets pagination cap reached after %d pages for %q", maxSecretListPages, filter)
+		}
+		result, err := s.client.ListSecrets(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		for i := range result.SecretList {
+			if result.SecretList[i].ARN != nil {
+				arns = append(arns, *result.SecretList[i].ARN)
+			}
+		}
+		if result.NextToken == nil || *result.NextToken == "" {
+			return arns, nil
+		}
+		input.NextToken = result.NextToken
 	}
-
-	return arns, nil
 }
 
 // UpdateSecret updates a secret with the given value.

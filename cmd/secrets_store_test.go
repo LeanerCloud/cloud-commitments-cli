@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	secretsmgrtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -62,4 +65,53 @@ func TestStoreGCPCredentials_SkipsPrefixMatch(t *testing.T) {
 	require.NoError(t, storeGCPCredentials(context.Background(), store, "cudly", creds))
 	assert.Contains(t, store.updatedSecrets, gcpWanted)
 	assert.NotContains(t, store.updatedSecrets, gcpOld)
+}
+
+type fakeSecretsClient struct {
+	pages []*secretsmanager.ListSecretsOutput
+	calls int
+	loop  bool
+}
+
+func (f *fakeSecretsClient) ListSecrets(_ context.Context, in *secretsmanager.ListSecretsInput, _ ...func(*secretsmanager.Options)) (*secretsmanager.ListSecretsOutput, error) {
+	f.calls++
+	if f.loop {
+		return &secretsmanager.ListSecretsOutput{NextToken: aws.String("again")}, nil
+	}
+	idx := 0
+	if in.NextToken != nil {
+		idx = 1
+	}
+	return f.pages[idx], nil
+}
+
+func (f *fakeSecretsClient) UpdateSecret(context.Context, *secretsmanager.UpdateSecretInput, ...func(*secretsmanager.Options)) (*secretsmanager.UpdateSecretOutput, error) {
+	return &secretsmanager.UpdateSecretOutput{}, nil
+}
+
+func TestAWSSecretsStore_ListSecretsPaginates(t *testing.T) {
+	fake := &fakeSecretsClient{pages: []*secretsmanager.ListSecretsOutput{
+		{SecretList: []secretsmgrtypes.SecretListEntry{{ARN: aws.String(oldARN)}}, NextToken: aws.String("t2")},
+		{SecretList: []secretsmgrtypes.SecretListEntry{{ARN: aws.String(wantedARN)}}},
+	}}
+	store := &AWSSecretsStore{client: fake}
+	got, err := resolveSecretID(context.Background(), store, wantedName)
+	require.NoError(t, err)
+	assert.Equal(t, wantedARN, got)
+	assert.Equal(t, 2, fake.calls)
+}
+
+func TestAWSSecretsStore_ListSecretsFailsAtPageCap(t *testing.T) {
+	fake := &fakeSecretsClient{loop: true}
+	_, err := (&AWSSecretsStore{client: fake}).ListSecrets(context.Background(), wantedName)
+	require.ErrorContains(t, err, "pagination cap")
+	assert.Equal(t, maxSecretListPages, fake.calls)
+}
+
+func TestAWSSecretsStore_ListSecretsHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	fake := &fakeSecretsClient{loop: true}
+	_, err := (&AWSSecretsStore{client: fake}).ListSecrets(ctx, wantedName)
+	require.ErrorIs(t, err, context.Canceled)
 }
