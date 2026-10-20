@@ -140,6 +140,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Bump cloud-commitments-go to dcb5ba0: Azure reservation purchases use one
+  shared helper with aligned guards, error messages and display names, and hold
+  the shared concurrency slot per call instead of per batch; the AWS provider
+  gains a configurable account scope for RI purchase recommendations and an
+  exported `RederiveFamilyCoverage` for post-sizing count changes.
 - Bumped `cloud-commitments-go` (pkg and the aws, azure and gcp providers) to
   `cfe8ac29`. User-visible effects: recommendations reported in a non-USD
   currency are skipped at ingestion and the skip is reported; RDS SQL Server
