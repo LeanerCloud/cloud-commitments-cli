@@ -8,6 +8,7 @@ import (
 )
 
 func TestApplyFilters_RegionFiltering(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		currentRegion  string
@@ -90,6 +91,7 @@ func TestApplyFilters_RegionFiltering(t *testing.T) {
 }
 
 func TestApplyFilters_InstanceTypeFiltering(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                 string
 		recs                 []common.Recommendation
@@ -135,6 +137,7 @@ func TestApplyFilters_InstanceTypeFiltering(t *testing.T) {
 }
 
 func TestApplyFilters_EngineFiltering(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		recs           []common.Recommendation
@@ -210,6 +213,7 @@ func TestApplyFilters_EngineFiltering(t *testing.T) {
 }
 
 func TestApplyFilters_AccountFiltering(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		recs            []common.Recommendation
@@ -274,6 +278,7 @@ func TestApplyFilters_AccountFiltering(t *testing.T) {
 }
 
 func TestApplyFilters_CombinedFilters(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{Region: "us-east-1", ResourceType: "db.t3.small", Count: 1, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "postgresql"}, AccountName: "prod-account"},
 		{Region: "us-west-2", ResourceType: "db.t3.medium", Count: 2, Service: common.ServiceRDS, Details: &common.DatabaseDetails{Engine: "mysql"}, AccountName: "dev-account"},

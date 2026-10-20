@@ -9,6 +9,7 @@ import (
 )
 
 func TestCreateServiceClient(t *testing.T) {
+	t.Parallel()
 	cfg := aws.Config{
 		Region: "us-east-1",
 	}
@@ -97,6 +98,7 @@ func TestCreateServiceClient(t *testing.T) {
 }
 
 func TestCreateServiceClientAllServices(t *testing.T) {
+	t.Parallel()
 	cfg := aws.Config{
 		Region: "eu-central-1",
 	}
@@ -110,6 +112,7 @@ func TestCreateServiceClientAllServices(t *testing.T) {
 }
 
 func TestSanitizeAccountName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -137,6 +140,7 @@ func TestSanitizeAccountName(t *testing.T) {
 }
 
 func TestValidateInstanceTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		errorContains string

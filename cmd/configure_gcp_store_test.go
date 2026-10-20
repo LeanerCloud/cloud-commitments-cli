@@ -12,6 +12,7 @@ import (
 
 // Tests for storeGCPCredentials function.
 func TestStoreGCPCredentials(t *testing.T) {
+	t.Parallel()
 	// private_key validation is presence-only; the key content is not parsed or
 	// validated as a real PEM block by storeGCPCredentials.
 	validGCPJSON := `{

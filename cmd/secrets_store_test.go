@@ -26,6 +26,7 @@ func listStore(arns ...string) *MockSecretsStore {
 }
 
 func TestResolveSecretID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		arns    []string
@@ -51,6 +52,7 @@ func TestResolveSecretID(t *testing.T) {
 }
 
 func TestStoreAzureCredentials_SkipsPrefixMatch(t *testing.T) {
+	t.Parallel()
 	store := listStore(oldARN, wantedARN)
 	creds := AzureCredentials{TenantID: testTenantID, ClientID: testSPAppID, ClientSecret: testSPSecret, SubscriptionID: testSubID}
 	require.NoError(t, storeAzureCredentials(context.Background(), store, "cudly", creds))
@@ -59,6 +61,7 @@ func TestStoreAzureCredentials_SkipsPrefixMatch(t *testing.T) {
 }
 
 func TestStoreGCPCredentials_SkipsPrefixMatch(t *testing.T) {
+	t.Parallel()
 	gcpOld := arnPrefix + "cudly-GCPCredentials-old-GhIjKl"
 	gcpWanted := arnPrefix + "cudly-GCPCredentials-AbCdEf"
 	store := listStore(gcpOld, gcpWanted)
@@ -91,6 +94,7 @@ func (f *fakeSecretsClient) UpdateSecret(context.Context, *secretsmanager.Update
 }
 
 func TestAWSSecretsStore_ListSecretsPaginates(t *testing.T) {
+	t.Parallel()
 	fake := &fakeSecretsClient{pages: []*secretsmanager.ListSecretsOutput{
 		{SecretList: []secretsmgrtypes.SecretListEntry{{ARN: aws.String(oldARN)}}, NextToken: aws.String("t2")},
 		{SecretList: []secretsmgrtypes.SecretListEntry{{ARN: aws.String(wantedARN)}}},
@@ -103,6 +107,7 @@ func TestAWSSecretsStore_ListSecretsPaginates(t *testing.T) {
 }
 
 func TestAWSSecretsStore_ListSecretsFailsAtPageCap(t *testing.T) {
+	t.Parallel()
 	fake := &fakeSecretsClient{loop: true}
 	_, err := (&AWSSecretsStore{client: fake}).ListSecrets(context.Background(), wantedName)
 	require.ErrorContains(t, err, "pagination cap")
@@ -110,6 +115,7 @@ func TestAWSSecretsStore_ListSecretsFailsAtPageCap(t *testing.T) {
 }
 
 func TestAWSSecretsStore_ListSecretsHonorsCanceledContext(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	fake := &fakeSecretsClient{loop: true}
@@ -118,6 +124,7 @@ func TestAWSSecretsStore_ListSecretsHonorsCanceledContext(t *testing.T) {
 }
 
 func TestResolveSecretID_ListErrorFails(t *testing.T) {
+	t.Parallel()
 	m := NewMockSecretsStore()
 	m.listSecretsFunc = func(context.Context, string) ([]string, error) { return nil, errors.New("AccessDenied") }
 	_, err := resolveSecretID(context.Background(), m, wantedName)

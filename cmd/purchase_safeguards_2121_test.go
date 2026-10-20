@@ -61,6 +61,7 @@ func TestApplyTargetCoverage_InvalidInputsDropped_2121(t *testing.T) {
 }
 
 func TestDuplicateChecker_ValkeyDoesNotCoverRedis_2121(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	recent := time.Now().Add(-1 * time.Hour)
 	commitment := func(engine string) common.Commitment {
@@ -119,6 +120,7 @@ func TestDuplicateChecker_ValkeyDoesNotCoverRedis_2121(t *testing.T) {
 }
 
 func TestDuplicateChecker_UnknownReservationStateRemainsOwned_2121(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	recs := []common.Recommendation{{
 		Provider:     common.ProviderAWS,

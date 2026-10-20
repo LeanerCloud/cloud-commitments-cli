@@ -10,6 +10,7 @@ import (
 )
 
 func TestGeneratePurchaseID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		region         string
@@ -95,6 +96,7 @@ func TestGeneratePurchaseID(t *testing.T) {
 }
 
 func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
+	t.Parallel()
 	testCoverage := 80.0
 
 	// Test with recommendations that have special characters
@@ -125,6 +127,7 @@ func TestGeneratePurchaseIDEdgeCases(t *testing.T) {
 }
 
 func TestGeneratePurchaseIDCoverageVariations(t *testing.T) {
+	t.Parallel()
 	rec := common.Recommendation{
 		Service:      common.ServiceRDS,
 		ResourceType: "db.t3.small",
@@ -156,6 +159,7 @@ func TestGeneratePurchaseIDCoverageVariations(t *testing.T) {
 }
 
 func TestGeneratePurchaseID_EdgeCases(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		region   string

@@ -21,6 +21,7 @@ func riRec(count int, avg, existing, cov, util float64) common.Recommendation {
 }
 
 func TestRederiveProjections(t *testing.T) {
+	t.Parallel()
 	rds := riRec(10, 125, 10, 55, 100)
 	rds.Service = common.ServiceRDS
 	noKnown := riRec(10, 125, 0, 80, 100)
@@ -58,6 +59,7 @@ func TestRederiveProjections(t *testing.T) {
 }
 
 func TestSyncDataWarehouseNodes(t *testing.T) {
+	t.Parallel()
 	ptr := &common.DataWarehouseDetails{NodeType: "ra3.xlplus", NumberOfNodes: 10, ClusterType: "multi-node"}
 	rec := common.Recommendation{Service: common.ServiceRedshift, Count: 3, Details: ptr}
 
@@ -104,6 +106,7 @@ func TestRefreshCountLinearMatchesSizerOutput(t *testing.T) {
 
 // Issue #1845: the cap changes Count, so the projections must follow.
 func TestApplyInstanceLimitRederivesProjections(t *testing.T) {
+	t.Parallel()
 	capped := riRec(100, 125, 0, 80, 100)
 	untouched := riRec(5, 10, 0, 40, 100)
 	untouched.ResourceType = "c5.large"
@@ -129,6 +132,7 @@ func TestApplyInstanceLimitRederivesProjections(t *testing.T) {
 }
 
 func TestApplyInstanceLimitSyncsRedshiftNodes(t *testing.T) {
+	t.Parallel()
 	src := &common.DataWarehouseDetails{NodeType: "ra3.xlplus", NumberOfNodes: 10, ClusterType: "multi-node"}
 	rec := common.Recommendation{Service: common.ServiceRedshift, Count: 10, Details: src}
 	got := ApplyInstanceLimit([]common.Recommendation{rec}, 3)

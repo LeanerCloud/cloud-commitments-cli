@@ -157,6 +157,7 @@ func mustJSON(t *testing.T, v string) string {
 // otherwise survive as a readable prefix. Sweep the boundary and assert no
 // 4+ byte prefix of the key remains, for a plain and a strip-split key.
 func TestArcheraErrorsLeaveNoKeyPrefixAtCap(t *testing.T) {
+	t.Parallel()
 	k := archeraTestKey
 	for _, echo := range []string{k, k[:5] + "\u200b" + k[5:], archeraSplitEverywhere(k, "\u200b")} {
 		for padLen := archeraMaxErrorSize - len(k) - 8; padLen <= archeraMaxErrorSize+2; padLen++ {
@@ -174,6 +175,7 @@ func TestArcheraErrorsLeaveNoKeyPrefixAtCap(t *testing.T) {
 // The withhold check must see the full text: a cut through a split key would
 // hide it from a check run after the cap while leaving a readable prefix.
 func TestArcheraErrorsWithholdSplitKeyAtAnyCapOffset(t *testing.T) {
+	t.Parallel()
 	k := archeraTestKey
 	for name, sep := range map[string]string{"variation selector": "\ufe0f", "invalid utf-8": "\xff", "combining acute": "\u0301"} {
 		for padLen := archeraMaxErrorSize - 3*len(k); padLen <= archeraMaxErrorSize+2; padLen++ {
@@ -184,6 +186,7 @@ func TestArcheraErrorsWithholdSplitKeyAtAnyCapOffset(t *testing.T) {
 }
 
 func TestArcheraErrorsTrimKeyBeforeMasking(t *testing.T) {
+	t.Parallel()
 	got := archeraSafeError(errors.New("bad key "+archeraTestKey[:5]+"\u200b"+archeraTestKey[5:]), " "+archeraTestKey+"\n").Error()
 	assert.Equal(t, "bad key [redacted]", got)
 }

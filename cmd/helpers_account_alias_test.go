@@ -14,6 +14,7 @@ import (
 )
 
 func TestNewAccountAliasCacheWithClient(t *testing.T) {
+	t.Parallel()
 	mockOrg := &MockOrganizationsClient{}
 	cache := NewAccountAliasCacheWithClient(mockOrg)
 
@@ -24,6 +25,7 @@ func TestNewAccountAliasCacheWithClient(t *testing.T) {
 }
 
 func TestGetAccountAlias(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -109,6 +111,7 @@ func TestGetAccountAlias(t *testing.T) {
 }
 
 func TestGetAccountAliasConcurrency(t *testing.T) {
+	t.Parallel()
 	// This test relies on AccountAliasCache.GetAccountAlias using double-checked locking:
 	// first acquire a read lock to check the cache, then acquire a write lock and re-check
 	// before calling the API. Without this pattern, multiple goroutines could pass the
@@ -153,6 +156,7 @@ func TestGetAccountAliasConcurrency(t *testing.T) {
 }
 
 func TestGetAccountAliasRealFunction(t *testing.T) {
+	t.Parallel()
 	// Skip integration test that requires real AWS API
 	t.Skip("Skipping integration test - GetAccountAlias tested via mock tests")
 

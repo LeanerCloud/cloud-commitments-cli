@@ -15,6 +15,7 @@ import (
 
 // Test loadRecommendationsFromCSV with file errors.
 func TestLoadRecommendationsFromCSV_FileErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		setup       func(t *testing.T) string
@@ -68,6 +69,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk ful
 // Issue #2004: csv.Writer buffers everything, so the bytes only reach the
 // file at Flush. A Flush failure must surface instead of a nil return.
 func TestWriteMultiServiceCSV_FlushErrorIsReturned(t *testing.T) {
+	t.Parallel()
 	results := []common.PurchaseResult{{
 		Recommendation: common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.small", Count: 1},
 		Success:        true,

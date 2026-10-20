@@ -196,6 +196,7 @@ func queryRegions(t *testing.T, stub *rdsAPIStub, ctx context.Context) (map[stri
 }
 
 func TestQueryRDSInstancesInRegions_AllRegionsFail(t *testing.T) {
+	t.Parallel()
 	stub := newRDSStub("us-east-1", "eu-west-1")
 	stub.failRegions["us-east-1"], stub.failRegions["eu-west-1"] = true, true
 
@@ -208,6 +209,7 @@ func TestQueryRDSInstancesInRegions_AllRegionsFail(t *testing.T) {
 }
 
 func TestQueryRDSInstancesInRegions_FailureMidPaginationMarksRegionFailed(t *testing.T) {
+	t.Parallel()
 	stub := newRDSStub("us-east-1", "eu-west-1")
 	stub.failPage2["us-east-1"] = true
 	stub.instances["us-east-1"], stub.instances["eu-west-1"] = "db.r5.large", "db.t3.small"
@@ -221,6 +223,7 @@ func TestQueryRDSInstancesInRegions_FailureMidPaginationMarksRegionFailed(t *tes
 }
 
 func TestQueryRDSInstancesInRegions_WorkerPanicMarksRegionFailed(t *testing.T) {
+	t.Parallel()
 	stub := newRDSStub("us-east-1", "eu-west-1")
 	stub.panicRegions["us-east-1"] = true
 	stub.instances["eu-west-1"] = "db.t3.small"
@@ -233,6 +236,7 @@ func TestQueryRDSInstancesInRegions_WorkerPanicMarksRegionFailed(t *testing.T) {
 }
 
 func TestQueryRDSInstancesInRegions_GenuineEmptyInventoryIsNotAFailure(t *testing.T) {
+	t.Parallel()
 	stub := newRDSStub("us-east-1", "eu-west-1")
 
 	inst, failed, err := queryRegions(t, stub, context.Background())
@@ -243,6 +247,7 @@ func TestQueryRDSInstancesInRegions_GenuineEmptyInventoryIsNotAFailure(t *testin
 }
 
 func TestQueryRDSInstancesInRegions_CancelledContextIsTerminal(t *testing.T) {
+	t.Parallel()
 	stub := newRDSStub("us-east-1")
 	ctx, cancel := context.WithCancel(context.Background())
 	regions, err := getAWSRegions(ctx, stub.awsConfig())
@@ -256,6 +261,7 @@ func TestQueryRDSInstancesInRegions_CancelledContextIsTerminal(t *testing.T) {
 }
 
 func TestQueryMajorEngineVersionsWithClient_EngineFailuresAreAggregated(t *testing.T) {
+	t.Parallel()
 	denied := errors.New("AccessDenied")
 	t.Run("all engines fail", func(t *testing.T) {
 		stub := &engineKeyedRDSMajorVersionsStub{errByEngine: map[string]error{
@@ -289,6 +295,7 @@ func TestQueryMajorEngineVersionsWithClient_EngineFailuresAreAggregated(t *testi
 }
 
 func TestQueryMajorEngineVersionsWithClient_PaginationCapIsAnError(t *testing.T) {
+	t.Parallel()
 	_, err := queryMajorEngineVersionsWithClient(context.Background(), &alwaysMarkerRDSStub{})
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "pagination cap")
@@ -370,6 +377,7 @@ func rdsRec(region string) common.Recommendation {
 }
 
 func TestRequireRegionInventory(t *testing.T) {
+	t.Parallel()
 	data := engineVersionData{failedRegions: map[string]error{"eu-west-1": errors.New("denied")}}
 
 	assert.ErrorContains(t, requireRegionInventory([]common.Recommendation{rdsRec("eu-west-1")}, Config{}, data), "eu-west-1")

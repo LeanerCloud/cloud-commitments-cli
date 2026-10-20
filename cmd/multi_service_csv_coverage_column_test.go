@@ -19,6 +19,7 @@ import (
 // (both land at ~100% on every under-buy row, so they add noise without
 // information).
 func TestWriteMultiServiceCSVReport_CoverageColumn(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	filepath := tmpDir + "/util.csv"
 

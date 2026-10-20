@@ -11,6 +11,7 @@ import (
 )
 
 func TestLoadRecommendationsFromCSV_HeaderValidation_1327(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		header      string
@@ -43,6 +44,7 @@ func TestLoadRecommendationsFromCSV_HeaderValidation_1327(t *testing.T) {
 }
 
 func TestLoadRecommendationsFromCSV_BOMPrefixed_1327(t *testing.T) {
+	t.Parallel()
 	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t,
 		"\ufeffService,Region,ResourceType,Count,Term,PaymentOption\nrds,us-east-1,db.t3.micro,2,3yr,partial-upfront\n"))
 	require.NoError(t, err)
@@ -110,6 +112,7 @@ func TestLoadRecommendationsFromCSV_Encoding_1327(t *testing.T) {
 
 // Lock in encoding/csv behaviors the purchase path relies on.
 func TestLoadRecommendationsFromCSV_EdgeCases_1327(t *testing.T) {
+	t.Parallel()
 	t.Run("CRLF line endings", func(t *testing.T) {
 		recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t,
 			"Service,Region,ResourceType,Count,Term,PaymentOption\r\nrds,us-east-1,db.t3.micro,2,3yr,partial-upfront\r\n"))

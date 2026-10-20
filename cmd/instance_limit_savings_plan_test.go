@@ -23,6 +23,7 @@ func mkSP() common.Recommendation {
 }
 
 func TestApplyInstanceLimit_SavingsPlanExempt(t *testing.T) {
+	t.Parallel()
 	got := ApplyInstanceLimit([]common.Recommendation{mkRI("db.r5.large", 3), mkSP(), mkRI("db.r5.xlarge", 2)}, 1)
 
 	require.Len(t, got, 2)
@@ -110,6 +111,7 @@ func TestScoreLimitAndDisplay_MinCountKeepsSavingsPlan(t *testing.T) {
 }
 
 func TestApplyInstanceLimit_SavingsPlanAfterBudgetSpent(t *testing.T) {
+	t.Parallel()
 	got := ApplyInstanceLimit([]common.Recommendation{mkRI("a", 3), mkRI("b", 2), mkSP()}, 3)
 
 	require.Len(t, got, 2)

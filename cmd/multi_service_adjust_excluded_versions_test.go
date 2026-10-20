@@ -13,6 +13,7 @@ import (
 )
 
 func TestAdjustRecommendationForExcludedVersions_MultipleVersionsInExtendedSupport(t *testing.T) {
+	t.Parallel()
 	recommendation := common.Recommendation{
 		Service:      common.ServiceRDS,
 		Region:       "us-east-1",
@@ -63,6 +64,7 @@ func TestAdjustRecommendationForExcludedVersions_MultipleVersionsInExtendedSuppo
 }
 
 func TestAdjustRecommendationForExcludedVersions_NonRDSService(t *testing.T) {
+	t.Parallel()
 	recommendation := common.Recommendation{
 		Service:      common.ServiceEC2,
 		Region:       "us-east-1",
@@ -87,6 +89,7 @@ func TestAdjustRecommendationForExcludedVersions_NonRDSService(t *testing.T) {
 // function gets past its early "no running instances" return and actually
 // reaches the switch.
 func TestAdjustRecommendationForExcludedVersions_TypedNilDetails(t *testing.T) {
+	t.Parallel()
 	recommendation := common.Recommendation{
 		Service:      common.ServiceRDS,
 		Region:       "us-east-1",
@@ -174,6 +177,7 @@ func TestAdjustRecommendationForExcludedVersions_UnknownLifecycle(t *testing.T) 
 // count must scale the money fields with it, or the report keeps the full
 // recommendation's cost for fewer instances.
 func TestAdjustRecommendationForExcludedVersions_ScalesMoneyWithCount(t *testing.T) {
+	t.Parallel()
 	monthly := 30.0
 	recommendation := common.Recommendation{
 		Service:              common.ServiceRDS,
@@ -205,6 +209,7 @@ func TestAdjustRecommendationForExcludedVersions_ScalesMoneyWithCount(t *testing
 }
 
 func TestAdjustRecommendationForExcludedVersions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		versionInfo      map[string]MajorEngineVersionInfo
 		instanceVersions map[string][]InstanceEngineVersion

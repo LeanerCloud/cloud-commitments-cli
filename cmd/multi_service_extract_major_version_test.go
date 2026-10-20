@@ -8,6 +8,7 @@ import (
 
 // Comprehensive tests for extractMajorVersion function.
 func TestExtractMajorVersion_Comprehensive(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		engine   string

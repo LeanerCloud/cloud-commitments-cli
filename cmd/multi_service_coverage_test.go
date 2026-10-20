@@ -21,6 +21,7 @@ import (
 // ==================== Tests for extractMajorVersion ====================
 
 func TestExtractMajorVersion_ComprehensiveTests(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		engine        string

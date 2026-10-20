@@ -62,6 +62,7 @@ func rdsMajorVersion(engine, major string) rdstypes.DBMajorEngineVersion { //nol
 // TestFetchMajorEngineVersionsForEngine_Paginates asserts that all pages are
 // fetched and results accumulated (issue #692 regression test).
 func TestFetchMajorEngineVersionsForEngine_Paginates(t *testing.T) {
+	t.Parallel()
 	mock := &multiPageRDSMajorVersionsMock{
 		pages: []*awsrds.DescribeDBMajorEngineVersionsOutput{
 			{
@@ -101,6 +102,7 @@ func TestFetchMajorEngineVersionsForEngine_Paginates(t *testing.T) {
 // TestFetchMajorEngineVersionsForEngine_EmptyMarkerTerminates asserts that an
 // empty-string Marker is treated as terminal (parity with PR #690).
 func TestFetchMajorEngineVersionsForEngine_EmptyMarkerTerminates(t *testing.T) {
+	t.Parallel()
 	mock := &multiPageRDSMajorVersionsMock{
 		pages: []*awsrds.DescribeDBMajorEngineVersionsOutput{
 			{
@@ -142,6 +144,7 @@ func (m *alwaysNextPageRDSMock) DescribeDBMajorEngineVersions(
 // TestFetchMajorEngineVersionsForEngine_PaginationCapError asserts that
 // exceeding maxEngineVersionPages returns a diagnostic error (issue #692).
 func TestFetchMajorEngineVersionsForEngine_PaginationCapError(t *testing.T) {
+	t.Parallel()
 	mock := &alwaysNextPageRDSMock{}
 	versionInfo := make(map[string]MajorEngineVersionInfo)
 
@@ -175,6 +178,7 @@ func (m *cancelOnFirstQueryRDSMock) DescribeDBMajorEngineVersions(
 
 // Caller cancellation must remain terminal even when the SDK wraps the error.
 func TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		wrap func(error) error
@@ -212,6 +216,7 @@ func TestQueryMajorEngineVersionsWithClient_CtxCancelIsTerminal(t *testing.T) {
 // TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal asserts the same
 // for an expired deadline (issue #1325): it fails fast before the first call.
 func TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Minute))
 	defer cancel()
 
@@ -225,6 +230,7 @@ func TestQueryMajorEngineVersionsWithClient_CtxDeadlineIsTerminal(t *testing.T) 
 }
 
 func TestQueryMajorEngineVersionsWithClient_CtxAlreadyCanceled(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -258,6 +264,7 @@ func (m *cancelOnFinalSuccessRDSMock) DescribeDBMajorEngineVersions(
 }
 
 func TestQueryMajorEngineVersionsWithClient_CtxCanceledOnFinalSuccess(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mock := &cancelOnFinalSuccessRDSMock{cancel: cancel}

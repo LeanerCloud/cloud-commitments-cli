@@ -265,6 +265,7 @@ func TestRegisterShutdownSignalHandler_CancelSetsFlagAndPrintsNoticeOnce(t *test
 // handler would return and the second signal below would terminate the test
 // binary.
 func TestInvocationContext_FurtherSigintsAreAbsorbed(t *testing.T) {
+	t.Parallel()
 	ctx, stop := invocationContext()
 	defer stop()
 

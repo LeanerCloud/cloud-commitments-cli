@@ -8,6 +8,7 @@ import (
 )
 
 func TestGeneratePurchaseIDComprehensive(t *testing.T) {
+	t.Parallel()
 	// Use a test coverage value
 	testCoverage := 75.0
 

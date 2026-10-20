@@ -13,6 +13,7 @@ import (
 )
 
 func TestDetermineCSVCoverage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		cfg      Config
@@ -73,6 +74,7 @@ func TestDetermineCSVCoverage(t *testing.T) {
 }
 
 func TestWriteMultiServiceCSVReport(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		filename string
@@ -197,6 +199,7 @@ func TestWriteMultiServiceCSVReport(t *testing.T) {
 
 // Tests for loadRecommendationsFromCSV function.
 func TestLoadRecommendationsFromCSV(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		validate    func(t *testing.T, recs []common.Recommendation)
 		name        string

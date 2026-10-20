@@ -195,6 +195,7 @@ func firstRunRequests(rdsPurchases, cachePurchases int) map[string]int {
 // must never answer a purchase call, so a test that forgets to install its own
 // purchase fixture fails instead of "succeeding".
 func TestAWSFixturesHaveNoPurchaseOps(t *testing.T) {
+	t.Parallel()
 	for key := range awsFixtures {
 		assert.NotContains(t, key, "Purchase")
 	}
@@ -318,6 +319,7 @@ func TestCSVReplay_SecondRunBuysNothing(t *testing.T) {
 // The dedupe key adds the "elasticache:" engine prefix only for ProviderAWS,
 // so a CSV row must carry its provider or replays re-buy ElastiCache (#2228).
 func TestLoadRecommendationsFromCSV_StampsAWSProvider(t *testing.T) {
+	t.Parallel()
 	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, csvPurchases))
 	require.NoError(t, err)
 	require.Len(t, recs, 2)
@@ -390,6 +392,7 @@ func testCSVReplayMemoryDB(t *testing.T, csv string) {
 }
 
 func TestLoadRecommendationsFromCSV_MemoryDBEngineIsCanonical(t *testing.T) {
+	t.Parallel()
 	for _, engine := range []string{"redis", "valkey", ""} {
 		recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, memdbCSVWithEngine(engine)))
 		require.NoError(t, err)

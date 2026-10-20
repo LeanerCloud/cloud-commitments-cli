@@ -165,6 +165,7 @@ func TestPrintFinalMessage_SavingsPlanOnlySuccessShowsCompletion(t *testing.T) {
 }
 
 func TestPurchaseFailureError(t *testing.T) {
+	t.Parallel()
 	ok := common.PurchaseResult{Success: true}
 	bad := common.PurchaseResult{Success: false}
 	assert.NoError(t, purchaseFailureError(nil, false))

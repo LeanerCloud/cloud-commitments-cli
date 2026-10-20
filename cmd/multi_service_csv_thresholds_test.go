@@ -105,6 +105,7 @@ func runCSVThresholdChild(t *testing.T, joinedArgs, csvKey, want string) {
 // TestCSVThresholdColumnsRoundTrip pins that the writer emits both columns and
 // the parser reads back exactly what was written.
 func TestCSVThresholdColumnsRoundTrip(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.small", Count: 2, Term: "1yr", PaymentOption: "all-upfront",
 			CommitmentCost: 1200, EstimatedSavings: 50, SavingsPercentage: 33.333333333333336},
@@ -138,6 +139,7 @@ func TestCSVThresholdColumnsRoundTrip(t *testing.T) {
 // that cannot be stated as a finite number is written blank (absent), never as
 // "+Inf" or a fabricated 0.
 func TestThresholdCellsBlankWhenBreakEvenUnknownOrInfinite(t *testing.T) {
+	t.Parallel()
 	never := common.Recommendation{Term: "1yr", CommitmentCost: 1200, EstimatedSavings: -100, SavingsPercentage: 1}
 	months, known := common.BreakEven(never)
 	require.True(t, known)
@@ -151,6 +153,7 @@ func TestThresholdCellsBlankWhenBreakEvenUnknownOrInfinite(t *testing.T) {
 // TestCSVThresholdHeaderStaysStrict pins that carrying the new columns did not
 // loosen the required-column check.
 func TestCSVThresholdHeaderStaysStrict(t *testing.T) {
+	t.Parallel()
 	_, err := loadCSVRecommendations(writeTestRecommendationsCSV(t,
 		"Service,Region,ResourceType,Term,PaymentOption,SavingsPercentage,BreakEvenMonths\nrds,us-east-1,db.t3.small,1yr,all-upfront,10,3\n"),
 		csvThresholdNeeds{savingsPct: true, breakEven: true})
@@ -161,6 +164,7 @@ func TestCSVThresholdHeaderStaysStrict(t *testing.T) {
 // TestCSVThresholdWhitespaceCellIsBlank pins that a whitespace-only cell is
 // blank: refused when its flag is set, ignored (left 0) when it is not.
 func TestCSVThresholdWhitespaceCellIsBlank(t *testing.T) {
+	t.Parallel()
 	const row = "rds,us-east-1,db.t3.small,postgres,2,1yr,all-upfront,111111111111,100,%s,%s\n"
 	for _, blank := range []string{" ", "\t"} {
 		for _, col := range []struct {

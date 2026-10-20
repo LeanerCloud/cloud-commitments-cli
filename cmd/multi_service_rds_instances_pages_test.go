@@ -26,6 +26,7 @@ func (c *loopingRDSInstancesClient) DescribeDBInstances(_ context.Context, _ *aw
 }
 
 func TestQueryRDSInstancesPaged_PageCapErrors(t *testing.T) {
+	t.Parallel()
 	client := &loopingRDSInstancesClient{}
 	var mu sync.Mutex
 	err := queryRDSInstancesPaged(context.Background(), client, "eu-west-1", map[string][]InstanceEngineVersion{}, &mu)
@@ -35,6 +36,7 @@ func TestQueryRDSInstancesPaged_PageCapErrors(t *testing.T) {
 }
 
 func TestQueryRDSInstancesPaged_CanceledContextStops(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &loopingRDSInstancesClient{onCall: cancel}
 	var mu sync.Mutex

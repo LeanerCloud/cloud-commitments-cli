@@ -14,6 +14,7 @@ import (
 )
 
 func TestExtractMajorVersion_Additional(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		engine   string
@@ -73,6 +74,7 @@ func TestExtractMajorVersion_Additional(t *testing.T) {
 }
 
 func TestIsInExtendedSupport(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	pastDate := now.AddDate(0, -6, 0)
 	futureDate := now.AddDate(3, 0, 0)

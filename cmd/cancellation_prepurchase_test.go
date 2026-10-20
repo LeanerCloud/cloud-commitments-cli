@@ -313,6 +313,7 @@ func TestFetchAllRecs_AccountFilters(t *testing.T) {
 }
 
 func TestRequireResolvedAccountNames_CSVRows(t *testing.T) {
+	t.Parallel()
 	rows := []common.Recommendation{{Account: testCallerAccount, AccountName: testCallerAccount}}
 	// The CSV wrote the ID where the name lookup had failed.
 	require.Error(t, requireResolvedAccountNames(rows, &Config{ExcludeAccounts: []string{"sandbox"}}))
@@ -324,6 +325,7 @@ func TestRequireResolvedAccountNames_CSVRows(t *testing.T) {
 }
 
 func TestRequireNamesResolved_BlankFilterValueIsNotANameFilter(t *testing.T) {
+	t.Parallel()
 	unresolved := []common.Recommendation{{Account: testCallerAccount, AccountName: testCallerAccount}}
 
 	require.NoError(t, requireNamesResolved(unresolved, &Config{ExcludeAccounts: []string{" "}}))

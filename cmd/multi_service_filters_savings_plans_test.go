@@ -15,6 +15,7 @@ import (
 // --exclude-regions. The provider-side filters were fixed first; these cases
 // pin the same semantics on the CLI path.
 func TestApplyFilters_SavingsPlansRegionFilters(t *testing.T) {
+	t.Parallel()
 	ec2SP := func(region string) common.Recommendation {
 		return common.Recommendation{
 			Provider:       common.ProviderAWS,
@@ -113,6 +114,7 @@ func TestApplyFilters_SavingsPlansRegionFilters(t *testing.T) {
 // account-level plans stay unfiltered, and that it ANDs with
 // --include-regions / --exclude-regions.
 func TestApplyFilters_SavingsPlansRegionsFlag(t *testing.T) {
+	t.Parallel()
 	sp := func(svc common.ServiceType, planType, region string) common.Recommendation {
 		return common.Recommendation{
 			Provider:       common.ProviderAWS,

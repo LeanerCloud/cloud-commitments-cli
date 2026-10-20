@@ -25,6 +25,7 @@ import (
 // ==================== Helper Function Tests ====================
 
 func TestApplyCoverageToRecommendations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		recs         []common.Recommendation
@@ -119,6 +120,7 @@ func TestRunPurchaseAndReportDeclinedConfirmationPrintsDropsBeforeCancellation(t
 }
 
 func TestServiceProcessingOrder(t *testing.T) {
+	t.Parallel()
 	// Test that services are processed in a consistent order
 	services := []common.ServiceType{
 		common.ServiceRDS,
@@ -150,6 +152,7 @@ func TestServiceProcessingOrder(t *testing.T) {
 }
 
 func TestGenerateCSVFilenameHelper(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		service     common.ServiceType
@@ -188,6 +191,7 @@ func TestGenerateCSVFilenameHelper(t *testing.T) {
 }
 
 func TestMultiServiceConfig(t *testing.T) {
+	t.Parallel()
 	cfg := MultiServiceConfig{
 		Services: map[common.ServiceType]ServiceConfig{
 			common.ServiceRDS: {

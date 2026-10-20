@@ -21,6 +21,7 @@ import (
 // removes the need to copy-paste columns into a spreadsheet to add
 // them up.
 func TestWriteMultiServiceCSVReport_SortAndTotal(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	fp := tmpDir + "/sort-total.csv"
 
@@ -84,6 +85,7 @@ func TestWriteMultiServiceCSVReport_SortAndTotal(t *testing.T) {
 // resolves their size suffix even though their own NU cell renders blank;
 // before the fix those rows inflated the TOTAL.
 func TestBuildTotalRow_NUSkipsRowsWithBlankNUCell(t *testing.T) {
+	t.Parallel()
 	results := []common.PurchaseResult{
 		// 5 × db.r6g.large = 20 NU (rendered on the row).
 		{Recommendation: common.Recommendation{Service: common.ServiceRDS, ResourceType: "db.r6g.large", Count: 5}},
@@ -123,6 +125,7 @@ func TestBuildTotalRow_NUSkipsRowsWithBlankNUCell(t *testing.T) {
 // TestBuildTotalRow_NUBlankWhenNoRowHasNU locks that a run with no RDS rows
 // leaves the TOTAL NU cell blank instead of summing NU for blank-cell rows.
 func TestBuildTotalRow_NUBlankWhenNoRowHasNU(t *testing.T) {
+	t.Parallel()
 	results := []common.PurchaseResult{
 		{Recommendation: common.Recommendation{Service: common.ServiceElastiCache, ResourceType: "cache.r7g.large", Count: 3}},
 	}

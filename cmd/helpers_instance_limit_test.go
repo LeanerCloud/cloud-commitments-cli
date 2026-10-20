@@ -9,6 +9,7 @@ import (
 )
 
 func TestApplyInstanceLimit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		recs           []common.Recommendation

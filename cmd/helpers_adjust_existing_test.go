@@ -11,6 +11,7 @@ import (
 )
 
 func TestAdjustRecommendationsForExisting(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -122,6 +123,7 @@ func TestAdjustRecommendationsForExisting(t *testing.T) {
 }
 
 func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -190,16 +192,19 @@ func TestAdjustRecommendationsForExistingRIsEdgeCases(t *testing.T) {
 }
 
 func TestNewDuplicateChecker_CustomWindow(t *testing.T) {
+	t.Parallel()
 	checker := NewDuplicateChecker(48)
 	assert.Equal(t, 48, checker.LookbackHours)
 }
 
 func TestNewDuplicateChecker_ZeroUsesDefault(t *testing.T) {
+	t.Parallel()
 	checker := NewDuplicateChecker(0)
 	assert.Equal(t, DefaultDuplicateCheckLookbackHours, checker.LookbackHours)
 }
 
 func TestAdjustRecommendationsForExisting_WithinWindow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rec := common.Recommendation{
 		ResourceType: "db.t3.small", Region: "us-east-1", Count: 5,
@@ -223,6 +228,7 @@ func TestAdjustRecommendationsForExisting_WithinWindow(t *testing.T) {
 }
 
 func TestAdjustRecommendationsForExisting_OutsideWindow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rec := common.Recommendation{
 		ResourceType: "db.t3.small", Region: "us-east-1", Count: 5,
@@ -247,6 +253,7 @@ func TestAdjustRecommendationsForExisting_OutsideWindow(t *testing.T) {
 }
 
 func TestAdjustRecommendationsForExisting_PartialCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rec := common.Recommendation{
 		ResourceType: "db.t3.small", Region: "us-east-1", Count: 10,

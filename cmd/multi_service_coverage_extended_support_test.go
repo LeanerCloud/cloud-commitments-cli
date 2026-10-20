@@ -10,6 +10,7 @@ import (
 )
 
 func TestIsInExtendedSupport_EdgeCases(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	pastDate := now.AddDate(0, -6, 0)  // 6 months ago
 	futureDate := now.AddDate(3, 0, 0) // 3 years from now
@@ -88,6 +89,7 @@ func TestIsInExtendedSupport_EdgeCases(t *testing.T) {
 // ==================== Tests for adjustRecommendationForExcludedVersions ====================
 
 func TestAdjustRecommendationForExcludedVersions_AdditionalCases(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	pastDate := now.AddDate(0, -6, 0)
 	futureDate := now.AddDate(3, 0, 0)

@@ -69,6 +69,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestRunTool(t *testing.T) {
+	t.Parallel()
 	// Skip this integration test that requires AWS credentials
 	t.Skip("Skipping integration test that requires AWS credentials - functionality tested in TestProcessServiceWithMocks")
 
@@ -171,6 +172,7 @@ func TestCommandFlags(t *testing.T) {
 // default Coverage=80 instead of the actual target value the user passed.
 // Regression guard for the Aurora-target / RDS-target CLI dry-run runs.
 func TestEffectiveSizingPct(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		cfg  Config

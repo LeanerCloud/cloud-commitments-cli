@@ -275,6 +275,7 @@ func TestMaxInstancesNeverPurchasesBelowMinCount(t *testing.T) {
 // the boundary (a truncated count exactly equal to the floor is kept) and the
 // disabled case.
 func TestDropTruncatedBelowMinCount(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		counts      []int
@@ -388,6 +389,7 @@ func TestApplyGlobalInstanceLimit(t *testing.T) {
 // non-positive Count cannot raise the remaining budget and let later
 // recommendations push the run past the cap.
 func TestApplyInstanceLimitNonPositiveCountDoesNotCreditBudget(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{ResourceType: "a", Count: 4},
 		{ResourceType: "b", Count: -10},

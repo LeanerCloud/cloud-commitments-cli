@@ -259,6 +259,7 @@ func TestValidatePaymentAndTerm(t *testing.T) {
 }
 
 func TestContainsService(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		service  common.ServiceType
@@ -302,6 +303,7 @@ func TestContainsService(t *testing.T) {
 }
 
 func TestValidateNoConflicts(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		itemType string

@@ -9,6 +9,7 @@ import (
 )
 
 func TestRequireRankingSignal_IgnoresZeroSavingsSavingsPlan(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 5, EstimatedSavings: 100},
 		{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.small", Count: 5, EstimatedSavings: 50},

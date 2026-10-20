@@ -12,6 +12,7 @@ import (
 )
 
 func TestPopulateAccountNames(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	tests := []struct {
@@ -120,6 +121,7 @@ func TestPopulateAccountNames(t *testing.T) {
 // TestPopulateAccountNamesLogic tests the logic of populateAccountNames
 // by verifying it populates the AccountName field correctly.
 func TestPopulateAccountNamesLogic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("Correctly populates account names", func(t *testing.T) {

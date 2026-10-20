@@ -16,6 +16,7 @@ func spRec(service common.ServiceType, planType string, savings float64) common.
 }
 
 func TestSPSummaryCountsEveryPlanType(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rec  common.Recommendation
@@ -50,6 +51,7 @@ func TestSPSummaryCountsEveryPlanType(t *testing.T) {
 }
 
 func TestSPSummaryTotalsAddUp(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		spRec(common.ServiceSavingsPlansCompute, "Compute", 1),
 		spRec(common.ServiceSavingsPlansEC2Instance, "EC2Instance", 2),
@@ -75,6 +77,7 @@ func TestPrintSPTypeSummariesShowsOther(t *testing.T) {
 }
 
 func TestCollectRISavingsLegacyAndCanonical(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		service common.ServiceType
 		wantEC2 float64

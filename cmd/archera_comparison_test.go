@@ -310,6 +310,7 @@ func TestArcheraComparisonJSON(t *testing.T) {
 }
 
 func TestArcheraMoneyExact(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{"0": "0", "7.25": "7.25", "10.125": "10.125", "1200": "1200", "0.00001": "0.00001"} {
 		r, ok := new(big.Rat).SetString(in)
 		require.True(t, ok)
@@ -321,6 +322,7 @@ func TestArcheraMoneyExact(t *testing.T) {
 }
 
 func TestArcheraSanitize(t *testing.T) {
+	t.Parallel()
 	got := archeraSanitize("a\x1bb\u009bc\nd")
 	assert.Equal(t, "abcd", got)
 	long := archeraSanitize(strings.Repeat("é", 300))
@@ -406,6 +408,7 @@ func TestArcheraNoKeyFlagAndStructsRedacted(t *testing.T) {
 // fields the decoder would reject (enums, UUIDs, terms) still carry control
 // characters into the DTO.
 func TestArcheraDTOSanitizesEveryVendorString(t *testing.T) {
+	t.Parallel()
 	dirty := func(s string) string { return s + "\x1b[31m\u0085\u009b\u202e\u200b\u2028\u2029" }
 	str := func(s string) *string { v := dirty(s); return &v }
 	pay := insurance.PaymentOption(dirty("no_upfront"))

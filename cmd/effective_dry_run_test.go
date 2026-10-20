@@ -23,6 +23,7 @@ func TestYesFlagRemoved(t *testing.T) {
 // true. That flag has since been removed; --purchase is now the only control,
 // so moving money is always an explicit opt-in and a bare run is always safe.
 func TestEffectiveDryRun(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		actualPurchase bool // --purchase

@@ -39,6 +39,7 @@ func (m *MockSecretsStore) UpdateSecret(ctx context.Context, secretID string, se
 
 // TestAzureCredentials_Struct tests the AzureCredentials struct.
 func TestAzureCredentials_Struct(t *testing.T) {
+	t.Parallel()
 	creds := AzureCredentials{
 		TenantID:       "tenant-123",
 		ClientID:       "client-456",
@@ -54,6 +55,7 @@ func TestAzureCredentials_Struct(t *testing.T) {
 
 // TestAzureConfigOptions_Defaults tests AzureConfigOptions defaults.
 func TestAzureConfigOptions_Defaults(t *testing.T) {
+	t.Parallel()
 	opts := AzureConfigOptions{}
 
 	assert.Equal(t, "", opts.StackName)
@@ -67,6 +69,7 @@ func TestAzureConfigOptions_Defaults(t *testing.T) {
 
 // TestAzureConfigOptions_WithValues tests AzureConfigOptions with values.
 func TestAzureConfigOptions_WithValues(t *testing.T) {
+	t.Parallel()
 	opts := AzureConfigOptions{
 		StackName:      "my-cudly",
 		Profile:        "production",
@@ -88,6 +91,7 @@ func TestAzureConfigOptions_WithValues(t *testing.T) {
 
 // TestGCPCredentials_Struct tests the GCPCredentials struct.
 func TestGCPCredentials_Struct(t *testing.T) {
+	t.Parallel()
 	creds := GCPCredentials{
 		Type:         "service_account",
 		ProjectID:    "my-project",
@@ -107,6 +111,7 @@ func TestGCPCredentials_Struct(t *testing.T) {
 
 // TestGCPConfigOptions_Defaults tests GCPConfigOptions defaults.
 func TestGCPConfigOptions_Defaults(t *testing.T) {
+	t.Parallel()
 	opts := GCPConfigOptions{}
 
 	assert.Equal(t, "", opts.StackName)
@@ -118,6 +123,7 @@ func TestGCPConfigOptions_Defaults(t *testing.T) {
 
 // TestGCPConfigOptions_WithValues tests GCPConfigOptions with values.
 func TestGCPConfigOptions_WithValues(t *testing.T) {
+	t.Parallel()
 	opts := GCPConfigOptions{
 		StackName:       "my-cudly",
 		Profile:         "production",
@@ -135,6 +141,7 @@ func TestGCPConfigOptions_WithValues(t *testing.T) {
 
 // Tests for validateAzureUUID function.
 func TestValidateAzureUUID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		uuid      string
@@ -255,6 +262,7 @@ func TestValidateAzureUUID(t *testing.T) {
 
 // Tests for validateGCPProjectID function.
 func TestValidateGCPProjectID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		projectID string

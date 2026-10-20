@@ -11,6 +11,7 @@ import (
 )
 
 func TestWriteMultiServiceCSVReport_EmptyResults(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_empty_results.csv"
 	defer os.Remove(tmpFile)
 
@@ -23,6 +24,7 @@ func TestWriteMultiServiceCSVReport_EmptyResults(t *testing.T) {
 }
 
 func TestWriteMultiServiceCSVReport_Success(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_csv_success.csv"
 	defer os.Remove(tmpFile)
 
@@ -59,6 +61,7 @@ func TestWriteMultiServiceCSVReport_Success(t *testing.T) {
 }
 
 func TestWriteMultiServiceCSVReport_WithError(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_csv_with_error.csv"
 	defer os.Remove(tmpFile)
 
@@ -88,6 +91,7 @@ func TestWriteMultiServiceCSVReport_WithError(t *testing.T) {
 }
 
 func TestWriteMultiServiceCSVReport_InvalidPath(t *testing.T) {
+	t.Parallel()
 	// Use an invalid path (directory that doesn't exist)
 	invalidPath := "/nonexistent/directory/test.csv"
 
@@ -110,6 +114,7 @@ func TestWriteMultiServiceCSVReport_InvalidPath(t *testing.T) {
 }
 
 func TestWriteMultiServiceCSVReport_MultipleResults(t *testing.T) {
+	t.Parallel()
 	tmpFile := "/tmp/test_csv_multiple.csv"
 	defer os.Remove(tmpFile)
 

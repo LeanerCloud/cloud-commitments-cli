@@ -41,6 +41,7 @@ func TestFetchRecommendationsForRegion_SavingsPlanRowsCarryDetailsRegion(t *test
 }
 
 func TestWriteCSV_SavingsPlanRowHasRegionFamilyAndHourlyCommitment(t *testing.T) {
+	t.Parallel()
 	rec := ec2InstanceSPRow()
 	rec.Region = "eu-west-2"
 	path := filepath.Join(t.TempDir(), "out.csv")

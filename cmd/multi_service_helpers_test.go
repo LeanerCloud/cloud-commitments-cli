@@ -12,6 +12,7 @@ import (
 )
 
 func TestFormatServices(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expected string
@@ -48,6 +49,7 @@ func TestFormatServices(t *testing.T) {
 }
 
 func TestGetServiceDisplayName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		service  common.ServiceType
 		expected string
@@ -314,6 +316,7 @@ func TestCheckDuplicates_ErrorOnDryRun_ContinuesUnadjusted(t *testing.T) {
 }
 
 func TestGroupRecommendationsByServiceRegion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		expectedGroups  map[common.ServiceType]map[string]int
 		name            string
@@ -383,6 +386,7 @@ func TestGroupRecommendationsByServiceRegion(t *testing.T) {
 }
 
 func TestGenerateCSVFilename(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		check    func(t *testing.T, filename string)
 		name     string

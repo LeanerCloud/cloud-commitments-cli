@@ -193,6 +193,7 @@ func TestArcheraLongKeyVisibleDisguisesAreWithheld(t *testing.T) {
 // Exactly 8 consecutive key characters are withheld, 7 are shown; the first
 // and last 8 count as much as any other.
 func TestArcheraKeyFragmentBoundary(t *testing.T) {
+	t.Parallel()
 	spaced := func(frag string) error {
 		return archeraSafeError(errors.New("A: "+archeraSplitEverywhere(frag, "\u2800")), archeraLongKey)
 	}
@@ -208,6 +209,7 @@ func TestArcheraKeyFragmentBoundary(t *testing.T) {
 // The irregular-insertion rule is bounded: key characters 2 apart read as the
 // key, 3 apart do not. Uses an 8-character key so there is a single window.
 func TestArcheraKeyGapBound(t *testing.T) {
+	t.Parallel()
 	const key = "abcdefgh"
 	two := archeraSafeError(errors.New("A: abc"+"aa"+"defgh"), key).Error()
 	assert.Contains(t, two, archeraWithheld)
@@ -241,6 +243,7 @@ func TestArcheraHostileLargeDecodeValueIsBounded(t *testing.T) {
 // Only text that could be displayed (plus a small slack for a key cut by the
 // cap) is checked: a key echoed far beyond the cap changes nothing.
 func TestArcheraKeyBeyondCheckWindowIsIgnored(t *testing.T) {
+	t.Parallel()
 	far := strings.Repeat("A", archeraMaxErrorSize+archeraCheckSlack+64) + archeraSplitEverywhere(archeraLongKey, "\u2800")
 	got := archeraSafeError(errors.New(far), archeraLongKey).Error()
 	assert.NotContains(t, got, archeraWithheld)
@@ -250,6 +253,7 @@ func TestArcheraKeyBeyondCheckWindowIsIgnored(t *testing.T) {
 // A key spaced by the longest separator and cut by the cap is still withheld,
 // so the look-ahead slack covers a whole window of such a key.
 func TestArcheraKeySpacedByLongestSeparatorAtCapIsWithheld(t *testing.T) {
+	t.Parallel()
 	sep := strings.Repeat("-", archeraMaxSep)
 	msg := strings.Repeat("A", archeraMaxErrorSize-4) + archeraSplitEverywhere(archeraLongKey, sep)
 	got := archeraSafeError(errors.New(msg), archeraLongKey).Error()
@@ -259,6 +263,7 @@ func TestArcheraKeySpacedByLongestSeparatorAtCapIsWithheld(t *testing.T) {
 // A key with an inner space or a format character is matched on what a reader
 // sees of it.
 func TestArcheraKeyWithInnerSpaceOrFormatRune(t *testing.T) {
+	t.Parallel()
 	for name, key := range map[string]string{"inner space": "abcd efgh ijkl", "format rune": "abcdefg\u200bhijklmn"} {
 		got := archeraSafeError(errors.New("A: abcd\u2800efgh\u2800ijkl and abcdefghijklmn"), key).Error()
 		assert.Contains(t, got, archeraWithheld, name)
@@ -267,6 +272,7 @@ func TestArcheraKeyWithInnerSpaceOrFormatRune(t *testing.T) {
 
 // Ordinary vendor text must survive: the gap rule only fires on the key.
 func TestArcheraOrdinaryVendorTextIsNotWithheld(t *testing.T) {
+	t.Parallel()
 	msgs := []string{
 		"invalid credentials for the account; request id 4821-aa; HTTP 403 forbidden",
 		"organization not found: check the org id and the plan id",

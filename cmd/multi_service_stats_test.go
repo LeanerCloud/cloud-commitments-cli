@@ -52,6 +52,7 @@ func captureAppOutput(t *testing.T, fn func()) string {
 }
 
 func TestCalculateServiceStats(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		service  common.ServiceType

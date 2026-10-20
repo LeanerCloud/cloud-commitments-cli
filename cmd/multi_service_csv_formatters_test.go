@@ -16,6 +16,7 @@ import (
 // previously meant either "CE was queried but returned 0%" or "CE
 // returned nothing", with no way to tell which.
 func TestFormatExistingCoverage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rec  common.Recommendation
@@ -39,6 +40,7 @@ func TestFormatExistingCoverage(t *testing.T) {
 // all-upfront RIs) renders as "0.00". Operators need to tell "we don't
 // know" apart from "definitely zero" to compute total cost correctly.
 func TestFormatRecurringMonthlyOrBlank(t *testing.T) {
+	t.Parallel()
 	zero := 0.0
 	twenty := 20.5
 	tests := []struct {
@@ -60,6 +62,7 @@ func TestFormatRecurringMonthlyOrBlank(t *testing.T) {
 // TestExtractFamily covers the CSV Family column: the RDS family prefix and
 // the Savings Plan instance family.
 func TestExtractFamily(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rec  common.Recommendation
@@ -88,6 +91,7 @@ func TestExtractFamily(t *testing.T) {
 // with known sizes and stay blank for non-RDS / zero-count / unknown-size
 // inputs, matching the "0/empty = unknown" convention used elsewhere.
 func TestFormatNormalizedUnitsOrBlank(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rec  common.Recommendation
@@ -120,6 +124,7 @@ func TestFormatNormalizedUnitsOrBlank(t *testing.T) {
 // pointer (every producer constructs it that way); no value-typed case
 // is needed.
 func TestExtractDeployment(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rec  common.Recommendation
@@ -149,6 +154,7 @@ func TestExtractDeployment(t *testing.T) {
 // the Azure compute client and the GCP compute-engine client both construct
 // it that way.
 func TestExtractEngine(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		rec  common.Recommendation
@@ -178,6 +184,7 @@ func TestExtractEngine(t *testing.T) {
 // as an empty cell so users can distinguish "no upfront due" from "actual
 // $0 upfront", consistent with the rest of the optional CSV columns.
 func TestFormatCurrencyOrBlank(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		in   float64

@@ -18,6 +18,7 @@ func loadCSVContent(t *testing.T, content string) error {
 // Count cells must parse whole or not at all (#1944): fmt.Sscanf truncated
 // "3.7" to 3 and accepted trailing garbage, both feeding the purchase loop.
 func TestLoadRecommendationsFromCSV_StrictCount(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		cell string
@@ -45,6 +46,7 @@ func TestLoadRecommendationsFromCSV_StrictCount(t *testing.T) {
 }
 
 func TestLoadRecommendationsFromCSV_CountTrimmed(t *testing.T) {
+	t.Parallel()
 	csvPath := writeTestRecommendationsCSV(t, "Service,Region,ResourceType,Count,Term,PaymentOption\nrds,us-east-1,db.t3.micro,\" 3 \",3yr,partial-upfront\n")
 	recs, err := loadRecommendationsFromCSV(csvPath)
 	require.NoError(t, err)
@@ -53,12 +55,14 @@ func TestLoadRecommendationsFromCSV_CountTrimmed(t *testing.T) {
 }
 
 func TestLoadRecommendationsFromCSV_CountColumnRequired(t *testing.T) {
+	t.Parallel()
 	err := loadCSVContent(t, "Service,Region,ResourceType,Term,PaymentOption\nrds,us-east-1,db.t3.micro,3yr,partial-upfront\n")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Count")
 }
 
 func TestLoadRecommendationsFromCSV_StrictEstimatedSavings(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		cell string
@@ -85,6 +89,7 @@ func TestLoadRecommendationsFromCSV_StrictEstimatedSavings(t *testing.T) {
 // A blank EstimatedSavings cell stays absent-as-zero: requireRankingSignal
 // relies on it to refuse a binding --max-instances cap.
 func TestLoadRecommendationsFromCSV_BlankSavingsStillZero(t *testing.T) {
+	t.Parallel()
 	csvPath := writeTestRecommendationsCSV(t, "Service,Region,ResourceType,Count,EstimatedSavings,Term,PaymentOption\nrds,us-east-1,db.t3.micro,2, ,3yr,partial-upfront\n")
 	recs, err := loadRecommendationsFromCSV(csvPath)
 	require.NoError(t, err)
@@ -129,6 +134,7 @@ func TestRunToolFromCSV_RejectsMalformedNumbers(t *testing.T) {
 // (1yr/3yr, all-upfront/partial-upfront/no-upfront); a blank or unknown value
 // fails the load with the row number instead of reaching the purchase loop.
 func TestLoadRecommendationsFromCSV_TermAndPaymentValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		term    string
@@ -158,6 +164,7 @@ func TestLoadRecommendationsFromCSV_TermAndPaymentValues(t *testing.T) {
 }
 
 func TestLoadRecommendationsFromCSV_TermAndPaymentAccepted(t *testing.T) {
+	t.Parallel()
 	for _, term := range []string{"1yr", "3yr"} {
 		for _, payment := range []string{"all-upfront", "partial-upfront", "no-upfront"} {
 			t.Run(term+"/"+payment, func(t *testing.T) {

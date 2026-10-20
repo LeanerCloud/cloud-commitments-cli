@@ -8,6 +8,7 @@ import (
 )
 
 func TestParseServices(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		input         []string
@@ -79,6 +80,7 @@ func TestParseServices(t *testing.T) {
 }
 
 func TestGetAllServices(t *testing.T) {
+	t.Parallel()
 	services := getAllServices()
 
 	expected := []common.ServiceType{
@@ -98,6 +100,7 @@ func TestGetAllServices(t *testing.T) {
 }
 
 func TestParseServicesWithEmptyAndNil(t *testing.T) {
+	t.Parallel()
 	for _, input := range [][]string{nil, {}} {
 		result, err := parseServices(input)
 		assert.NoError(t, err)
@@ -111,6 +114,7 @@ func TestParseServicesWithEmptyAndNil(t *testing.T) {
 }
 
 func TestParseServicesSavingsPlanAliases(t *testing.T) {
+	t.Parallel()
 	expected := []common.ServiceType{common.ServiceSavingsPlansCompute, common.ServiceSavingsPlansEC2Instance, common.ServiceSavingsPlansSageMaker, common.ServiceSavingsPlansDatabase}
 	for _, alias := range []string{"savingsplans", "savings-plans", "SP"} {
 		result, err := parseServices([]string{"ec2", alias, "savingsplans-compute", "rds", "EC2"})

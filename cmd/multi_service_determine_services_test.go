@@ -9,6 +9,7 @@ import (
 )
 
 func TestDetermineServicesToProcess_AllServices(t *testing.T) {
+	t.Parallel()
 	cfg := Config{
 		AllServices: true,
 	}
@@ -26,6 +27,7 @@ func TestDetermineServicesToProcess_AllServices(t *testing.T) {
 }
 
 func TestDetermineServicesToProcess_SpecificServices(t *testing.T) {
+	t.Parallel()
 	cfg := Config{
 		AllServices: false,
 		Services:    []string{"rds", "elasticache"},
@@ -40,6 +42,7 @@ func TestDetermineServicesToProcess_SpecificServices(t *testing.T) {
 }
 
 func TestDetermineServicesToProcess_DefaultAndInvalid(t *testing.T) {
+	t.Parallel()
 	for _, services := range [][]string{nil, {}} {
 		result, err := determineServicesToProcess(Config{Services: services})
 		assert.NoError(t, err)
@@ -51,6 +54,7 @@ func TestDetermineServicesToProcess_DefaultAndInvalid(t *testing.T) {
 }
 
 func TestDetermineServicesToProcess_SavingsPlanTypeFilters(t *testing.T) {
+	t.Parallel()
 	allSP := []common.ServiceType{
 		common.ServiceSavingsPlansCompute, common.ServiceSavingsPlansEC2Instance,
 		common.ServiceSavingsPlansSageMaker, common.ServiceSavingsPlansDatabase,

@@ -23,6 +23,7 @@ func typedNilSPDetails() common.ServiceDetails {
 // in this file depend on. If this ever stops holding, the guards below are
 // guarding nothing and the tests would pass vacuously.
 func TestTypedNilSPDetailsAssertionSucceeds(t *testing.T) {
+	t.Parallel()
 	details, ok := typedNilSPDetails().(*common.SavingsPlanDetails)
 	require.True(t, ok, "a typed nil must still satisfy the type assertion")
 	require.Nil(t, details, "and must yield a nil pointer, which is what makes an unguarded deref panic")
@@ -37,6 +38,7 @@ func TestTypedNilSPDetailsAssertionSucceeds(t *testing.T) {
 // still scale (they do not depend on Details) and Details is left exactly as
 // it was rather than being replaced with a fabricated zero-value struct.
 func TestScaleRecommendationCostsSurvivesTypedNilDetails(t *testing.T) {
+	t.Parallel()
 	rec := common.Recommendation{
 		Service:          common.ServiceSavingsPlansCompute,
 		Count:            4,
@@ -66,6 +68,7 @@ func TestScaleRecommendationCostsSurvivesTypedNilDetails(t *testing.T) {
 // panicking mid-run leaves the operator with no report at all rather than a
 // degraded one.
 func TestApplyInstanceLimitSurvivesTypedNilSPDetails(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{
 			Service:          common.ServiceSavingsPlansCompute,

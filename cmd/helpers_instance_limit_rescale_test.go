@@ -20,6 +20,7 @@ func float64Ptr(v float64) *float64 { return &v }
 // The assertion is the ratio, not a literal figure, so the test keeps
 // meaning if the fixture's dollar values are ever changed.
 func TestApplyInstanceLimitRescalesTruncatedRow(t *testing.T) {
+	t.Parallel()
 	const (
 		origCount = 100
 		maxKept   = 10
@@ -74,6 +75,7 @@ func TestApplyInstanceLimitRescalesTruncatedRow(t *testing.T) {
 // a fix that rescaled every row would satisfy the truncation test above while
 // silently shrinking rows that fit inside the budget.
 func TestApplyInstanceLimitLeavesUntruncatedRowsUntouched(t *testing.T) {
+	t.Parallel()
 	monthly := float64Ptr(200)
 	rec := common.Recommendation{
 		Service:              common.ServiceEC2,
@@ -106,6 +108,7 @@ func TestApplyInstanceLimitLeavesUntruncatedRowsUntouched(t *testing.T) {
 // breakdown" and the frontend renders it as "—". Truncation must not turn
 // that into a confident $0.
 func TestApplyInstanceLimitPreservesNilRecurringMonthlyCost(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{
 			Service:              common.ServiceEC2,
@@ -130,6 +133,7 @@ func TestApplyInstanceLimitPreservesNilRecurringMonthlyCost(t *testing.T) {
 // it must pass through with its money untouched rather than through a ratio
 // computed from a zero denominator (NaN) or a negative one (sign flip).
 func TestApplyInstanceLimitNonPositiveCountIsNotRescaled(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{ResourceType: "zero-count", Count: 0, EstimatedSavings: 600, OnDemandCost: 100},
 		{ResourceType: "negative-count", Count: -5, EstimatedSavings: 300, OnDemandCost: 50},
@@ -161,6 +165,7 @@ func TestApplyInstanceLimitNonPositiveCountIsNotRescaled(t *testing.T) {
 // --override-count no longer routes SPs here: it leaves them alone precisely
 // because an SP is dollar-denominated rather than count-denominated (#1844).
 func TestApplyInstanceLimitRescalesSavingsPlanHourlyCommitment(t *testing.T) {
+	t.Parallel()
 	const ratio = 2.0 / 5.0
 
 	rec := common.Recommendation{
@@ -197,6 +202,7 @@ func TestApplyInstanceLimitRescalesSavingsPlanHourlyCommitment(t *testing.T) {
 // asserted against an independently computed expectation rather than against
 // the function's own output, so it cannot agree with a wrong implementation.
 func TestApplyInstanceLimitTotalMatchesSumOfKeptRows(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{ResourceType: "whole", Count: 6, EstimatedSavings: 500},     // fits whole
 		{ResourceType: "truncated", Count: 6, EstimatedSavings: 100}, // truncated 6 -> 4

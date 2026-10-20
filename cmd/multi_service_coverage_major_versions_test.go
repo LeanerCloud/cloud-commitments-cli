@@ -42,6 +42,7 @@ func (s *engineKeyedRDSMajorVersionsStub) DescribeDBMajorEngineVersions(
 // live-credential test: it stubs the RDS client and asserts the merged
 // engine:major-version map deterministically.
 func TestQueryMajorEngineVersionsWithClient_Success(t *testing.T) {
+	t.Parallel()
 	stub := &engineKeyedRDSMajorVersionsStub{
 		versionsByEngine: map[string][]rdstypes.DBMajorEngineVersion{
 			"mysql":    {rdsMajorVersion("mysql", "5.7"), rdsMajorVersion("mysql", "8.0")},
@@ -71,6 +72,7 @@ func TestQueryMajorEngineVersionsWithClient_Success(t *testing.T) {
 // call fails: missing lifecycle data must not silently disable the
 // extended-support exclusion (#2147).
 func TestQueryMajorEngineVersionsWithClient_EngineErrorContinues(t *testing.T) {
+	t.Parallel()
 	stub := &engineKeyedRDSMajorVersionsStub{
 		versionsByEngine: map[string][]rdstypes.DBMajorEngineVersion{
 			"postgres": {rdsMajorVersion("postgres", "15")},

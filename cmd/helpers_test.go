@@ -13,6 +13,7 @@ import (
 )
 
 func TestCalculateTotalInstances(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		recs     []common.Recommendation
@@ -246,6 +247,7 @@ func TestApplySizing_LegacyCoverageRecordsCountsFlooredToZero(t *testing.T) {
 }
 
 func TestGetRecommendationDescription(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expected string
@@ -294,6 +296,7 @@ func TestGetRecommendationDescription(t *testing.T) {
 }
 
 func TestNormalizeEngineName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected string
@@ -331,6 +334,7 @@ func TestNormalizeEngineName(t *testing.T) {
 // value-typed case to cover -- see
 // pkg/common/service_details_codec.go's package doc for the invariant.
 func TestGetEngineFromRecommendation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		expected string
@@ -401,6 +405,7 @@ func TestConfirmPurchaseRejectsNonterminalInput(t *testing.T) {
 }
 
 func TestResolveAccountName_LookupErrorIsReturnedAndRememberedForTheRun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	org := &MockOrganizationsClient{}
 	org.On("DescribeAccount", ctx, &organizations.DescribeAccountInput{AccountId: aws.String("999888777666")}).

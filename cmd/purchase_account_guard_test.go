@@ -19,6 +19,7 @@ const (
 )
 
 func TestCheckPurchaseAccount(t *testing.T) {
+	t.Parallel()
 	rec := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", Account: testCallerAccount}
 
 	require.NoError(t, checkPurchaseAccount(rec, testCallerAccount))

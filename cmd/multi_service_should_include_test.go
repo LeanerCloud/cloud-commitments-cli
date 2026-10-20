@@ -303,6 +303,7 @@ func TestShouldIncludeEngine(t *testing.T) {
 }
 
 func TestShouldIncludePoolSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		avg      float64
@@ -326,6 +327,7 @@ func TestShouldIncludePoolSize(t *testing.T) {
 }
 
 func TestShouldIncludeAccountIDOrNameExactMatch(t *testing.T) {
+	t.Parallel()
 	const id = "123456789012"
 	tests := []struct {
 		name        string

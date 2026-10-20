@@ -12,6 +12,7 @@ import (
 
 // Tests for storeAzureCredentials function.
 func TestStoreAzureCredentials(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		mockSetup     func(*MockSecretsStore)
 		validateStore func(*testing.T, *MockSecretsStore)

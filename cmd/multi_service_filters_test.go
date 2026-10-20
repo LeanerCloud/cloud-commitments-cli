@@ -185,6 +185,7 @@ func TestApplyFilters_DropExtendedSupport(t *testing.T) {
 // --regions does not narrow Savings Plan rows loaded from --input-csv: CSV
 // rows carry no Provider or CommitmentType, so they are used as supplied.
 func TestApplyFilters_SavingsPlansRegionsFlagCSVModeUnchanged(t *testing.T) {
+	t.Parallel()
 	csvPath := filepath.Join(t.TempDir(), "sp.csv")
 	content := `Service,Region,ResourceType,Count,Term,PaymentOption,PlanType,HourlyCommitment,InstanceFamily,DetailsRegion
 savings-plans-compute,,,1,1yr,no-upfront,Compute,1.5,,
@@ -206,6 +207,7 @@ savings-plans-ec2instance,,,1,1yr,no-upfront,EC2Instance,1.5,m5,us-east-1
 // its plan region (Details.Region), as on the main path, while --regions alone
 // still leaves it alone (#2228).
 func TestApplyFilters_SavingsPlansIncludeRegionsCSVMode(t *testing.T) {
+	t.Parallel()
 	csvPath := filepath.Join(t.TempDir(), "sp.csv")
 	content := `Service,Region,ResourceType,Count,Term,PaymentOption,PlanType,HourlyCommitment,InstanceFamily,DetailsRegion
 savings-plans-ec2instance,,,1,1yr,no-upfront,EC2Instance,1.5,m5,us-east-1
@@ -236,6 +238,7 @@ savings-plans-ec2instance,,,1,1yr,no-upfront,EC2Instance,1.5,m5,us-east-1
 }
 
 func TestRequireExactExcludes(t *testing.T) {
+	t.Parallel()
 	recs := []common.Recommendation{
 		{
 			Account:     "123456789012",
@@ -285,6 +288,7 @@ const (
 )
 
 func TestApplyFilters_UnidentifiedAccountUnderInclude(t *testing.T) {
+	t.Parallel()
 	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1}
 	named := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testUnidentifiedAcct, AccountName: "prod"}
 	tests := []struct {
@@ -312,6 +316,7 @@ func TestApplyFilters_UnidentifiedAccountUnderInclude(t *testing.T) {
 }
 
 func TestApplyFilters_UnidentifiedAccountUnderExclude(t *testing.T) {
+	t.Parallel()
 	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1}
 	named := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testUnidentifiedAcct, AccountName: "prod"}
 	other := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testOtherAcct, AccountName: "dev"}
@@ -341,6 +346,7 @@ func TestApplyFilters_UnidentifiedAccountUnderExclude(t *testing.T) {
 }
 
 func TestCSVExcludeOnly_UnidentifiedRowFilteredOutWithoutError(t *testing.T) {
+	t.Parallel()
 	unidentified := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1}
 	other := common.Recommendation{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro", Count: 1, Account: testOtherAcct, AccountName: "dev"}
 	cfg := Config{IncludeExtendedSupport: true, ExcludeAccounts: []string{testUnidentifiedAcct}}
@@ -354,6 +360,7 @@ func TestCSVExcludeOnly_UnidentifiedRowFilteredOutWithoutError(t *testing.T) {
 }
 
 func TestPopulateRecommendationAccountNames_UnidentifiedRecUnderExcludeOnly(t *testing.T) {
+	t.Parallel()
 	cache := NewAccountAliasCacheWithClient(&MockOrganizationsClient{})
 	recs := []common.Recommendation{{Service: common.ServiceRDS, Region: "us-east-1", ResourceType: "db.t3.micro"}}
 

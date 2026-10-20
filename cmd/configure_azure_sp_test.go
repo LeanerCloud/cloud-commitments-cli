@@ -102,6 +102,7 @@ const (
 )
 
 func TestCreateAzureServicePrincipal_Success(t *testing.T) {
+	t.Parallel()
 	m := &mockSPProvisioner{
 		appObjectID: "app-object-id",
 		appID:       "app-client-id",
@@ -145,6 +146,7 @@ func TestCreateAzureServicePrincipal_Success(t *testing.T) {
 }
 
 func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		setup         func(*mockSPProvisioner)
@@ -227,6 +229,7 @@ func TestCreateAzureServicePrincipal_ErrorPropagation(t *testing.T) {
 // the compensating delete also fails, the error names the orphaned application
 // so the operator can delete it manually.
 func TestCreateAzureServicePrincipal_RollbackFailureSurfaced(t *testing.T) {
+	t.Parallel()
 	m := &mockSPProvisioner{
 		appObjectID:  "app-object-id",
 		appID:        "app-client-id",
@@ -246,6 +249,7 @@ func TestCreateAzureServicePrincipal_RollbackFailureSurfaced(t *testing.T) {
 }
 
 func TestCreateAzureServicePrincipal_ScopeFormat(t *testing.T) {
+	t.Parallel()
 	m := &mockSPProvisioner{
 		appObjectID: "o", appID: "a", secret: "s", principalID: "p", roleDefID: "r",
 	}
@@ -297,6 +301,7 @@ func newFakePrincipalNotFoundProvisioner(fake *fakeRoleAssigner) *graphSPProvisi
 // TestGraphSPProvisioner_AssignRole_RetrySucceeds verifies that AssignRole
 // retries when ARM returns PrincipalNotFound and eventually succeeds.
 func TestGraphSPProvisioner_AssignRole_RetrySucceeds(t *testing.T) {
+	t.Parallel()
 	principalNotFound := &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400}
 	fake := &fakeRoleAssigner{failsRemaining: 2, principalNotFoundErr: principalNotFound}
 	p := newFakePrincipalNotFoundProvisioner(fake)
@@ -312,6 +317,7 @@ func TestGraphSPProvisioner_AssignRole_RetrySucceeds(t *testing.T) {
 // AssignRole fails loud with a clear message when the service principal never
 // propagates within the budget.
 func TestGraphSPProvisioner_AssignRole_ExhaustsRetryBudget(t *testing.T) {
+	t.Parallel()
 	principalNotFound := &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400}
 	fake := &fakeRoleAssigner{failsRemaining: 100, principalNotFoundErr: principalNotFound}
 	p := newFakePrincipalNotFoundProvisioner(fake)
@@ -329,6 +335,7 @@ func TestGraphSPProvisioner_AssignRole_ExhaustsRetryBudget(t *testing.T) {
 // TestGraphSPProvisioner_AssignRole_NonRetryableError verifies that a
 // non-PrincipalNotFound error is returned immediately without retrying.
 func TestGraphSPProvisioner_AssignRole_NonRetryableError(t *testing.T) {
+	t.Parallel()
 	fake := &fakeRoleAssigner{otherErr: errors.New("authorization denied")}
 	p := newFakePrincipalNotFoundProvisioner(fake)
 
@@ -342,6 +349,7 @@ func TestGraphSPProvisioner_AssignRole_NonRetryableError(t *testing.T) {
 // TestGraphSPProvisioner_AssignRole_ContextCancellation verifies that context
 // cancellation is treated as a terminal stop and does not continue retrying.
 func TestGraphSPProvisioner_AssignRole_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	principalNotFound := &azcore.ResponseError{ErrorCode: "PrincipalNotFound", StatusCode: 400}
 	fake := &fakeRoleAssigner{failsRemaining: 100, principalNotFoundErr: principalNotFound}
 	p := newFakePrincipalNotFoundProvisioner(fake)
@@ -359,6 +367,7 @@ func TestGraphSPProvisioner_AssignRole_ContextCancellation(t *testing.T) {
 
 // TestIsPrincipalNotFoundErr covers the error-code detection helper directly.
 func TestIsPrincipalNotFoundErr(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		err  error
 		name string

@@ -20,6 +20,7 @@ import (
 // appended to an existing binding for the role and the function reports a
 // change.
 func TestAddMemberToPolicyBinding_AppendsToExistingBinding(t *testing.T) {
+	t.Parallel()
 	policy := &cloudresourcemanager.Policy{
 		Bindings: []*cloudresourcemanager.Binding{
 			{Role: "roles/viewer", Members: []string{"user:existing@example.com"}},
@@ -40,6 +41,7 @@ func TestAddMemberToPolicyBinding_AppendsToExistingBinding(t *testing.T) {
 // TestAddMemberToPolicyBinding_AlreadyBoundNoChange verifies that an
 // already-bound member is a no-op (returns false, no duplicate appended).
 func TestAddMemberToPolicyBinding_AlreadyBoundNoChange(t *testing.T) {
+	t.Parallel()
 	member := "serviceAccount:sa@proj.iam.gserviceaccount.com"
 	policy := &cloudresourcemanager.Policy{
 		Bindings: []*cloudresourcemanager.Binding{
@@ -59,6 +61,7 @@ func TestAddMemberToPolicyBinding_AlreadyBoundNoChange(t *testing.T) {
 // TestAddMemberToPolicyBinding_CreatesMissingBinding verifies a new binding is
 // appended when the role is absent from the policy.
 func TestAddMemberToPolicyBinding_CreatesMissingBinding(t *testing.T) {
+	t.Parallel()
 	policy := &cloudresourcemanager.Policy{
 		Bindings: []*cloudresourcemanager.Binding{
 			{Role: "roles/viewer", Members: []string{"user:existing@example.com"}},
@@ -81,6 +84,7 @@ func TestAddMemberToPolicyBinding_CreatesMissingBinding(t *testing.T) {
 // role must NOT drop or mutate a conditional (IAM condition) binding on another
 // role. Losing conditional bindings would silently widen access.
 func TestAddMemberToPolicyBinding_PreservesConditionalBindings(t *testing.T) {
+	t.Parallel()
 	conditional := &cloudresourcemanager.Binding{
 		Role:    "roles/storage.objectViewer",
 		Members: []string{"user:auditor@example.com"},
@@ -150,6 +154,7 @@ func (m *mockGCPKeyProvisioner) DeleteKey(_ context.Context, keyName string) err
 }
 
 func TestWriteServiceAccountKey_Success(t *testing.T) {
+	t.Parallel()
 	keyMaterial := []byte(`{"type":"service_account","project_id":"proj"}`)
 	m := &mockGCPKeyProvisioner{
 		keyName:        "projects/-/serviceAccounts/sa@proj.iam.gserviceaccount.com/keys/abc123",
@@ -175,6 +180,7 @@ func TestWriteServiceAccountKey_Success(t *testing.T) {
 // (so it does not linger as an active unused credential) and the reserved local
 // file is cleaned up.
 func TestWriteServiceAccountKey_DecodeFailureRollsBack(t *testing.T) {
+	t.Parallel()
 	m := &mockGCPKeyProvisioner{
 		keyName:        "projects/-/serviceAccounts/sa@proj.iam.gserviceaccount.com/keys/abc123",
 		privateKeyData: "!!!not-base64!!!",
@@ -198,6 +204,7 @@ func TestWriteServiceAccountKey_DecodeFailureRollsBack(t *testing.T) {
 // compensating DeleteKey also fails, the error names the orphaned remote key so
 // the operator can delete it manually, while still surfacing the original cause.
 func TestWriteServiceAccountKey_RollbackFailureSurfaced(t *testing.T) {
+	t.Parallel()
 	m := &mockGCPKeyProvisioner{
 		keyName:        "projects/-/serviceAccounts/sa@proj.iam.gserviceaccount.com/keys/orphan999",
 		privateKeyData: "!!!not-base64!!!",
@@ -217,6 +224,7 @@ func TestWriteServiceAccountKey_RollbackFailureSurfaced(t *testing.T) {
 // the remote key fails, no rollback is attempted (nothing was minted) and no
 // local file is left behind.
 func TestWriteServiceAccountKey_CreateFailureNoOrphan(t *testing.T) {
+	t.Parallel()
 	m := &mockGCPKeyProvisioner{
 		createErr: &googleapi.Error{Code: 403},
 	}
@@ -235,6 +243,7 @@ func TestWriteServiceAccountKey_CreateFailureNoOrphan(t *testing.T) {
 // TestWriteServiceAccountKey_CreateFailureAmbiguous verifies that only a 4xx
 // googleapi error is a definite failure; every other outcome may have minted a key.
 func TestWriteServiceAccountKey_CreateFailureAmbiguous(t *testing.T) {
+	t.Parallel()
 	const sa = "sa@proj.iam.gserviceaccount.com"
 	cases := []struct {
 		name      string
@@ -267,6 +276,7 @@ func TestWriteServiceAccountKey_CreateFailureAmbiguous(t *testing.T) {
 // destination file already exists (exclusive-create fails), the remote key is
 // never minted, so there is nothing to orphan.
 func TestWriteServiceAccountKey_ReserveFailureNoMint(t *testing.T) {
+	t.Parallel()
 	keyFile := filepath.Join(t.TempDir(), "cudly-gcp-key.json")
 	require.NoError(t, os.WriteFile(keyFile, []byte("pre-existing"), 0o600))
 
@@ -457,6 +467,7 @@ func TestUploadGCPCredentialsFile_OperatorFileKept(t *testing.T) {
 }
 
 func TestGcloudDeleteKeyCommand(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t,
 		"gcloud iam service-accounts keys delete abc123 --iam-account=sa@proj.iam.gserviceaccount.com",
 		gcloudDeleteKeyCommand(testMintedKeyName))

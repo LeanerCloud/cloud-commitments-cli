@@ -47,6 +47,7 @@ func containsVerify(s string) bool {
 }
 
 func TestAuditStopMessage_SuccessWithErrorReportsError(t *testing.T) {
+	t.Parallel()
 	msg := auditStopMessage(1, 2, []common.PurchaseResult{succeededWithError()}, errors.New("cause"))
 	assert.Contains(t, msg, "(errored: x)")
 	assert.NotContains(t, msg, "(commitment")
@@ -58,6 +59,7 @@ func TestAuditStopMessage_SuccessWithErrorReportsError(t *testing.T) {
 }
 
 func TestCalculateServiceStats_SuccessWithErrorCountsFailed(t *testing.T) {
+	t.Parallel()
 	results := []common.PurchaseResult{
 		{Success: true},
 		succeededWithError(),
@@ -70,6 +72,7 @@ func TestCalculateServiceStats_SuccessWithErrorCountsFailed(t *testing.T) {
 }
 
 func TestPurchaseFailureError_SuccessWithErrorIsFailure(t *testing.T) {
+	t.Parallel()
 	err := purchaseFailureError([]common.PurchaseResult{{Success: true}, succeededWithError()}, false)
 	assert.ErrorIs(t, err, errPurchasesFailed)
 	assert.Contains(t, err.Error(), "1 of 2")
