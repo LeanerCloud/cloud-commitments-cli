@@ -85,7 +85,7 @@
 # blocks, none a real account) that the AWS account-ID detector flags in Go
 # test tables. Each entry pins the path, the placeholder digits and the
 # whole line, so anything else on the line is still scanned.
-^cmd/(helpers_test|multi_service_filters_test|multi_service_test|multi_service_csv_report_test)\.go:[0-9]+:[[:space:]]*(accountID|Account):[[:space:]]*"(123456789012|999888777666|111222333444)",$
+^cmd/(helpers_test|multi_service_filters_test|multi_service_test|multi_service_csv_report_test|multi_service_purchase_loop_test)\.go:[0-9]+:[[:space:]]*(accountID|Account):[[:space:]]*"(123456789012|999888777666|111222333444)",$
 ^cmd/multi_service_helpers_test\.go:[0-9]+:[[:space:]]*\{Account: "(123456789012|210987654321|111222333444|555666777888)", AccountName: ""\},( // Same account - should use cache)?$
 ^cmd/savings_plan_purchase_test\.go:[0-9]+:[[:space:]]*(Service: common\.ServiceSavingsPlansCompute, )?(Count: 1, )?Account: "11111111111[1]", Term: "1yr", PaymentOption: "no-upfront",$
 ^cmd/savings_plan_purchase_test\.go:[0-9]+:[[:space:]]*"account": func\(r \*common\.Recommendation\) \{ r\.Account = "22222222222[2]" \},$
