@@ -194,7 +194,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	exitIfInterrupted(ctx, "fetching recommendations")
 
 	// Phase 2: score, enforce the run-wide instance cap, and display.
-	scoredResult := scoreLimitAndDisplay(allRecs, cfg, drops)
+	scoredResult := scoreLimitAndDisplay(allRecs, cfg, drops, coverageMap)
 	if len(scoredResult.Passed) == 0 {
 		printDropSummary(drops)
 		AppLogger.Printf("\nℹ️  No recommendations passed filters. Nothing to purchase.\n")
@@ -348,7 +348,12 @@ func loadAWSConfig(ctx context.Context, cfg Config) (aws.Config, error) {
 // prompt and the purchase loop all describe the same post-cap set, and so the
 // instances that survive are the highest-savings ones run-wide (scorer.Score
 // sorts Passed by savings percentage descending).
-func scoreLimitAndDisplay(recs []common.Recommendation, cfg Config, drops *common.DropSummary) scorer.ScoredResult {
+//
+// RDS family coverage is re-derived after the cap (see rederiveRDSFamilyCoverage),
+// because the cap, --count-override and the duplicate check all change Count
+// after family-NU sizing wrote ProjectedCoverage (#2214). coverageMap must be
+// the map the sizing stage used.
+func scoreLimitAndDisplay(recs []common.Recommendation, cfg Config, drops *common.DropSummary, coverageMap recommendations.PoolCoverageMap) scorer.ScoredResult {
 	scorerCfg := scorer.Config{
 		MinSavingsPct:      cfg.MinSavingsPct,
 		MaxBreakEvenMonths: cfg.MaxBreakEvenMonths,
@@ -356,10 +361,23 @@ func scoreLimitAndDisplay(recs []common.Recommendation, cfg Config, drops *commo
 	}
 	result := scorer.Score(recs, scorerCfg)
 	result.Passed = applyGlobalInstanceLimit(result.Passed, cfg, rankBySavingsPercentage, drops)
+	result.Passed = rederiveRDSFamilyCoverage(result.Passed, cfg, coverageMap)
 	fmt.Print(reporter.RenderTable(result))
 	fmt.Print(reporter.RenderExcluded(result))
 	fmt.Print(reporter.RenderSummary(result))
 	return result
+}
+
+// rederiveRDSFamilyCoverage refreshes the family-wide RDS ProjectedCoverage
+// from the final counts. It only runs for --target-coverage, the sole path
+// where ApplyFamilyNUSizingRDS wrote that field; on the legacy --coverage path
+// the field is a per-pool value that RederiveFamilyCoverage would overwrite.
+// The CSV path has no coverage map and does not call it.
+func rederiveRDSFamilyCoverage(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap) []common.Recommendation {
+	if cfg.TargetCoverage <= 0 {
+		return recs
+	}
+	return recommendations.RederiveFamilyCoverage(recs, coverageMap)
 }
 
 // rankingRule names the ordering --max-instances consumes, so the cap can say

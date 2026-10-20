@@ -308,7 +308,9 @@ func mapRecs(recs []common.Recommendation, fn func(common.Recommendation) common
 // usage signal (zero, negative, NaN or infinite avg) and rows without a positive
 // Count are returned unchanged.
 // RDS ProjectedCoverage is a family aggregate set by family-NU sizing, which a
-// per-row formula would corrupt, so only RDS ProjectedUtilization is refreshed.
+// per-row formula would corrupt, so only RDS ProjectedUtilization is refreshed;
+// the family coverage is re-derived once on the final set by
+// rederiveRDSFamilyCoverage (#2214).
 func rederiveProjections(rec common.Recommendation) common.Recommendation {
 	avg := rec.AverageInstancesUsedPerHour
 	if common.IsSavingsPlan(rec.Service) || rec.Count <= 0 || !(avg > 0) || math.IsInf(avg, 1) {
