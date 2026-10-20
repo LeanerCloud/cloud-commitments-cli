@@ -83,11 +83,25 @@ func loadCSVRecommendations(csvPath string, need csvThresholdNeeds) ([]common.Re
 var requiredCSVColumns = []string{"Service", "Region", "ResourceType", "Count", "Term", "PaymentOption"}
 
 // Accepted Term values match fetchRecommendationsForRegion; accepted
-// PaymentOption values match validatePaymentAndTerm.
+// PaymentOption values match validatePaymentAndTerm. Accepted Service values
+// are the canonical slugs writeMultiServiceCSV emits and createServiceClient
+// builds a client for; --services flag aliases (elasticsearch, savingsplans,
+// savingsplans-compute, ...) are not accepted, since a row the purchase loop
+// cannot route would otherwise be skipped mid-run instead of failing the load.
 var (
 	validCSVTerms          = []string{"1yr", "3yr"}
 	validCSVPaymentOptions = []string{"all-upfront", "partial-upfront", "no-upfront"}
+	validCSVServices       = csvServiceNames()
 )
+
+func csvServiceNames() []string {
+	services := getAllServices()
+	names := make([]string, len(services))
+	for i, s := range services {
+		names[i] = string(s)
+	}
+	return names
+}
 
 // parseCSVEnum requires the cell to be exactly one of allowed.
 func parseCSVEnum(record []string, colIdx map[string]int, fieldName string, allowed []string) (string, error) {
@@ -174,8 +188,13 @@ func parseCSVRecords(reader *csv.Reader, colIdx map[string]int, need csvThreshol
 func parseCSVRecord(record []string, colIdx map[string]int, need csvThresholdNeeds) (common.Recommendation, error) {
 	rec := common.Recommendation{Provider: common.ProviderAWS}
 
+	service, err := parseCSVEnum(record, colIdx, "Service", validCSVServices)
+	if err != nil {
+		return rec, err
+	}
+	rec.Service = common.ServiceType(service)
+
 	// Parse string fields
-	rec.Service = common.ServiceType(getCSVField(record, colIdx, "Service"))
 	rec.Region = getCSVField(record, colIdx, "Region")
 	rec.ResourceType = getCSVField(record, colIdx, "ResourceType")
 	rec.Account = getCSVField(record, colIdx, "Account")
@@ -242,6 +261,10 @@ func parseCSVCount(record []string, colIdx map[string]int, target *int) error {
 	}
 	if n < 1 {
 		return fmt.Errorf("column %d %q: must be at least 1, got %d", idx+1, fieldName, n)
+	}
+	// Same ceiling validateFlags puts on --max-instances and --override-count.
+	if n > MaxReasonableInstances {
+		return fmt.Errorf("column %d %q: must be at most %d, got %d", idx+1, fieldName, MaxReasonableInstances, n)
 	}
 	*target = n
 	return nil

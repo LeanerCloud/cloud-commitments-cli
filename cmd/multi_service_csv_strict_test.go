@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -178,4 +179,93 @@ func TestLoadRecommendationsFromCSV_TermAndPaymentAccepted(t *testing.T) {
 			})
 		}
 	}
+}
+
+// Service cells must be one of the canonical service types the purchase loop
+// builds a client for (#379, audit A10-007). A flag alias such as
+// "elasticsearch", a padded or capitalized slug, or the "savingsplans"
+// umbrella used to load as an unknown ServiceType, and the row was then
+// skipped with "Service client not yet implemented" instead of failing.
+func TestLoadRecommendationsFromCSV_ServiceValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+	}{
+		{"empty", ""},
+		{"whitespace only", " "},
+		{"flag alias", "elasticsearch"},
+		{"trailing space", "rds "},
+		{"uppercase", "RDS"},
+		{"savings plans umbrella", "savingsplans"},
+		{"flag-only savings plans spelling", "savingsplans-compute"},
+		{"unknown", "dynamodb"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content := "Service,Region,ResourceType,Count,Term,PaymentOption\n" +
+				"rds,us-east-1,db.t3.micro,1,1yr,all-upfront\n" +
+				"\"" + tt.service + "\",us-east-1,db.t3.small,2,1yr,all-upfront\n"
+			err := loadCSVContent(t, content)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "line 3")
+			assert.Contains(t, err.Error(), `column 1 "Service"`)
+		})
+	}
+}
+
+// Every service the tool supports still loads, so the report a run writes can
+// be fed back through --input-csv.
+func TestLoadRecommendationsFromCSV_ServiceAccepted(t *testing.T) {
+	for _, service := range getAllServices() {
+		t.Run(string(service), func(t *testing.T) {
+			recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t,
+				"Service,Region,ResourceType,Count,Term,PaymentOption\n"+
+					string(service)+",us-east-1,m5.large,1,1yr,no-upfront\n"))
+			require.NoError(t, err)
+			require.Len(t, recs, 1)
+			assert.Equal(t, service, recs[0].Service)
+		})
+	}
+}
+
+// Count is bounded by MaxReasonableInstances, the same ceiling validateFlags
+// puts on --max-instances and --override-count (#379).
+func TestLoadRecommendationsFromCSV_CountUpperBound(t *testing.T) {
+	row := func(count int) string {
+		return "Service,Region,ResourceType,Count,Term,PaymentOption\n" +
+			"rds,us-east-1,db.t3.micro," + strconv.Itoa(count) + ",3yr,partial-upfront\n"
+	}
+
+	recs, err := loadRecommendationsFromCSV(writeTestRecommendationsCSV(t, row(MaxReasonableInstances)))
+	require.NoError(t, err)
+	require.Len(t, recs, 1)
+	assert.Equal(t, MaxReasonableInstances, recs[0].Count)
+
+	err = loadCSVContent(t, row(MaxReasonableInstances+1))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "line 2")
+	assert.Contains(t, err.Error(), `column 4 "Count"`)
+	assert.Contains(t, err.Error(), strconv.Itoa(MaxReasonableInstances))
+}
+
+// End to end: a row with a bad Service cell stops the run before any AWS call
+// and before a report is written, rather than being dropped mid-run.
+func TestRunToolFromCSV_RejectsUnknownService(t *testing.T) {
+	awsHits := isolateAWSEnv(t)
+	cfg := Config{
+		CSVInput: writeTestRecommendationsCSV(t, "Service,Region,ResourceType,Count,EstimatedSavings,Term,PaymentOption\n"+
+			"rds,us-east-1,db.t3.micro,1,100,1yr,all-upfront\n"+
+			"elasticsearch,us-east-1,m5.large.search,1,100,1yr,all-upfront\n"),
+		CSVOutput:      filepath.Join(t.TempDir(), "report.csv"),
+		AuditLog:       filepath.Join(t.TempDir(), "audit.jsonl"),
+		ActualPurchase: false,
+		Coverage:       100,
+	}
+	err := runToolFromCSV(context.Background(), cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read CSV file: CSV line 3:")
+	assert.Contains(t, err.Error(), `column 1 "Service"`)
+	assert.Contains(t, err.Error(), `"elasticsearch"`)
+	assert.NoFileExists(t, cfg.CSVOutput)
+	assert.Zero(t, awsHits.Load())
 }
