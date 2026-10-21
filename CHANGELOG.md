@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Bump Go to 1.26.10 to pick up the fix for GO-2026-6809 (crypto/x509), which `govulncheck` now reports against 1.26.9.
 - `--max-instances` drop summary: a zero-Count recommendation swept out by the
   `--min-count` floor no longer drives the tally negative (which panicked in
   `DropSummary.Add`), and removed zero-Count entries are now counted and named
