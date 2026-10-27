@@ -22,17 +22,17 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout code
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Read from go.mod rather than a hardcoded string, matching
           # aws_sanity / azure_sanity / database-migration. One fewer place the
@@ -40,14 +40,14 @@ jobs:
           go-version-file: go.mod
 
       - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
 
       # Cache the pinned gocyclo binary before installation.
       - name: Cache Go-installed tools (gocyclo)
         id: cache-go-tools
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/go/bin
           key: go-tools-${{ runner.os }}-gocyclo-v0.6.0
@@ -139,7 +139,7 @@ jobs:
       # Saves ~30-60s per cache-hit run; safe because pre-commit verifies
       # env integrity on use.
       - name: Cache pre-commit environments
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -153,7 +153,7 @@ jobs:
       # step covers the latter. Keyed on go.sum so a dep upgrade still
       # invalidates the cache and gets clean builds.
       - name: Cache Go build cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build
           key: go-build-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
@@ -166,7 +166,7 @@ jobs:
         # job runs the shared strict policy across the root module.
         # nick-fields/retry wraps the run with up to 3 attempts and a
         # 90-second wait so transient flakes do not require a manual rerun.
-        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
+        uses: nick-fields/retry@ad984534de44a9489a53aefd81eb77f87c70dc60 # v4.0.0
         env:
           SKIP: gosec
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
