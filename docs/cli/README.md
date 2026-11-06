@@ -83,7 +83,7 @@ All flags belong to the root command unless noted otherwise.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--rebuy-window-days` | `0` (disabled) | When set, treat existing RIs whose remaining term is at most this many days as already uncovered, so `--target-coverage` sizes replacements before they expire. `0` fully trusts existing coverage. See [purchase-safety.md](purchase-safety.md). |
+| `--rebuy-window-days` | `0` (disabled) | When set, treat existing RIs whose remaining term is at most this many days as already uncovered, so `--target-coverage` sizes replacements before they expire. `0` fully trusts existing coverage. With `--target-coverage`, refuses to run from a member account of an AWS Organization, when the account does not own all in-scope usage, or when a scope check or the RI inventory read fails; needs read-only `sts:GetCallerIdentity`, `organizations:DescribeOrganization` and `ce:GetReservationCoverage`. See [purchase-safety.md](purchase-safety.md) and [cloud-setup.md](cloud-setup.md#aws-permissions-for---rebuy-window-days). |
 | `--min-pool-size` | `0` (no filter) | When set, drop RI recommendations for pools whose `AverageInstancesUsedPerHour` is below this threshold. Prevents integer-arithmetic over-coverage on tiny pools (e.g. average=1 cannot approximate 80% coverage without effectively buying 100%). SPs and recommendations without a per-hour signal pass through unfiltered. See [filtering.md](filtering.md). |
 
 ### Input / output

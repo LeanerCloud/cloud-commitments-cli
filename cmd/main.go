@@ -161,7 +161,12 @@ func init() {
 	rootCmd.Flags().IntVar(&toolCfg.RebuyWindowDays, "rebuy-window-days", 0,
 		"When >0, treat existing RIs expiring within this many days as already "+
 			"uncovered, so --target-coverage sizes recommendations to replace them "+
-			"before they expire. Default 0 = trust existing coverage fully.")
+			"before they expire. Default 0 = trust existing coverage fully. "+
+			"With --target-coverage, refuses to run from a member account of an AWS "+
+			"Organization, when the credentials' account does not own all in-scope "+
+			"usage, or when a scope check or the RI inventory read fails. Needs "+
+			"read-only sts:GetCallerIdentity, organizations:DescribeOrganization "+
+			"and ce:GetReservationCoverage; see docs/cli/purchase-safety.md.")
 	rootCmd.Flags().Float64Var(&toolCfg.MinPoolSize, "min-pool-size", 0,
 		"When >0, drop RI recommendations for pools with AverageInstancesUsedPerHour "+
 			"below this threshold. Useful with --target-coverage to skip tiny pools "+

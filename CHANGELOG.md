@@ -54,6 +54,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `--target-coverage` with `--rebuy-window-days` no longer buys replacement EC2 and
   other non-RDS RIs again when they were already bought inside the coverage
   lookback: the expiring RIs are netted against those replacements (#2235).
+- `--rebuy-window-days` with `--target-coverage` now refuses to run (exit 1, no
+  CSV, dry runs included) when the credentials' account does not own all the
+  in-scope RI usage, instead of netting one account's expiring RIs against
+  broader demand. Member accounts of an AWS Organization are refused. A failed
+  STS lookup, role check, scope probe (new Cost Explorer
+  `GetReservationCoverage` query grouped by linked account) or RI inventory
+  read also exits 1 on these runs. These runs now need the read-only
+  `organizations:DescribeOrganization` permission (#2131).
 - `--min-savings-pct` and `--max-break-even-months` now apply on `--input-csv`
   runs instead of being refused. The CSV report gains `SavingsPercentage` and
   `BreakEvenMonths` columns; replaying a report that lacks a column a set flag

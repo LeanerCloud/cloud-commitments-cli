@@ -323,6 +323,18 @@ The command expects a standard GCP Service Account JSON key file (type `service_
 
 Any missing required field causes the command to exit with an error before writing to Secrets Manager.
 
+### AWS permissions for --rebuy-window-days
+
+A run that sets `--rebuy-window-days` with `--target-coverage` on an RI service first checks that the credentials' account owns all the in-scope usage (see [purchase-safety.md](purchase-safety.md#scope)). The check needs one new read-only permission, `organizations:DescribeOrganization`. It also calls two actions the run already uses:
+
+| Action | Used for | If the call fails |
+|--------|----------|------------|
+| `sts:GetCallerIdentity` | Identifies the credentials' account (IAM cannot deny it) | The run exits 1 and names the failed lookup |
+| `organizations:DescribeOrganization` | Tells a standalone, management or member account apart; member accounts are refused | The run exits 1 and asks you to grant it or omit the flag |
+| `ce:GetReservationCoverage` | Already needed by `--target-coverage`; here it also lists which accounts have usage in the sized pool | The run exits 1 and names the cause; a Cost Explorer denial also asks you to grant it or enable Cost Explorer access for the account |
+
+`organizations:DescribeOrganization` is not needed when `--rebuy-window-days` is not set.
+
 ## Usage notes
 
 | Scenario | Notes |
