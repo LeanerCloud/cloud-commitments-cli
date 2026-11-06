@@ -333,7 +333,7 @@ A run that sets `--rebuy-window-days` with `--target-coverage` on an RI service 
 | `organizations:DescribeOrganization` | Tells a standalone, management or member account apart; member accounts are refused | The run exits 1 and asks you to grant it or omit the flag |
 | `ce:GetReservationCoverage` | Already needed by `--target-coverage`; here it also lists which accounts have usage in the sized pool | The run exits 1 and names the cause; a Cost Explorer denial also asks you to grant it or enable Cost Explorer access for the account |
 
-`organizations:DescribeOrganization` is not needed when `--rebuy-window-days` is not set.
+`organizations:DescribeOrganization` is needed only when the check runs: `--rebuy-window-days` and `--target-coverage` are both set and the run includes an RI service. Runs without either flag, and Savings Plans-only runs, never call it.
 
 ## Usage notes
 
