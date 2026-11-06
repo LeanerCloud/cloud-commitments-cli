@@ -100,6 +100,12 @@ func TestRebuyScopeRefusalCommand(t *testing.T) {
 	}
 }
 
+// ceDimension is a Cost Explorer DimensionValues as the JSON protocol sends it.
+type ceDimension struct {
+	Key    string
+	Values []string
+}
+
 // linkedAccountCoverage is the shared LINKED_ACCOUNT router: it answers the
 // scope probe (GroupBy LINKED_ACCOUNT) and reports ok=false for any other
 // coverage request. It pins the probe's request shape: the 30-day window,
@@ -111,11 +117,9 @@ func (p *completenessProxy) linkedAccountCoverage(body []byte, ceService, foreig
 		TimePeriod map[string]string
 		GroupBy    []map[string]string
 		Filter     struct {
-			And []struct {
-				Dimensions struct {
-					Key    string
-					Values []string
-				}
+			Dimensions *ceDimension
+			And        []struct {
+				Dimensions ceDimension
 			}
 		}
 		Metrics       []string
@@ -134,7 +138,15 @@ func (p *completenessProxy) linkedAccountCoverage(body []byte, ceService, foreig
 	end, err := time.Parse(time.DateOnly, request.TimePeriod["End"])
 	require.NoError(p.t, err)
 	require.Equal(p.t, 30*24*time.Hour, end.Sub(start))
+	// Cost Explorer rejects an And with fewer than two operands, so one filter
+	// must be a bare dimension (as in cloud-commitments-go's CE filter builders).
 	filters := make(map[string][]string)
+	if d := request.Filter.Dimensions; d != nil {
+		require.Empty(p.t, request.Filter.And, "a filter is a bare dimension or an And, not both")
+		filters[d.Key] = d.Values
+	} else {
+		require.GreaterOrEqual(p.t, len(request.Filter.And), 2, "Cost Explorer rejects an And with fewer than two operands")
+	}
 	for _, expression := range request.Filter.And {
 		require.NotContains(p.t, filters, expression.Dimensions.Key)
 		filters[expression.Dimensions.Key] = expression.Dimensions.Values

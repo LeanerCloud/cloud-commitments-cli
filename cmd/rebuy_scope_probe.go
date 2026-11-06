@@ -91,17 +91,22 @@ func probeServiceAccounts(ctx context.Context, client coverageAPI, service commo
 
 // rebuyProbeInput builds the probe request: the coverage lookback window
 // (Metrics "Hour" as the coverage map), SERVICE and optional REGION filters.
+// Cost Explorer rejects an And with fewer than two operands, so SERVICE alone
+// is a bare dimension, as in cloud-commitments-go's CE filter builders.
 func rebuyProbeInput(ceService string, cfg Config) *costexplorer.GetReservationCoverageInput {
 	end := time.Now().UTC()
 	start := end.AddDate(0, 0, -coverageLookbackDays(cfg))
-	filters := []types.Expression{{Dimensions: &types.DimensionValues{Key: types.DimensionService, Values: []string{ceService}}}}
+	filter := &types.Expression{Dimensions: &types.DimensionValues{Key: types.DimensionService, Values: []string{ceService}}}
 	if len(cfg.Regions) > 0 {
-		filters = append(filters, types.Expression{Dimensions: &types.DimensionValues{Key: types.DimensionRegion, Values: cfg.Regions}})
+		filter = &types.Expression{And: []types.Expression{
+			*filter,
+			{Dimensions: &types.DimensionValues{Key: types.DimensionRegion, Values: cfg.Regions}},
+		}}
 	}
 	return &costexplorer.GetReservationCoverageInput{
 		TimePeriod: &types.DateInterval{Start: aws.String(start.Format(time.DateOnly)), End: aws.String(end.Format(time.DateOnly))},
 		GroupBy:    []types.GroupDefinition{{Type: types.GroupDefinitionTypeDimension, Key: aws.String(string(types.DimensionLinkedAccount))}},
-		Filter:     &types.Expression{And: filters},
+		Filter:     filter,
 		Metrics:    []string{"Hour"},
 	}
 }

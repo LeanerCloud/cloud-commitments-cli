@@ -95,7 +95,7 @@ func TestProbeServiceAccounts(t *testing.T) {
 		assert.Contains(t, err.Error(), "333333333333")
 		assert.Contains(t, err.Error(), "rds")
 		require.Len(t, fake.inputs, 1)
-		assert.Equal(t, []string{"Amazon Relational Database Service"}, fake.inputs[0].Filter.And[0].Dimensions.Values)
+		assert.Equal(t, []string{"Amazon Relational Database Service"}, fake.inputs[0].Filter.Dimensions.Values)
 	})
 	t.Run("an account compared exactly: padding is foreign", func(t *testing.T) {
 		fake := &fakeCoverage{t: t, pages: []*costexplorer.GetReservationCoverageOutput{groupsPage("", " 111111111111")}}
@@ -150,7 +150,7 @@ func TestProbeRequestShape(t *testing.T) {
 		require.NoError(t, probeServiceAccounts(ctx, fake, service, probeCfg()))
 		require.Len(t, fake.inputs, 1)
 		in := fake.inputs[0]
-		assert.Equal(t, []types.Expression{{Dimensions: &types.DimensionValues{Key: types.DimensionService, Values: []string{want}}}}, in.Filter.And, "%s: default mode has no REGION filter", service)
+		assert.Equal(t, &types.Expression{Dimensions: &types.DimensionValues{Key: types.DimensionService, Values: []string{want}}}, in.Filter, "%s: default mode is the bare SERVICE dimension (no single-operand And)", service)
 		assert.Equal(t, []types.GroupDefinition{{Type: types.GroupDefinitionTypeDimension, Key: aws.String("LINKED_ACCOUNT")}}, in.GroupBy)
 		assert.Equal(t, []string{"Hour"}, in.Metrics)
 	}
@@ -160,6 +160,8 @@ func TestProbeRequestShape(t *testing.T) {
 		fake := &fakeCoverage{t: t}
 		require.NoError(t, probeServiceAccounts(ctx, fake, common.ServiceEC2, cfg))
 		require.Len(t, fake.inputs[0].Filter.And, 2)
+		assert.Nil(t, fake.inputs[0].Filter.Dimensions)
+		assert.Equal(t, &types.DimensionValues{Key: types.DimensionService, Values: []string{"Amazon Elastic Compute Cloud - Compute"}}, fake.inputs[0].Filter.And[0].Dimensions)
 		assert.Equal(t, &types.DimensionValues{Key: types.DimensionRegion, Values: []string{"us-east-1", "eu-west-1"}}, fake.inputs[0].Filter.And[1].Dimensions)
 	})
 	t.Run("the window is the coverage lookback", func(t *testing.T) {
