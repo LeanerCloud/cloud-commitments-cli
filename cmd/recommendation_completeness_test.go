@@ -44,11 +44,14 @@ func TestRecommendationCompletenessCommand(t *testing.T) {
 	}
 }
 
-func runCompletenessScenario(t *testing.T, service, regionMode, details string) {
+// startCompletenessChild re-executes the test binary as the root command
+// against a recorded-HTTP proxy and returns what the child printed. The
+// output path is the CSV the child would write.
+func startCompletenessChild(t *testing.T, service, regionMode, details string) (fixture *completenessProxy, output, stdout, stderr string, runErr error) {
 	t.Helper()
 	dir := t.TempDir()
 	fixture, proxyURL, caPath := newCompletenessProxy(t, dir, regionMode, details, service)
-	output := filepath.Join(dir, "recommendations.csv")
+	output = filepath.Join(dir, "recommendations.csv")
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRecommendationCompletenessCommand$", "-test.v")
@@ -65,10 +68,16 @@ func runCompletenessScenario(t *testing.T, service, regionMode, details string) 
 		"AWS_SHARED_CREDENTIALS_FILE=" + filepath.Join(dir, "absent-credentials"),
 		"HTTPS_PROXY=" + proxyURL, "HTTP_PROXY=" + proxyURL, "AWS_CA_BUNDLE=" + caPath,
 	}
-	var stdout, stderr bytes.Buffer
-	child.Stdout, child.Stderr = &stdout, &stderr
-	runErr := child.Run()
-	logs := stdout.String() + stderr.String()
+	var out, errOut bytes.Buffer
+	child.Stdout, child.Stderr = &out, &errOut
+	runErr = child.Run()
+	return fixture, output, out.String(), errOut.String(), runErr
+}
+
+func runCompletenessScenario(t *testing.T, service, regionMode, details string) {
+	t.Helper()
+	fixture, output, stdout, stderr, runErr := startCompletenessChild(t, service, regionMode, details)
+	logs := stdout + stderr
 	if details == "api-error" || details == "failed-type" {
 		// A provider failure is a failed run, not "nothing to buy".
 		var exitErr *exec.ExitError
@@ -79,7 +88,7 @@ func runCompletenessScenario(t *testing.T, service, regionMode, details string) 
 		require.NoFileExists(t, output)
 		return
 	}
-	require.NoError(t, runErr, "stdout: %s\nstderr: %s", &stdout, &stderr)
+	require.NoError(t, runErr, "stdout: %s\nstderr: %s", stdout, stderr)
 	fixture.assertRequests(t)
 	for _, failure := range []string{"Could not check", "Failed to query", "request send failed", "certificate", "TLS handshake"} {
 		require.NotContains(t, logs, failure, "unexpected ancillary error")
@@ -90,7 +99,7 @@ func runCompletenessScenario(t *testing.T, service, regionMode, details string) 
 	case rdsExpiryService:
 		assertRDSExpiryCSV(t, output, details, logs)
 	case "rds":
-		assertCompletenessDiagnostics(t, details, stdout.String(), stderr.String())
+		assertCompletenessDiagnostics(t, details, stdout, stderr)
 		assertCompletenessCSV(t, output, details, logs)
 	default:
 		assertSPCompleteness(t, output, service, details, logs)
