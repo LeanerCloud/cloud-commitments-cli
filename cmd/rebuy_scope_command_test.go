@@ -146,7 +146,7 @@ func (p *completenessProxy) linkedAccountCoverage(body []byte, ceService, foreig
 		wantDays = 60
 		foreignVisible = end.Sub(start) > 30*24*time.Hour
 	}
-	require.Equal(p.t, time.Duration(wantDays)*24*time.Hour, end.Sub(start))
+	require.Equal(p.t, time.Duration(wantDays+2)*24*time.Hour, end.Sub(start))
 	// Cost Explorer rejects an And with fewer than two operands, so one filter
 	// must be a bare dimension (as in cloud-commitments-go's CE filter builders).
 	filters := make(map[string][]string)

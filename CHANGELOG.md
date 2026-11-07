@@ -169,6 +169,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- `--coverage-lookback-days` is now capped at 365 for every `--target-coverage`
+  run, not only gated rebuy runs; values from 366 up to about 395, previously
+  accepted, are now rejected. The gated rebuy scope probe also starts two days
+  earlier than the longer lookback window, so it can only refuse more.
 - Bump cloud-commitments-go to dcb5ba0: Azure reservation purchases use one
   shared helper with aligned guards, error messages and display names, and hold
   the shared concurrency slot per call instead of per batch; the AWS provider

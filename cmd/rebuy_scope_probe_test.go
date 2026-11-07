@@ -181,7 +181,7 @@ func TestProbeRequestShape(t *testing.T) {
 			require.NoError(t, err)
 			end, err := time.Parse(time.DateOnly, aws.ToString(fake.inputs[0].TimePeriod.End))
 			require.NoError(t, err)
-			assert.Equal(t, time.Duration(tc.wantDays)*24*time.Hour, end.Sub(start), "coverage %d rec %q", tc.coverage, tc.rec)
+			assert.Equal(t, time.Duration(tc.wantDays+2)*24*time.Hour, end.Sub(start), "coverage %d rec %q", tc.coverage, tc.rec)
 		}
 	})
 	t.Run("an unparsable recommendation lookback refuses before any request", func(t *testing.T) {
