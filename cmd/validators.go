@@ -91,6 +91,10 @@ func validateIdempotencyWindow() error {
 	return nil
 }
 
+// maxCoverageLookbackDays keeps the Cost Explorer window inside its roughly
+// 13 months of history.
+const maxCoverageLookbackDays = 365
+
 // validateRecLookbackPeriod validates the --rec-lookback-period flag.
 func validateRecLookbackPeriod() error {
 	valid := map[string]bool{"7d": true, "30d": true, "60d": true}
@@ -116,6 +120,9 @@ func validateNumericRanges(cmd *cobra.Command) error {
 	// Validate coverage lookback days
 	if toolCfg.CoverageLookbackDays < 1 {
 		return fmt.Errorf("coverage-lookback-days must be >= 1, got: %d", toolCfg.CoverageLookbackDays)
+	}
+	if toolCfg.CoverageLookbackDays > maxCoverageLookbackDays {
+		return fmt.Errorf("coverage-lookback-days must be <= %d (Cost Explorer keeps about 13 months of history), got: %d", maxCoverageLookbackDays, toolCfg.CoverageLookbackDays)
 	}
 
 	// Validate max instances

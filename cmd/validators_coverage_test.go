@@ -77,7 +77,7 @@ func TestValidateTargetCoverage(t *testing.T) {
 }
 
 // TestValidateCoverageLookbackDays verifies that validateNumericRanges rejects
-// non-positive --coverage-lookback-days and accepts positive values.
+// --coverage-lookback-days outside 1..365 and accepts values inside it.
 func TestValidateCoverageLookbackDays(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -88,6 +88,13 @@ func TestValidateCoverageLookbackDays(t *testing.T) {
 		{name: "default 30 is valid", days: 30, wantErr: false},
 		{name: "1 day is valid", days: 1, wantErr: false},
 		{name: "90 days is valid", days: 90, wantErr: false},
+		{name: "365 days is valid", days: 365, wantErr: false},
+		{
+			name:      "366 days rejected",
+			days:      366,
+			wantErr:   true,
+			errSubstr: "coverage-lookback-days must be <= 365",
+		},
 		{
 			name:      "zero rejected",
 			days:      0,
