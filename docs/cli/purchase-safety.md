@@ -81,7 +81,7 @@ A duplicate check runs before every purchase, on both the `--services` and `--in
 
 The window is a Go duration string that must be a positive whole number of hours (e.g. `24h`, `48h`, `72h`). A value that doesn't parse, is zero or negative, or isn't whole hours (e.g. `90m`, `1h30m`) is rejected at startup, before any API call, rather than rounded or replaced with the default.
 
-If the existing-commitments lookup itself fails (a transient API error), the two modes diverge: a dry run continues with a warning printed to the log (nothing is bought, so reporting fidelity wins), while a `--purchase` run refuses that (service, region) - it prints a "Refusing to purchase" line and buys nothing there, rather than falling back to the un-deduplicated counts ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)).
+If the existing-commitments lookup itself fails (a transient API error), the two modes diverge: a dry run continues with a warning printed to the log (nothing is bought, so reporting fidelity wins), while a `--purchase` run refuses that (service, region) - it prints a "Refusing to purchase" line and buys nothing there, rather than falling back to the un-deduplicated counts ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)). The exception is `--rebuy-window-days` with `--target-coverage` on an RI service: there a failed existing-RI inventory read exits 1 first, on dry runs too (see [Scope](#scope)).
 
 The audit status value `skipped_covered` (idempotency hit) is defined in the audit record schema for use by the server-side scheduler path and is not emitted by this CLI's dedup check.
 
@@ -111,6 +111,26 @@ cudly --services rds \
 
 `--rebuy-window-days` has no effect when `--target-coverage` is not set.
 
+### Scope
+
+Rebuy reads the existing-RI inventory of the credentials' own account only. The `--target-coverage` demand it sizes against can be broader: a payer or management account sees the usage of its member accounts. Netting one account's expiring RIs against another account's demand would be wrong, so a run with `--rebuy-window-days` and `--target-coverage` on an RI service refuses when it cannot show that the credentials' account owns all the in-scope usage. Savings Plans are never expiry-adjusted and are not checked.
+
+The run exits 1 and writes no CSV, on dry runs and `--purchase` runs alike, in these cases:
+
+- the credentials belong to a member account of an AWS Organization. Replacements bought centrally are not visible to a member account, so its expiry netting could buy them again. Gated rebuy runs from a standalone account, or from a management account whose member accounts have no in-scope usage;
+- a recommendation row belongs to another account;
+- a Cost Explorer coverage query (grouped by linked account, over the longer of `--coverage-lookback-days` and `--rec-lookback-period`, with the same service and, when `--regions` is set, region filters as sizing) shows usage in another account, so recommendations hidden behind your own account's rows are caught too;
+- the check itself could not run: an unrecognized `--rec-lookback-period`, the STS identity lookup, the `organizations:DescribeOrganization` role check, the Cost Explorer scope query or the RI inventory read failed. Before this check, a failed RI inventory read on a dry run only warned and sized without the expiry netting; now it exits 1.
+
+A scope refusal names the other account and the service. To recover, run from a standalone account or from a management account whose member accounts have no in-scope usage, or omit `--rebuy-window-days`. A check failure says "the scope check could not run" and the cause: fix access or retry, or omit `--rebuy-window-days`. A failed role check also asks you to grant `organizations:DescribeOrganization` (read-only); see [cloud-setup.md](cloud-setup.md#aws-permissions-for---rebuy-window-days). A Cost Explorer AccessDenied also asks you to grant `ce:GetReservationCoverage` or enable Cost Explorer access for the account. A Cost Explorer failure while building the coverage map on a dry run still only warns, as described above. `--input-csv` runs never apply rebuy.
+
+Limits of the check, in both directions, for a management account that passes it:
+
+- expiring RIs owned by member accounts are missing from the inventory, so the run can under-replace;
+- a replacement bought by a member account and shared through RI sharing to the management account's usage is not credited against the management account's own expiring RIs, so the run can buy it again: an over-purchase. This is rarer than the member case the check refuses, and it cannot be detected from the management account.
+
+Purchases for other accounts are still refused regardless.
+
 ## Between-purchase delay
 
 cudly inserts a short delay between consecutive purchases to respect AWS API rate limits. This delay is hardcoded (a few seconds) and cannot be configured via a user-facing flag.
@@ -129,8 +149,8 @@ Before any real purchase run:
 
 1. Run without `--purchase` first to review the dry-run CSV output.
 2. Check that `--audit-log` points to a readable, writable, durable location.
-3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence.
+3. If using `--target-coverage`, verify `--rebuy-window-days` is set appropriately for your RI renewal cadence, and that the credentials' account owns all in-scope usage (see [Scope](#scope)).
 4. Narrow the scope with `--include-regions`, `--include-accounts`, or `--min-savings-pct` before buying across all services.
 5. Consider `--max-instances` as a final safety cap for a first run. It limits instance-based reservations only; Savings Plans are exempt, so it does not cap their hourly commitment spend.
-6. Set `--idempotency-window` to cover the time since the earlier run (e.g. `72h` for a re-run two days later), and note that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward.
+6. Set `--idempotency-window` to cover the time since the earlier run (e.g. `72h` for a re-run two days later), and note that a failed existing-commitments lookup makes a dry run proceed un-deduplicated with a warning, while a `--purchase` run refuses to purchase for that (service, region) instead ([#1941](https://github.com/LeanerCloud/cloud-commitments-cli/issues/1941)); watch the log for either signal and check the audit log afterward. With `--rebuy-window-days` and `--target-coverage`, a failed RI inventory read exits 1 instead.
 7. If an AI agent or other automation drives `cudly`, have it hand off the dry-run recommendation to a human, who reviews the totals and confirms `--purchase` at a terminal. See [Automation and AI agents](#automation-and-ai-agents).

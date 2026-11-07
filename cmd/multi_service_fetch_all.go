@@ -104,7 +104,7 @@ func fetchAndFilterRegionRecs(
 	if err := populateRecommendationAccountNames(ctx, recs, accountCache, cfg); err != nil {
 		return nil, fmt.Errorf("%w: %w", errRecommendationFetch, err)
 	}
-	if err := requireRegionInventory(recs, cfg, engineData); err != nil {
+	if err := requireRecPreconditions(recs, cfg, engineData); err != nil {
 		return nil, err
 	}
 	recs = applyRegionFilters(recs, engineData, region, cfg, drops)
@@ -120,17 +120,13 @@ func fetchAndFilterRegionRecs(
 	serviceClient := createServiceClient(service, regionalCfg)
 
 	// Fetch existing commitments up front when --rebuy-window-days is set so
-	// the sizing step can deduct expiring RIs from ExistingCoveragePct.
-	// Best-effort: a failure here logs and continues; expiry adjustment
-	// becomes a no-op for this region.
-	var expiringCommitments []common.Commitment
-	if cfg.RebuyWindowDays > 0 && serviceClient != nil {
-		commits, err := serviceClient.GetExistingCommitments(ctx)
-		if err != nil {
-			AppLogger.Printf("  ⚠️  Could not fetch existing commitments for expiry check: %v\n", err)
-		} else {
-			expiringCommitments = commits
-		}
+	// the sizing step can deduct expiring RIs from ExistingCoveragePct. Under
+	// the rebuy scope gate (RI service, coverage target) a failed read refuses
+	// the run; otherwise it warns and the expiry adjustment is a no-op for this
+	// region.
+	expiringCommitments, inventoryErr := fetchRebuyInventory(ctx, serviceClient, service, cfg)
+	if inventoryErr != nil {
+		return nil, inventoryErr
 	}
 
 	recs = applyCoverageAndOverrides(recs, cfg, coverageMap, expiringCommitments, drops)

@@ -72,6 +72,9 @@ type rdsExpiryScenario struct {
 	absentLogLine string
 	// parent documents the count the commit before the fix produced.
 	parent []int
+	// foreignUsage is an account the scope probe reports besides the caller.
+	foreignUsage string
+	orgMaster    string
 }
 
 const rdsExpiryTarget = 80
@@ -120,6 +123,8 @@ func rdsExpiryCase(name string) rdsExpiryScenario {
 			recs:  one("db.r6g.xlarge", 4), want: []int{2}, existing: 60, parent: []int{0},
 		}
 	case "multi-size-linked-accounts":
+		// Refused since cli#2131 (rebuy_scope_command_test.go): the recs span
+		// three accounts. Sizing math kept for the day the probe allows it.
 		// Two sizes and three linked-account rows in one family: the 16 expiring
 		// NU are deducted once (family 40% -> 20%), so the 60% gap (48 NU) splits
 		// 2 + 4 + 2. A double deduction would buy 2 + 5 + 2; no deduction, 1 + 2 + 1.
@@ -132,14 +137,17 @@ func rdsExpiryCase(name string) rdsExpiryScenario {
 			want: []int{2, 4, 2}, existing: 20, parent: []int{1, 2, 1},
 		}
 	case "partial-inventory":
-		// Cost Explorer covers 64 NU org-wide but the single-account inventory
-		// lists only the 4 expiring large RIs (16 NU); the other accounts' RIs
-		// are missing. The deduction is capped at the 16 expiring NU (80% ->
-		// 60%, buy 4 large), never the whole supplied-vs-covered difference.
+		// Refused since cli#2131: Cost Explorer covers 64 NU org-wide but the
+		// single-account inventory lists only the 4 expiring large RIs (16 NU);
+		// the other accounts' RIs are missing, which the scope probe detects as
+		// another account's usage in the pool. The sizing math below is kept for
+		// the day the probe allows it (deduction capped at the 16 expiring NU:
+		// 80% -> 60%, buy 4 large).
 		return rdsExpiryScenario{
-			usage: []rdsExpiryUsage{mysql("db.r6g.large", 20, 80)},
-			ris:   []rdsExpiryRI{ri("db.r6g.large", 4, 15)},
-			recs:  one("db.r6g.large", 8), want: []int{4}, existing: 60, parent: []int{0},
+			foreignUsage: "999999999999",
+			usage:        []rdsExpiryUsage{mysql("db.r6g.large", 20, 80)},
+			ris:          []rdsExpiryRI{ri("db.r6g.large", 4, 15)},
+			recs:         one("db.r6g.large", 8), want: []int{4}, existing: 60, parent: []int{0},
 		}
 	case "unusable-expiring-warned":
 		// Expiring RIs the family pass cannot use (multi-AZ with no coverage
@@ -207,8 +215,8 @@ func rdsExpiryCase(name string) rdsExpiryScenario {
 
 func TestRDSFamilyExpiryCommand(t *testing.T) {
 	for _, name := range []string{
-		"already-at-target", "below-target", "large-ri-xlarge-usage", "multi-size-linked-accounts",
-		"partial-inventory", "unusable-expiring-warned", "control-outside-window", "control-engine-isolation",
+		"already-at-target", "below-target", "large-ri-xlarge-usage",
+		"unusable-expiring-warned", "control-outside-window", "control-engine-isolation",
 		"rerun-replacement-bought", "control-replacement-outside-lookback",
 	} {
 		t.Run(name, func(t *testing.T) { runCompletenessScenario(t, rdsExpiryService, "explicit", name) })
@@ -324,6 +332,9 @@ func (p *completenessProxy) respondRDSExpiry(req *http.Request, body []byte) *ht
 
 func (p *completenessProxy) rdsExpiryResponse(host, op string, body []byte, values url.Values) (int, string, string) {
 	s := rdsExpiryCase(p.details)
+	if payload, ok := p.describeOrganization(host, op, s.orgMaster); ok {
+		return 200, "application/x-amz-json-1.1", payload
+	}
 	switch {
 	case host == "ce.us-east-1.amazonaws.com" && op == "AWSInsightsIndexService.GetReservationPurchaseRecommendation":
 		var request map[string]any
@@ -345,6 +356,9 @@ func (p *completenessProxy) rdsExpiryResponse(host, op string, body []byte, valu
 		require.NoError(p.t, err)
 		return 200, "application/x-amz-json-1.1", string(encoded)
 	case host == "ce.us-east-1.amazonaws.com" && op == "AWSInsightsIndexService.GetReservationCoverage":
+		if payload, ok := p.linkedAccountCoverage(body, "Amazon Relational Database Service", s.foreignUsage); ok {
+			return 200, "application/x-amz-json-1.1", payload
+		}
 		return 200, "application/x-amz-json-1.1", p.rdsExpiryCoverage(s, body)
 	case host == "organizations.us-east-1.amazonaws.com" && op == "AWSOrganizationsV20161128.DescribeAccount":
 		var request map[string]string
@@ -433,6 +447,7 @@ func (p *completenessProxy) assertRDSExpiryRequests(t *testing.T) {
 		t.Logf("rds expiry op %s x%d", op, n)
 	}
 	require.Equal(t, 1, p.requests["ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationPurchaseRecommendation"])
-	require.Equal(t, 12, p.requests["ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage"])
+	require.Equal(t, 13, p.requests["ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage"], "12 coverage-map calls plus the scope probe")
+	require.Equal(t, 1, p.requests[orgDescribeKey], "one organization role check")
 	require.Positive(t, p.requests["rds.us-east-1.amazonaws.com/DescribeReservedDBInstances"])
 }

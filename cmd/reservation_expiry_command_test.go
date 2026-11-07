@@ -24,28 +24,56 @@ type reservationExpiryScenario struct {
 	average, demand, target, existing float64
 	missing, filtered                 bool
 	replacedDays, replacedCount       int
+	// inventoryFails makes DescribeReservedInstances answer AccessDenied.
+	inventoryFails bool
+	// foreignUsage is an account the scope probe reports besides the caller.
+	foreignUsage string
+	// orgMaster is the management account DescribeOrganization reports;
+	// empty means the caller (a management account).
+	orgMaster string
+	// recLookback is the --rec-lookback-period; empty keeps the default.
+	recLookback string
 }
 
+// reservationExpiryCase defines each scenario. Since cli#2131 a gated rebuy run
+// refuses a recommendation owned by another account, so every success scenario
+// is a single account (the caller, 111111111111) whose usage is the whole pool:
+// average equals demand, so Cost Explorer's pool rescaling is the identity.
 func reservationExpiryCase(name string) reservationExpiryScenario {
-	s := reservationExpiryScenario{rows: 3, expiry: 18, endDays: 15, count: 12, average: 30, demand: 90, target: 80, existing: 40}
+	s := reservationExpiryScenario{rows: 1, expiry: 18, endDays: 15, count: 36, average: 90, demand: 90, target: 80, existing: 40}
 	switch name {
 	case "pool-demand":
 	case "outside-window":
-		s.endDays, s.count, s.existing = 180, 6, 60
+		s.endDays, s.count, s.existing = 180, 18, 60
 	case "replaced-inside-lookback":
 		// Replacements bought 5 days ago are inside the 30-day coverage
 		// lookback, so the expiring RIs net to zero and the run must not
 		// re-buy them (cli#2235).
-		s.count, s.existing, s.replacedDays, s.replacedCount = 6, 60, 5, 18
-	case "missing-demand-two-each-six-total":
+		s.count, s.existing, s.replacedDays, s.replacedCount = 18, 60, 5, 18
+	case "missing-demand-two-total":
 		s.average, s.demand, s.count, s.existing, s.missing = 10, 0, 2, 60, true
-	case "filtered-subset":
-		s.count, s.filtered = 18, true
 	case "exact-boundary", "below-boundary":
-		s.rows, s.expiry, s.count, s.average, s.demand, s.existing = 2, 2, 4, 15, 30, 160.0/3
+		s.expiry, s.count, s.average, s.demand, s.existing = 2, 8, 30, 30, 160.0/3
 		if name == "below-boundary" {
-			s.target, s.count = math.Nextafter(80, 0), 3
+			s.target, s.count = math.Nextafter(80, 0), 7
 		}
+	case "exclude-others-refuses":
+		// Three accounts, the run excludes the two foreign ones: the scope check
+		// still refuses because it runs before the exclusion filter.
+		s.rows, s.average, s.filtered = 3, 30, true
+	case "inventory-error":
+		s.inventoryFails = true
+	case "member-account-refuses":
+		// The caller belongs to an organization managed by another account.
+		s.orgMaster = "999999999999"
+	case "foreign-usage-default-region":
+		// Every rec row is the caller's, but Cost Explorer reports another
+		// account's usage in the pool: only the probe can see it.
+		s.foreignUsage = "999999999999"
+	case "foreign-usage-days-31-60":
+		// The foreign account has usage only before the 30-day coverage window,
+		// which a 60-day recommendation lookback still includes.
+		s.foreignUsage, s.recLookback = "999999999999", "60d"
 	default:
 		panic("unknown expiry scenario: " + name)
 	}
@@ -53,7 +81,7 @@ func reservationExpiryCase(name string) reservationExpiryScenario {
 }
 
 func TestReservationExpiryCommand(t *testing.T) {
-	for _, name := range []string{"pool-demand", "outside-window", "replaced-inside-lookback", "missing-demand-two-each-six-total", "filtered-subset", "exact-boundary", "below-boundary"} {
+	for _, name := range []string{"pool-demand", "outside-window", "replaced-inside-lookback", "missing-demand-two-total", "exact-boundary", "below-boundary"} {
 		t.Run(name, func(t *testing.T) { runCompletenessScenario(t, "ec2", "explicit", name) })
 	}
 }
@@ -61,8 +89,11 @@ func TestReservationExpiryCommand(t *testing.T) {
 func reservationExpiryArgs(name string) []string {
 	s := reservationExpiryCase(name)
 	args := []string{"--payment", "partial-upfront", "--target-coverage", strconv.FormatFloat(s.target, 'g', -1, 64), "--rebuy-window-days", "30"}
+	if s.recLookback != "" {
+		args = append(args, "--rec-lookback-period", s.recLookback)
+	}
 	if s.filtered {
-		args = append(args, "--exclude-accounts", "expiry-account-3")
+		args = append(args, "--exclude-accounts", "expiry-account-2,expiry-account-3")
 	}
 	return args
 }
@@ -78,7 +109,7 @@ func assertReservationExpiryCSV(t *testing.T, output, name, logs string) {
 	warnings := 0
 	if s.missing {
 		warnings = 1
-		require.Contains(t, logs, "3 recommendations because pool demand was unavailable; coverage was left unchanged")
+		require.Contains(t, logs, "1 recommendations because pool demand was unavailable; coverage was left unchanged")
 	}
 	require.Equal(t, warnings, strings.Count(logs, "Skipped expiry adjustment for"), logs)
 	for _, failure := range []string{"Failed to fetch", "incomplete AWS", "Could not fetch", "failed to fetch", "WARNING:", "no signal", "catalog fetch"} {
@@ -86,10 +117,6 @@ func assertReservationExpiryCSV(t *testing.T, output, name, logs string) {
 	}
 	count := s.rows
 	avg := s.average
-	if s.filtered {
-		count--
-		avg = s.demand / float64(count)
-	}
 	require.Len(t, rows, count+2, logs)
 	require.NotContains(t, rows[0], "ExistingCoveragePercentExact")
 	seen := make(map[string]bool)
@@ -149,6 +176,9 @@ func (p *completenessProxy) respondReservationExpiry(req *http.Request, body []b
 
 func (p *completenessProxy) reservationExpiryResponse(host, op string, body []byte, values url.Values) (int, string, string) {
 	s := reservationExpiryCase(p.details)
+	if payload, ok := p.describeOrganization(host, op, s.orgMaster); ok {
+		return 200, "application/x-amz-json-1.1", payload
+	}
 	if host == "ce.us-east-1.amazonaws.com" {
 		switch op {
 		case "AWSInsightsIndexService.GetReservationPurchaseRecommendation":
@@ -195,6 +225,9 @@ func (p *completenessProxy) reservationExpiryResponse(host, op string, body []by
 		case "DescribeInstanceTypes":
 			return 200, "text/xml", `<DescribeInstanceTypesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/"><instanceTypeSet><item><instanceType>m5.large</instanceType><vCpuInfo><defaultVCpus>2</defaultVCpus></vCpuInfo><memoryInfo><sizeInMiB>8192</sizeInMiB></memoryInfo></item></instanceTypeSet></DescribeInstanceTypesResponse>`
 		case "DescribeReservedInstances":
+			if s.inventoryFails {
+				return 403, "text/xml", `<Response><Errors><Error><Code>UnauthorizedOperation</Code><Message>fixture denied reserved instances</Message></Error></Errors><RequestID>fixture</RequestID></Response>`
+			}
 			return 200, "text/xml", reservationExpiryReservedInstances(s)
 		}
 	}
@@ -232,6 +265,9 @@ func reservationExpiryReservedInstances(s reservationExpiryScenario) string {
 }
 
 func (p *completenessProxy) reservationExpiryCoverage(body []byte) string {
+	if payload, ok := p.linkedAccountCoverage(body, "Amazon Elastic Compute Cloud - Compute", reservationExpiryCase(p.details).foreignUsage); ok {
+		return payload
+	}
 	var request struct {
 		TimePeriod map[string]string
 		GroupBy    []map[string]string
@@ -294,10 +330,11 @@ func (p *completenessProxy) assertReservationExpiryRequests(t *testing.T) {
 	s := reservationExpiryCase(p.details)
 	want := map[string]int{
 		"ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationPurchaseRecommendation": 1,
-		"ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage":               12,
+		"ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage":               13,
 		"organizations.us-east-1.amazonaws.com/AWSOrganizationsV20161128.DescribeAccount":         s.rows,
-		"ec2.us-east-1.amazonaws.com/DescribeInstanceTypes":                                       1,
-		"ec2.us-east-1.amazonaws.com/DescribeReservedInstances":                                   2,
+		orgDescribeKey: 1,
+		"ec2.us-east-1.amazonaws.com/DescribeInstanceTypes":     1,
+		"ec2.us-east-1.amazonaws.com/DescribeReservedInstances": 2,
 	}
 	require.Equal(t, want, p.requests, "no other operation, including purchases, is permitted")
 	wantCoverage := make([]string, 0, 12)

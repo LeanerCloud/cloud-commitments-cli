@@ -172,6 +172,7 @@ func runToolMultiService(ctx context.Context, cfg Config) {
 	if adapter, ok := recClient.(*awsprovider.RecommendationsClientAdapter); ok && cfg.RecLookbackPeriod != "" {
 		adapter.SetRecLookbackPeriod(cfg.RecLookbackPeriod)
 	}
+	cfg = mustEnforceRebuyScope(ctx, awsCfg, cfg, servicesToProcess)
 	engineData := mustFetchEngineVersionData(ctx, cfg, extendedSupportCheckNeeded(cfg, servicesToProcess))
 
 	// Fetch existing-RI coverage so --target-coverage can subtract what
@@ -384,6 +385,9 @@ func rederiveRDSFamilyCoverage(recs []common.Recommendation, cfg Config, coverag
 func exitOnFetchError(err error) {
 	if errors.Is(err, errRecommendationFetch) {
 		log.Fatalf("Cannot complete the recommendation fetch: %v", err)
+	}
+	if errors.Is(err, errRebuyScope) {
+		log.Fatalf("Cannot verify the rebuy scope: %v", err)
 	}
 	exitOnExclusionError(err)
 }

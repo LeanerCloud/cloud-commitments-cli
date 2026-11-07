@@ -39,6 +39,8 @@ type completenessProxy struct {
 	cert           tls.Certificate
 	expiryCoverage []string
 	expiryAccounts []string
+	// linkedAccountCalls counts the rebuy scope probe's LINKED_ACCOUNT requests.
+	linkedAccountCalls int
 }
 
 type completenessSPRequest struct {
