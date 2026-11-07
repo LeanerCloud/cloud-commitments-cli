@@ -157,7 +157,7 @@ func init() {
 		"Number of calendar days of historical demand fed to GetReservationCoverage "+
 			"when computing the existing-RI coverage map for --target-coverage sizing. "+
 			"Match this to your AWS console coverage report window to reconcile "+
-			"CUDly's ExistingCoverage column against the console export. Default 30.")
+			"CUDly's ExistingCoverage column against the console export. Range 1-365, default 30.")
 	rootCmd.Flags().IntVar(&toolCfg.RebuyWindowDays, "rebuy-window-days", 0,
 		"When >0, treat existing RIs expiring within this many days as already "+
 			"uncovered, so --target-coverage sizes recommendations to replace them "+
