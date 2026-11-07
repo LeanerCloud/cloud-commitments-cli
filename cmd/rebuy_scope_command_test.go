@@ -73,6 +73,10 @@ func TestRebuyScopeRefusalCommand(t *testing.T) {
 			orgDescribeKey: 1, "ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage": 1}},
 		{"ec2", "foreign-usage-default-region", "default", []string{"Cannot verify the rebuy scope", "999999999999", "ec2"}, map[string]int{
 			orgDescribeKey: 1, "ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage": 1}},
+		// The foreign usage is only in days 31-60; the 60-day recommendation
+		// lookback must widen the probe to see it.
+		{"ec2", "foreign-usage-days-31-60", "default", []string{"Cannot verify the rebuy scope", "999999999999", "ec2"}, map[string]int{
+			orgDescribeKey: 1, "ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage": 1}},
 		// A member account is refused after the role check and before any Cost Explorer request.
 		{"ec2", "member-account-refuses", "default", []string{"Cannot verify the rebuy scope", "member of an AWS Organization", "111111111111"}, map[string]int{
 			orgDescribeKey: 1}},
@@ -93,7 +97,7 @@ func TestRebuyScopeRefusalCommand(t *testing.T) {
 			require.Equal(t, tc.requests, fixture.requests, "no other operation, including purchases, is permitted")
 			wantProbes := tc.requests["ce.us-east-1.amazonaws.com/AWSInsightsIndexService.GetReservationCoverage"]
 			require.Equal(t, wantProbes-len(fixture.expiryCoverage), fixture.linkedAccountCalls, "coverage requests are the probe plus the coverage map")
-			if tc.name == "partial-inventory" || tc.name == "foreign-usage-default-region" {
+			if tc.name == "partial-inventory" || tc.name == "foreign-usage-default-region" || tc.name == "foreign-usage-days-31-60" {
 				require.Empty(t, fixture.expiryCoverage, "the probe must refuse before the coverage map is built")
 			}
 		})
@@ -108,7 +112,7 @@ type ceDimension struct {
 
 // linkedAccountCoverage is the shared LINKED_ACCOUNT router: it answers the
 // scope probe (GroupBy LINKED_ACCOUNT) and reports ok=false for any other
-// coverage request. It pins the probe's request shape: the 30-day window,
+// coverage request. It pins the probe's request shape: the window (30 days, or 60 for the recommendation-lookback case),
 // Metrics Hour, one page, the SERVICE filter of the run's service, and the
 // REGION filter only in explicit region mode. The caller (111111111111) is
 // always reported; foreign, when set, is reported too. The caller holds p.mu.
@@ -137,7 +141,12 @@ func (p *completenessProxy) linkedAccountCoverage(body []byte, ceService, foreig
 	require.NoError(p.t, err)
 	end, err := time.Parse(time.DateOnly, request.TimePeriod["End"])
 	require.NoError(p.t, err)
-	require.Equal(p.t, 30*24*time.Hour, end.Sub(start))
+	wantDays, foreignVisible := 30, true
+	if p.details == "foreign-usage-days-31-60" {
+		wantDays = 60
+		foreignVisible = end.Sub(start) > 30*24*time.Hour
+	}
+	require.Equal(p.t, time.Duration(wantDays)*24*time.Hour, end.Sub(start))
 	// Cost Explorer rejects an And with fewer than two operands, so one filter
 	// must be a bare dimension (as in cloud-commitments-go's CE filter builders).
 	filters := make(map[string][]string)
@@ -157,7 +166,7 @@ func (p *completenessProxy) linkedAccountCoverage(body []byte, ceService, foreig
 	}
 	require.Equal(p.t, want, filters)
 	groups := []any{map[string]any{"Attributes": map[string]string{"linkedAccount": "111111111111"}}}
-	if foreign != "" {
+	if foreign != "" && foreignVisible {
 		groups = append(groups, map[string]any{"Attributes": map[string]string{"linkedAccount": foreign}})
 	}
 	payload, err := json.Marshal(map[string]any{"CoveragesByTime": []any{map[string]any{"Groups": groups}}})

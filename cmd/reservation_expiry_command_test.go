@@ -31,6 +31,8 @@ type reservationExpiryScenario struct {
 	// orgMaster is the management account DescribeOrganization reports;
 	// empty means the caller (a management account).
 	orgMaster string
+	// recLookback is the --rec-lookback-period; empty keeps the default.
+	recLookback string
 }
 
 // reservationExpiryCase defines each scenario. Since cli#2131 a gated rebuy run
@@ -68,6 +70,10 @@ func reservationExpiryCase(name string) reservationExpiryScenario {
 		// Every rec row is the caller's, but Cost Explorer reports another
 		// account's usage in the pool: only the probe can see it.
 		s.foreignUsage = "999999999999"
+	case "foreign-usage-days-31-60":
+		// The foreign account has usage only before the 30-day coverage window,
+		// which a 60-day recommendation lookback still includes.
+		s.foreignUsage, s.recLookback = "999999999999", "60d"
 	default:
 		panic("unknown expiry scenario: " + name)
 	}
@@ -83,6 +89,9 @@ func TestReservationExpiryCommand(t *testing.T) {
 func reservationExpiryArgs(name string) []string {
 	s := reservationExpiryCase(name)
 	args := []string{"--payment", "partial-upfront", "--target-coverage", strconv.FormatFloat(s.target, 'g', -1, 64), "--rebuy-window-days", "30"}
+	if s.recLookback != "" {
+		args = append(args, "--rec-lookback-period", s.recLookback)
+	}
 	if s.filtered {
 		args = append(args, "--exclude-accounts", "expiry-account-2,expiry-account-3")
 	}

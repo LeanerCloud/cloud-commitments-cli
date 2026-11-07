@@ -164,18 +164,34 @@ func TestProbeRequestShape(t *testing.T) {
 		assert.Equal(t, &types.DimensionValues{Key: types.DimensionService, Values: []string{"Amazon Elastic Compute Cloud - Compute"}}, fake.inputs[0].Filter.And[0].Dimensions)
 		assert.Equal(t, &types.DimensionValues{Key: types.DimensionRegion, Values: []string{"us-east-1", "eu-west-1"}}, fake.inputs[0].Filter.And[1].Dimensions)
 	})
-	t.Run("the window is the coverage lookback", func(t *testing.T) {
-		for lookback, wantDays := range map[int]int{0: 30, 7: 7} {
+	t.Run("the window is the larger of the coverage and recommendation lookbacks", func(t *testing.T) {
+		for _, tc := range []struct {
+			coverage int
+			rec      string
+			wantDays int
+		}{
+			{0, "", 30}, {7, "", 7}, {30, "7d", 30}, {30, "30d", 30}, {30, "60d", 60}, {90, "60d", 90},
+		} {
 			cfg := probeCfg()
-			cfg.CoverageLookbackDays = lookback
+			cfg.CoverageLookbackDays = tc.coverage
+			cfg.RecLookbackPeriod = tc.rec
 			fake := &fakeCoverage{t: t}
 			require.NoError(t, probeServiceAccounts(ctx, fake, common.ServiceEC2, cfg))
 			start, err := time.Parse(time.DateOnly, aws.ToString(fake.inputs[0].TimePeriod.Start))
 			require.NoError(t, err)
 			end, err := time.Parse(time.DateOnly, aws.ToString(fake.inputs[0].TimePeriod.End))
 			require.NoError(t, err)
-			assert.Equal(t, time.Duration(wantDays)*24*time.Hour, end.Sub(start))
+			assert.Equal(t, time.Duration(tc.wantDays)*24*time.Hour, end.Sub(start), "coverage %d rec %q", tc.coverage, tc.rec)
 		}
+	})
+	t.Run("an unparsable recommendation lookback refuses before any request", func(t *testing.T) {
+		cfg := probeCfg()
+		cfg.RecLookbackPeriod = "SIXTY_DAYS"
+		fake := &fakeCoverage{t: t}
+		err := probeServiceAccounts(ctx, fake, common.ServiceEC2, cfg)
+		require.ErrorIs(t, err, errRebuyScope)
+		assert.Contains(t, err.Error(), "SIXTY_DAYS")
+		assert.Empty(t, fake.inputs)
 	})
 }
 

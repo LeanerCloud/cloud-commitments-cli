@@ -103,7 +103,8 @@ func requireRecPreconditions(recs []common.Recommendation, cfg Config, data engi
 // an account other than the credentials'. The existing-commitment inventory
 // reads only the credentials' own account, so expiry netting against another
 // account's demand would be wrong. A recommendation with no account passes
-// here; the scope probe covers it.
+// here; the scope probe covers it, over the longer of --coverage-lookback-days
+// and --rec-lookback-period, so usage the recommendations were sized on is seen.
 func requireRebuyRecScope(recs []common.Recommendation, cfg Config) error {
 	for i := range recs {
 		if !rebuyGated(cfg, recs[i].Service) {

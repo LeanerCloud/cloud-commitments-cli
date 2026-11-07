@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
+	"github.com/LeanerCloud/cloud-commitments-go/providers/aws/recommendations"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
@@ -60,7 +61,8 @@ func probeRebuyScope(ctx context.Context, client coverageAPI, cfg Config, servic
 }
 
 // probeServiceAccounts asks Cost Explorer which accounts have usage in the
-// same pool the coverage map sizes (same window, SERVICE and, when --regions
+// same pool the recommendations and coverage map size (the longer of their
+// two windows, same SERVICE and, when --regions
 // is set, REGION filters), grouped by LINKED_ACCOUNT. It refuses on the first
 // account other than the credentials'. Without --regions there is no REGION
 // filter: that is broader, so it can only refuse more. A member account sees
@@ -70,7 +72,10 @@ func probeServiceAccounts(ctx context.Context, client coverageAPI, service commo
 	if !ok {
 		return refuseRebuyScope("no Cost Explorer service mapping for %s, so its usage scope cannot be checked; omit --rebuy-window-days", service)
 	}
-	input := rebuyProbeInput(ceService, cfg)
+	input, err := rebuyProbeInput(ceService, cfg)
+	if err != nil {
+		return err
+	}
 	for range maxProbePages {
 		out, err := client.GetReservationCoverage(ctx, input)
 		if err != nil {
@@ -89,13 +94,37 @@ func probeServiceAccounts(ctx context.Context, client coverageAPI, service commo
 	return refuseRebuyScope("the scope check could not run (more than %d pages of %s usage groups); omit --rebuy-window-days", maxProbePages, service)
 }
 
-// rebuyProbeInput builds the probe request: the coverage lookback window
-// (Metrics "Hour" as the coverage map), SERVICE and optional REGION filters.
+// recLookbackDays maps --rec-lookback-period to days. An empty value is the
+// pipeline's default; any other unrecognized value cannot be sized, so the
+// probe refuses rather than guess a window.
+func recLookbackDays(period string) (int, error) {
+	if period == "" {
+		period = recommendations.DefaultRecLookbackPeriod
+	}
+	switch period {
+	case "7d":
+		return 7, nil
+	case "30d":
+		return 30, nil
+	case "60d":
+		return 60, nil
+	}
+	return 0, refuseRebuyScope("cannot read --rec-lookback-period %q, so the scope window is unknown; use 7d, 30d or 60d, or omit --rebuy-window-days", period)
+}
+
+// rebuyProbeInput builds the probe request: the larger of the coverage and
+// recommendation lookback windows, so an account that contributed usage to
+// either the recommendations or the coverage demand is seen (Metrics "Hour" as
+// the coverage map), SERVICE and optional REGION filters.
 // Cost Explorer rejects an And with fewer than two operands, so SERVICE alone
 // is a bare dimension, as in cloud-commitments-go's CE filter builders.
-func rebuyProbeInput(ceService string, cfg Config) *costexplorer.GetReservationCoverageInput {
+func rebuyProbeInput(ceService string, cfg Config) (*costexplorer.GetReservationCoverageInput, error) {
+	recDays, err := recLookbackDays(cfg.RecLookbackPeriod)
+	if err != nil {
+		return nil, err
+	}
 	end := time.Now().UTC()
-	start := end.AddDate(0, 0, -coverageLookbackDays(cfg))
+	start := end.AddDate(0, 0, -max(coverageLookbackDays(cfg), recDays))
 	filter := &types.Expression{Dimensions: &types.DimensionValues{Key: types.DimensionService, Values: []string{ceService}}}
 	if len(cfg.Regions) > 0 {
 		filter = &types.Expression{And: []types.Expression{
@@ -108,7 +137,7 @@ func rebuyProbeInput(ceService string, cfg Config) *costexplorer.GetReservationC
 		GroupBy:    []types.GroupDefinition{{Type: types.GroupDefinitionTypeDimension, Key: aws.String(string(types.DimensionLinkedAccount))}},
 		Filter:     filter,
 		Metrics:    []string{"Hour"},
-	}
+	}, nil
 }
 
 // requireOwnAccountGroups refuses when a page names an account other than the
