@@ -112,6 +112,10 @@ func recLookbackDays(period string) (int, error) {
 	return 0, refuseRebuyScope("cannot read --rec-lookback-period %q, so the scope window is unknown; use 7d, 30d or 60d, or omit --rebuy-window-days", period)
 }
 
+// rebuyProbeStartMarginDays: recommendations can be about a day old, so their
+// window can start before a probe that begins exactly N days back.
+const rebuyProbeStartMarginDays = 2
+
 // rebuyProbeInput builds the probe request: the larger of the coverage and
 // recommendation lookback windows, so an account that contributed usage to
 // either the recommendations or the coverage demand is seen (Metrics "Hour" as
@@ -124,7 +128,7 @@ func rebuyProbeInput(ceService string, cfg Config) (*costexplorer.GetReservation
 		return nil, err
 	}
 	end := time.Now().UTC()
-	start := end.AddDate(0, 0, -max(coverageLookbackDays(cfg), recDays))
+	start := end.AddDate(0, 0, -(max(coverageLookbackDays(cfg), recDays) + rebuyProbeStartMarginDays))
 	filter := &types.Expression{Dimensions: &types.DimensionValues{Key: types.DimensionService, Values: []string{ceService}}}
 	if len(cfg.Regions) > 0 {
 		filter = &types.Expression{And: []types.Expression{
