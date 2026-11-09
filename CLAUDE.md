@@ -67,6 +67,27 @@ surfaced bugs found while working here go into this repository's GitHub
 issues instead. See `CONTRIBUTING.md` under "Known Issues Sweep" for the
 full convention (including the cross-component sweep in the platform repo).
 
+## Landing changes: one PR per change, self-merged (MANDATORY)
+
+Owner policy (2026-11-09), matching `~/.claude/AGENTS.md` §1d except that
+`main` has a ruleset requiring a PR (0 approvals), so the PR is the landing
+mechanism, not a review gate.
+
+1. Staged-diff review: 2 adversarial passes by the same cold, non-author
+   reviewer, and local tests green at the staged tree.
+2. Open ONE PR per landed change, with `Closes #<N>` for each issue it
+   resolves; every commit at most 400 additions plus deletions.
+3. Merge it yourself as soon as the required checks (CI Success, Run
+   pre-commit hooks) are green:
+   `gh pr merge --squash --match-head-commit <sha>`. Squash only; review
+   threads resolved and the branch up to date. Never `--admin`.
+4. No cold-approval gate, no second-reviewer round, no PR cap. Watch main
+   CI after the merge; fix a red main at once.
+
+Outside-contributor and fork PRs are still reviewed and merged through
+their PR under the "Review gate" below. Secrets and public-content rules
+are unchanged.
+
 ## Issue assignment: claim before you work (MANDATORY)
 
 Several people (and their agents) work through this repo's issue queue in
@@ -266,6 +287,9 @@ in doubt, copy the iteration loop above (steps 2–6) into the fork
 prompt verbatim.
 
 ## Review gate
+
+Applies to outside-contributor and fork PRs. Fleet PRs follow "Landing
+changes" above.
 
 Merge only at the reviewed SHA, and only when all of these cover it:
 
