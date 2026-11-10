@@ -82,6 +82,17 @@ Use the AWS SDK's supported credential chain. Select a profile with `--profile` 
 
 This component owns the CLI under `cmd` and its CLI documentation. It does not own the web dashboard, MCP server, or deployment infrastructure.
 
+## About
+
+Built by [LeanerCloud](https://leanercloud.com), a group of AWS cost
+optimization and FinOps specialists, also authors of [AutoSpotting](https://autospotting.io).
+
+Development is sponsored by [Archera](https://www.archera.ai/cudly), which
+funds it from insurance purchases made through that page. Archera can insure
+the Savings Plans, Reserved Instances and CUD purchases you make with this tool.
+
+If this tool saves you time and money, please give us a ⭐ so others can also find it.
+
 ## License and attribution
 
 CUDly is maintained by [LeanerCloud](https://github.com/LeanerCloud) and licensed under the [Open Software License 3.0](LICENSE). See the repository license and attribution files for third-party notices.
