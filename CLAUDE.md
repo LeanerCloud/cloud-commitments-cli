@@ -67,26 +67,25 @@ surfaced bugs found while working here go into this repository's GitHub
 issues instead. See `CONTRIBUTING.md` under "Known Issues Sweep" for the
 full convention (including the cross-component sweep in the platform repo).
 
-## Landing changes: one PR per change, self-merged (MANDATORY)
+## Landing changes: direct commits, no new PRs (MANDATORY)
 
-Owner policy (2026-11-09), matching `~/.claude/AGENTS.md` §1d except that
-`main` has a ruleset requiring a PR (0 approvals), so the PR is the landing
-mechanism, not a review gate.
+Owner policy (2026-11-09), matching `~/.claude/AGENTS.md` §1d: fleet work
+lands as direct fast-forward commits to `main`. Do not open new PRs.
 
 1. Staged-diff review: 2 adversarial passes by the same cold, non-author
-   reviewer, and local tests green at the staged tree.
-2. Open ONE PR per landed change, with `Closes #<N>` for each issue it
-   resolves; every commit at most 400 additions plus deletions.
-3. Merge it yourself as soon as the required checks (CI Success, Run
-   pre-commit hooks) are green:
-   `gh pr merge --squash --match-head-commit <sha>`. Squash only; review
-   threads resolved and the branch up to date. Never `--admin`.
-4. No cold-approval gate, no second-reviewer round, no PR cap. Watch main
-   CI after the merge; fix a red main at once.
+   reviewer.
+2. Local tests green at the staged tree.
+3. Rebase onto `origin/main`; re-test if the base moved.
+4. Fast-forward push (`git push origin HEAD:main`), never force.
+5. `Closes #<N>` in the commit message for each issue it resolves; every
+   commit at most 400 additions plus deletions.
+6. Watch main CI after the push; fix a red main at once.
 
-Outside-contributor and fork PRs are still reviewed and merged through
-their PR under the "Review gate" below. Secrets and public-content rules
-are unchanged.
+Still done through a PR: review and merge of outside-contributor and fork
+PRs, and PRs that were already open before this policy (they finish as
+PRs). The PR-specific sections below (CodeRabbit loop, Review gate, PR
+labeling) apply only to those. Secrets and public-content rules are
+unchanged.
 
 ## Issue assignment: claim before you work (MANDATORY)
 
@@ -191,11 +190,12 @@ coordinates agents on one machine; assignment is what coordinates people.
      --add-assignee @me --remove-assignee <old-owner>
    ```
 
-4. **Link the PR.** Put `Closes #<N>` in the PR body so the issue and PR
-   stay connected (and the PR labeling rule below can find the issue).
+4. **Link the commit.** Put `Closes #<N>` in the commit message (or in the
+   PR body for a contributor or already-open PR) so the issue closes when
+   the work lands.
 
-5. **Release what you drop.** If you stop working on an issue without a
-   PR, post `Released: <where you got to> [<worker-id>]` as a new comment
+5. **Release what you drop.** If you stop working on an issue without
+   landing a fix, post `Released: <where you got to> [<worker-id>]` as a new comment
    and unassign yourself (unless another worker on your shared login
    still holds an active claim)
    (`gh issue edit <N> --repo LeanerCloud/cloud-commitments-cli --remove-assignee @me`), so the next
@@ -208,8 +208,8 @@ so it shows up as taken.
 
 ## Post-push CI watcher (MANDATORY, even for one-line fix commits)
 
-After **every** `git push` that publishes new commits to a PR branch on
-this repo (including follow-up CodeRabbit-nitpick fixes), launch a
+After **every** `git push` that publishes new commits to `main` or to a PR
+branch on this repo (including follow-up CodeRabbit-nitpick fixes), launch a
 background watcher per workflow run **before** ending the turn. This is
 the project-level reinforcement of the global rule in
 `~/.claude/git-workflow.md` §Post-push CI watcher: CUDly's pre-commit
@@ -245,7 +245,7 @@ Forgetting this rule has been a recurring failure mode in this
 project. Before declaring a "pushed and done" turn complete, confirm
 at least one `ci-watch-*` background task is armed.
 
-## CodeRabbit loop: iterate to silence (when required by the review gate)
+## CodeRabbit loop: iterate to silence (contributor and already-open PRs only)
 
 Run this loop when CodeRabbit is the chosen review path, or when the
 independent-review condition in "Review gate" below is not met. The full
@@ -288,8 +288,8 @@ prompt verbatim.
 
 ## Review gate
 
-Applies to outside-contributor and fork PRs. Fleet PRs follow "Landing
-changes" above.
+Applies to outside-contributor, fork and already-open PRs. Fleet direct
+commits use the review and test steps in "Landing changes" above.
 
 Merge only at the reviewed SHA, and only when all of these cover it:
 
@@ -322,7 +322,7 @@ Verification never authorizes real purchases, deploys or the CLI's `--yes`.
 Any new commit or rebase restarts the gate; a missing reviewer or
 verification blocks the PR.
 
-## PR labeling: mirror closing-issue labels (MANDATORY)
+## PR labeling: mirror closing-issue labels (contributor and already-open PRs only)
 
 Every PR opened in this repo must carry the **same** triage labels as
 the issue it closes: `priority/*`, `severity/*`, `urgency/*`,
