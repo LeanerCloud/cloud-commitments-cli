@@ -24,6 +24,7 @@ import (
 
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/LeanerCloud/cloud-commitments-go/pkg/insurance"
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/logging"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,6 +111,7 @@ func resetHelpFlags() {
 
 func runArchera(t *testing.T, env map[string]string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
+	snapshotArcheraTestState(t)
 	for _, k := range []string{archeraEnvAPIKey, archeraEnvOrgID, archeraEnvPlanID} {
 		t.Setenv(k, "")
 	}
@@ -641,16 +643,19 @@ func TestArcheraErrorsTrimKeyBeforeMasking(t *testing.T) {
 // A log or slog write of the key would bypass os.Stderr captured per test, so
 // route both default loggers into the capture for the whole run.
 func TestArcheraRunDoesNotLogKey(t *testing.T) {
-	var logs bytes.Buffer
-	savedLog, savedFlags := log.Writer(), log.Flags()
-	log.SetOutput(&logs)
-	savedSlog := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { log.SetOutput(savedLog); log.SetFlags(savedFlags); slog.SetDefault(savedSlog) })
+	logs := captureArcheraTestLogs(t)
+	log.Print("archera standard marker")
+	slog.Info("archera slog marker")
+	logging.Info("archera shared marker")
+	assert.Contains(t, logs[0].String(), "archera standard marker")
+	assert.Contains(t, logs[1].String(), "archera slog marker")
+	assert.Contains(t, logs[2].String(), "archera shared marker")
 	setupArchera(t, okHandler)
 	_, _, err := runArchera(t, fullEnv())
 	require.NoError(t, err)
 	setupArchera(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(403) })
 	_, _, _ = runArchera(t, fullEnv())
-	assert.NotContains(t, logs.String(), archeraTestKey)
+	for _, sink := range logs {
+		assert.NotContains(t, sink.String(), archeraTestKey)
+	}
 }
