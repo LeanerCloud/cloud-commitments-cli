@@ -278,6 +278,10 @@ func TestArcheraComparisonTable(t *testing.T) {
 }
 
 func TestArcheraComparisonJSON(t *testing.T) {
+	decoded, decodeErr := insurance.DecodeComparison(strings.NewReader(archeraComparisonFixture()), archeraTestOrg, archeraTestPlan, time.Unix(0, 0))
+	require.NoError(t, decodeErr)
+	assert.Equal(t, "70000000-0000-4000-8000-0000000000c1\x1b[31m\u0085", decoded.Rows[0].LineItemID)
+	assert.Equal(t, "30000000-0000-4000-8000-000000000001\x1b[31m\u0085", decoded.Rows[0].Current.OfferID)
 	setupArchera(t, okHandler)
 	out, errOut, err := runArchera(t, fullEnv(), "--format", "json")
 	require.NoError(t, err)
@@ -285,6 +289,11 @@ func TestArcheraComparisonJSON(t *testing.T) {
 	dec := json.NewDecoder(strings.NewReader(out))
 	var doc map[string]any
 	require.NoError(t, dec.Decode(&doc), "stdout must be exactly one JSON document")
+	var dto archeraComparisonDTO
+	require.NoError(t, json.Unmarshal([]byte(out), &dto))
+	assert.Equal(t, "70000000-0000-4000-8000-0000000000c1[31m", dto.Rows[0].LineItemID)
+	assert.Equal(t, "30000000-0000-4000-8000-000000000001[31m", dto.Rows[0].Current.OfferID)
+	assert.Equal(t, "40000000-0000-4000-8000-000000000002", dto.Rows[0].Candidates[0].OfferID)
 	assert.False(t, dec.More())
 	assert.NotContains(t, doc, "disclosures")
 	assert.NotContains(t, out, archeraTestKey)
@@ -293,6 +302,7 @@ func TestArcheraComparisonJSON(t *testing.T) {
 }
 
 func TestArcheraMoneyExact(t *testing.T) {
+	assert.Equal(t, "1/3", *archeraMoney(big.NewRat(1, 3)))
 	for in, want := range map[string]string{"0": "0", "7.25": "7.25", "10.125": "10.125", "1200": "1200", "0.00001": "0.00001"} {
 		r, ok := new(big.Rat).SetString(in)
 		require.True(t, ok)
@@ -371,7 +381,8 @@ func TestArcheraNoKeyFlagAndStructsRedacted(t *testing.T) {
 	check := func(label string) {
 		comparison, err := insurance.DecodeComparison(strings.NewReader(archeraComparisonFixture()), archeraTestOrg, archeraTestPlan, time.Unix(0, 0))
 		require.NoError(t, err)
-		dto := buildArcheraDTO(comparison)
+		dto, err := buildArcheraDTO(comparison, insurance.Secret{})
+		require.NoError(t, err)
 		for _, v := range []any{archeraOpts, &archeraOpts, dto, &dto} {
 			for _, f := range []string{"%v", "%+v", "%#v", "%s"} {
 				assert.NotContains(t, fmt.Sprintf(f, v), archeraTestKey, label+" "+f)
@@ -412,7 +423,8 @@ func TestArcheraDTOSanitizesEveryVendorString(t *testing.T) {
 		Rows: []insurance.ComparisonRow{{LineItemID: dirty("row"), Current: entry("c"), Candidates: []insurance.OfferEntry{entry("k")}}},
 	}
 	var buf bytes.Buffer
-	dto := buildArcheraDTO(c)
+	dto, err := buildArcheraDTO(c, insurance.Secret{})
+	require.NoError(t, err)
 	require.NoError(t, renderArcheraJSON(&buf, dto))
 	assertArcheraNoControlChars(t, buf.String())
 	buf.Reset()
