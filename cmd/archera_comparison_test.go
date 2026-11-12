@@ -77,6 +77,7 @@ func (a *archeraTestTransport) RoundTrip(r *http.Request) (*http.Response, error
 
 func setupArchera(t *testing.T, handler http.HandlerFunc) *archeraRecorder {
 	t.Helper()
+	snapshotArcheraCommandState(t) // registered first so its restore runs after every later cleanup
 	rec := &archeraRecorder{hits: map[string]int{}}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.mu.Lock()
@@ -96,7 +97,6 @@ func setupArchera(t *testing.T, handler http.HandlerFunc) *archeraRecorder {
 	target, err := url.Parse(srv.URL)
 	require.NoError(t, err)
 	archeraHTTPClient = &http.Client{Transport: &archeraTestTransport{t: t, target: target, rec: rec}}
-	t.Cleanup(func() { archeraHTTPClient = nil })
 	return rec
 }
 
@@ -122,7 +122,8 @@ func runArchera(t *testing.T, env map[string]string, args ...string) (stdout, st
 
 func runArcheraCommand(t *testing.T, command string, env map[string]string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	for _, k := range []string{archeraEnvAPIKey, archeraEnvOrgID, archeraEnvPlanID} {
+	snapshotArcheraCommandState(t)
+	for _, k := range archeraHarnessEnv {
 		t.Setenv(k, "")
 	}
 	for k, v := range env {
@@ -143,7 +144,6 @@ func runArcheraCommand(t *testing.T, command string, env map[string]string, args
 	rootCmd.SetOut(&out)
 	rootCmd.SetErr(&errb)
 	rootCmd.SetArgs(append([]string{command}, args...))
-	t.Cleanup(func() { rootCmd.SetOut(nil); rootCmd.SetErr(nil); rootCmd.SetArgs(nil) })
 	realOut, realErr := captureRealStd(t, func() { err = rootCmd.Execute() })
 	// Anything the command wrote to the real process streams is returned with
 	// the cobra stderr so every caller's key grep covers it.

@@ -1,13 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
@@ -194,16 +191,12 @@ func TestArcheraErrorsTrimKeyBeforeMasking(t *testing.T) {
 // A log or slog write of the key would bypass os.Stderr captured per test, so
 // route both default loggers into the capture for the whole run.
 func TestArcheraRunDoesNotLogKey(t *testing.T) {
-	var logs bytes.Buffer
-	savedLog, savedFlags := log.Writer(), log.Flags()
-	log.SetOutput(&logs)
-	savedSlog := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { log.SetOutput(savedLog); log.SetFlags(savedFlags); slog.SetDefault(savedSlog) })
+	sinks := captureArcheraLogs(t)
 	setupArchera(t, okHandler)
 	_, _, err := runArchera(t, fullEnv())
 	require.NoError(t, err)
 	setupArchera(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(403) })
 	_, _, _ = runArchera(t, fullEnv())
-	assert.NotContains(t, logs.String(), archeraTestKey)
+	assertArcheraLogSinksReceiveMarkers(t, sinks)
+	assert.NotContains(t, sinks.all(), archeraTestKey)
 }

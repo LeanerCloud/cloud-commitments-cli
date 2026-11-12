@@ -1,12 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -163,10 +160,10 @@ func TestArcheraLineItemsRejectsBeforeRequestAndDefaultOff(t *testing.T) {
 func TestArcheraLineItemsLateFailuresNeverPrintPartialRows(t *testing.T) {
 	for _, failure := range []string{"http", "decode", "metadata", "duplicate", "size", "cancel", "429", "redirect"} {
 		t.Run(failure, func(t *testing.T) {
+			snapshotArcheraCommandState(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			archeraLineItemsCmd.SetContext(ctx)
-			t.Cleanup(func() { archeraLineItemsCmd.SetContext(context.Background()) })
 			rec := setupArchera(t, listingHandler(t, 101, func(w http.ResponseWriter, _ *http.Request) {
 				switch failure {
 				case "http":
@@ -229,11 +226,8 @@ func TestArcheraLineItemsAggregateDeadline(t *testing.T) {
 }
 
 func TestArcheraLineItemsPrivacyAndTable(t *testing.T) {
-	var logs bytes.Buffer
-	oldLog, oldSlog := log.Writer(), slog.Default()
-	log.SetOutput(&logs)
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
-	t.Cleanup(func() { log.SetOutput(oldLog); slog.SetDefault(oldSlog) })
+	sinks := captureArcheraLogs(t)
+	assertArcheraLogSinksReceiveMarkers(t, sinks)
 	for _, format := range []string{"json", "table"} {
 		rec := setupArchera(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Pagination", `{"total":1,"total_pages":1,"page":1,"first_page":1,"last_page":1}`)
@@ -244,7 +238,7 @@ func TestArcheraLineItemsPrivacyAndTable(t *testing.T) {
 		})
 		out, stderr, err := runListing(t, fullEnv(), "--format", format)
 		require.NoError(t, err)
-		assert.NotContains(t, out+stderr+logs.String(), archeraTestKey)
+		assert.NotContains(t, out+stderr+sinks.all(), archeraTestKey)
 		assert.NotContains(t, out, "\x1b")
 		assert.Contains(t, out, "[redacted]")
 		assert.NotContains(t, out, strings.Repeat("x", 257))
@@ -268,5 +262,5 @@ func TestArcheraLineItemsPrivacyAndTable(t *testing.T) {
 	out, stderr, err := runListing(t, env, "--format=json")
 	require.Error(t, err)
 	assert.Empty(t, out)
-	assert.NotContains(t, stderr+logs.String()+err.Error(), env[archeraEnvAPIKey])
+	assert.NotContains(t, stderr+sinks.all()+err.Error(), env[archeraEnvAPIKey])
 }
