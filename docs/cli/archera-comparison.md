@@ -55,6 +55,8 @@ Errors go to stderr and the exit status is 1 for every failure. A vendor error
 shows the sanitized HTTP status and message, plus `Retry-After` when given
 (capped at 24 hours). The command does not retry.
 
+Credential-bearing vendor comparison values withhold the whole result before any financial output.
+
 ## Reading the output
 
 - Totals include the Archera premium. The API reports no currency, so amounts

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -48,11 +49,53 @@ func archeraSanitizeN(s string, maxBytes int) string {
 	return b.String()
 }
 
-func archeraSanitizePtr(s *string) *string {
+type archeraMapper struct {
+	err error
+	key insurance.Secret
+}
+
+var errArcheraCredential = errors.New("archera comparison withheld: credential material in vendor data")
+
+// Mirrors cloud-commitments-mcp tools/archera_comparison.go's whole-value policy.
+func archeraSkeleton(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case utf8.RuneError, 0x115F, 0x1160, 0x3164, 0xFFA0:
+			continue
+		}
+		if !unicode.In(r, unicode.Cc, unicode.Cf, unicode.Mn, unicode.Me, unicode.Zl, unicode.Zp, unicode.Zs) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func (m *archeraMapper) check(s string) {
+	key := strings.TrimSpace(m.key.Reveal())
+	if m.err == nil && key != "" && strings.Contains(archeraSkeleton(s), archeraSkeleton(key)) {
+		m.err = errArcheraCredential
+	}
+}
+
+func (m *archeraMapper) clean(s string) string {
+	m.check(s)
+	return archeraSanitize(s)
+}
+
+func (m *archeraMapper) money(r *big.Rat) *string {
+	s := archeraMoney(r)
+	if s != nil {
+		m.check(*s)
+	}
+	return s
+}
+
+func (m *archeraMapper) ptr(s *string) *string {
 	if s == nil {
 		return nil
 	}
-	v := archeraSanitize(*s)
+	v := m.clean(*s)
 	return &v
 }
 
@@ -160,30 +203,30 @@ type archeraComparisonDTO struct { //nolint:govet // fieldalignment: field order
 	SponsorshipDisclosure string                   `json:"sponsorship_disclosure"`
 }
 
-func archeraFinancials(f insurance.Financials) archeraFinancialsDTO {
+func (m *archeraMapper) financials(f insurance.Financials) archeraFinancialsDTO {
 	return archeraFinancialsDTO{
-		CommitmentCostTotal: archeraMoney(f.CommitmentCostTotal),
-		CloudProviderCost:   archeraMoney(f.CloudProviderCost),
-		Premium:             archeraMoney(f.Premium),
-		GrossSavings:        archeraMoney(f.GrossSavings),
-		NetSavings:          archeraMoney(f.NetSavings),
-		CoveredOnDemandCost: archeraMoney(f.CoveredOnDemandCost),
+		CommitmentCostTotal: m.money(f.CommitmentCostTotal),
+		CloudProviderCost:   m.money(f.CloudProviderCost),
+		Premium:             m.money(f.Premium),
+		GrossSavings:        m.money(f.GrossSavings),
+		NetSavings:          m.money(f.NetSavings),
+		CoveredOnDemandCost: m.money(f.CoveredOnDemandCost),
 	}
 }
 
-func archeraTotals(t insurance.Totals) archeraTotalsDTO {
-	return archeraTotalsDTO{Monthly: archeraFinancials(t.Monthly), UpfrontCost: archeraMoney(t.UpfrontCost)}
+func (m *archeraMapper) totals(t insurance.Totals) archeraTotalsDTO {
+	return archeraTotalsDTO{Monthly: m.financials(t.Monthly), UpfrontCost: m.money(t.UpfrontCost)}
 }
 
-func archeraPayment(p *insurance.PaymentOption) *string {
+func (m *archeraMapper) payment(p *insurance.PaymentOption) *string {
 	if p == nil {
 		return nil
 	}
-	s := archeraSanitize(string(*p))
+	s := m.clean(string(*p))
 	return &s
 }
 
-func archeraOffer(e insurance.OfferEntry) archeraOfferDTO {
+func (m *archeraMapper) offer(e insurance.OfferEntry) archeraOfferDTO {
 	support := insurance.AssessProductSupport(e.Provider, e.CommitmentType)
 	ps := archeraProductSupportDTO{Status: string(support.Status)}
 	if support.Status == insurance.ProductSupportSupported {
@@ -191,39 +234,40 @@ func archeraOffer(e insurance.OfferEntry) archeraOfferDTO {
 	}
 	return archeraOfferDTO{
 		IsCurrent:        e.IsCurrent,
-		OfferID:          archeraSanitize(e.OfferID),
-		CommitmentType:   archeraSanitize(e.CommitmentType),
-		Provider:         archeraSanitize(string(e.Provider)),
-		Region:           archeraSanitizePtr(e.Region),
-		ContractTerm:     archeraSanitizePtr(e.ContractTerm),
-		PaymentOption:    archeraPayment(e.PaymentOption),
+		OfferID:          m.clean(e.OfferID),
+		CommitmentType:   m.clean(e.CommitmentType),
+		Provider:         m.clean(string(e.Provider)),
+		Region:           m.ptr(e.Region),
+		ContractTerm:     m.ptr(e.ContractTerm),
+		PaymentOption:    m.payment(e.PaymentOption),
 		LeaseAttached:    e.LeaseBacked(),
-		ArcheraOfferName: archeraSanitizePtr(e.GuaranteedDisplayName),
-		DiscountRate:     archeraMoney(e.DiscountRate),
-		BreakevenDays:    archeraMoney(e.BreakevenDays),
-		Totals:           archeraTotalsDTO{Monthly: archeraFinancials(e.Monthly), UpfrontCost: archeraMoney(e.UpfrontCost)},
+		ArcheraOfferName: m.ptr(e.GuaranteedDisplayName),
+		DiscountRate:     m.money(e.DiscountRate),
+		BreakevenDays:    m.money(e.BreakevenDays),
+		Totals:           archeraTotalsDTO{Monthly: m.financials(e.Monthly), UpfrontCost: m.money(e.UpfrontCost)},
 		DeltaVsCurrent: archeraDeltaDTO{
-			MonthlyNetSavings: archeraMoney(e.Delta.MonthlyNetSavings),
-			UpfrontCost:       archeraMoney(e.Delta.UpfrontCost),
-			DiscountRate:      archeraMoney(e.Delta.DiscountRate),
-			BreakevenDays:     archeraMoney(e.Delta.BreakevenDays),
+			MonthlyNetSavings: m.money(e.Delta.MonthlyNetSavings),
+			UpfrontCost:       m.money(e.Delta.UpfrontCost),
+			DiscountRate:      m.money(e.Delta.DiscountRate),
+			BreakevenDays:     m.money(e.Delta.BreakevenDays),
 		},
 		ArcheraProductSupport: ps,
 	}
 }
 
-func buildArcheraDTO(c *insurance.Comparison) archeraComparisonDTO {
+func buildArcheraDTO(c *insurance.Comparison, key insurance.Secret) (archeraComparisonDTO, error) {
+	m := &archeraMapper{key: key}
 	dto := archeraComparisonDTO{
 		Title:                 archeraTitle,
-		PlanID:                archeraSanitize(c.PlanID),
+		PlanID:                m.clean(c.PlanID),
 		FetchedAt:             c.FetchedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		Currency:              archeraSanitizePtr(c.Currency),
+		Currency:              m.ptr(c.Currency),
 		PremiumIncluded:       true,
 		MonthlyBasis:          archeraMonthlyBasis,
 		UpfrontBasis:          archeraUpfrontBasis,
 		PlanWide:              archeraPlanWideNote,
 		Caveat:                archeraCaveat,
-		Current:               archeraTotals(c.Current),
+		Current:               m.totals(c.Current),
 		Hypotheticals:         []archeraHypotheticalDTO{},
 		Rows:                  []archeraRowDTO{},
 		NonGatingDisclosure:   common.ArcheraNonGatingDisclosure,
@@ -232,34 +276,37 @@ func buildArcheraDTO(c *insurance.Comparison) archeraComparisonDTO {
 	for i := range c.Hypotheticals {
 		h := &c.Hypotheticals[i]
 		hd := archeraHypotheticalDTO{
-			ContractTerm:               archeraSanitizePtr(h.ContractTerm),
-			PaymentOption:              archeraSanitize(string(h.PaymentOption)),
-			Totals:                     archeraTotals(h.Totals),
-			DeltaMonthlyNetSavings:     archeraMoney(h.DeltaMonthlyNetSavings),
-			DeltaMonthlyCommitmentCost: archeraMoney(h.DeltaMonthlyCommitmentCost),
-			DeltaUpfrontCost:           archeraMoney(h.DeltaUpfrontCost),
+			ContractTerm:               m.ptr(h.ContractTerm),
+			PaymentOption:              m.clean(string(h.PaymentOption)),
+			Totals:                     m.totals(h.Totals),
+			DeltaMonthlyNetSavings:     m.money(h.DeltaMonthlyNetSavings),
+			DeltaMonthlyCommitmentCost: m.money(h.DeltaMonthlyCommitmentCost),
+			DeltaUpfrontCost:           m.money(h.DeltaUpfrontCost),
 			LineItems:                  []archeraLineItemDTO{},
 		}
 		for _, li := range h.LineItems {
 			hd.LineItems = append(hd.LineItems, archeraLineItemDTO{
-				LineItemID:           archeraSanitize(li.LineItemID),
-				ActualTerm:           archeraSanitizePtr(li.ActualTerm),
-				ActualPaymentOption:  archeraPayment(li.ActualPaymentOption),
-				ActualCommitmentType: archeraSanitizePtr(li.ActualCommitmentType),
-				Reason:               archeraSanitize(string(li.Reason)),
+				LineItemID:           m.clean(li.LineItemID),
+				ActualTerm:           m.ptr(li.ActualTerm),
+				ActualPaymentOption:  m.payment(li.ActualPaymentOption),
+				ActualCommitmentType: m.ptr(li.ActualCommitmentType),
+				Reason:               m.clean(string(li.Reason)),
 			})
 		}
 		dto.Hypotheticals = append(dto.Hypotheticals, hd)
 	}
 	for i := range c.Rows {
 		r := &c.Rows[i]
-		rd := archeraRowDTO{LineItemID: archeraSanitize(r.LineItemID), Current: archeraOffer(r.Current), Candidates: []archeraOfferDTO{}}
+		rd := archeraRowDTO{LineItemID: m.clean(r.LineItemID), Current: m.offer(r.Current), Candidates: []archeraOfferDTO{}}
 		for j := range r.Candidates {
-			rd.Candidates = append(rd.Candidates, archeraOffer(r.Candidates[j]))
+			rd.Candidates = append(rd.Candidates, m.offer(r.Candidates[j]))
 		}
 		dto.Rows = append(dto.Rows, rd)
 	}
-	return dto
+	if m.err != nil {
+		return archeraComparisonDTO{}, m.err
+	}
+	return dto, nil
 }
 
 func renderArcheraJSON(w io.Writer, dto archeraComparisonDTO) error {
