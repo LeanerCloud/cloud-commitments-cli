@@ -28,8 +28,6 @@ An `--exclude-accounts` value that matches no account exactly but is part of one
 
 When a filter value is a name (anything other than a 12-digit account ID) and an account's name cannot be resolved, cudly stops with an error instead of guessing: carrying on would treat an account you excluded as "not excluded". ID-only filters never need the name. The same rule applies to `--input-csv` replay, where the name comes from the CSV's `AccountName` column; a row whose name column holds the account ID counts as unresolved.
 
-A recommendation with neither an account ID nor an account name (for example a CSV row with empty `Account` and `AccountName`) cannot be placed by an account filter, so it is dropped under either `--include-accounts` or `--exclude-accounts`. On live runs the end-of-run drop summary itemises it as `unidentified-account (--include-accounts)` or `unidentified-account (--exclude-accounts)` (the include label when both filters are set), provided it passed every other filter. On `--input-csv` runs there is no drop summary, so such rows are counted only in the "filtered out N" line.
-
 ```bash
 # Only process two accounts
 cudly --services rds --include-accounts prod-account,staging-account

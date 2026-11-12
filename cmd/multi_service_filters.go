@@ -68,10 +68,7 @@ func processRecommendation(rec *common.Recommendation, cfg *Config, instanceVers
 		// operator-scoping choices, not drops worth surfacing in the summary.
 		// --min-pool-size drops are counted separately in applyFilters before
 		// this function runs, so no drop reason is surfaced here.
-		// The exception is a recommendation with no account ID or name under an
-		// account filter: it is not a scoping choice but data the filter
-		// cannot place, so it is counted.
-		return *rec, false, unidentifiedAccountDropReason(rec, cfg)
+		return *rec, false, ""
 	}
 
 	// Apply engine version filters - adjust instance count by subtracting extended support versions.
@@ -169,42 +166,6 @@ func shouldIncludeInstanceType(instanceType string, cfg *Config) bool {
 // and tests are unchanged.
 func shouldIncludeEngine(rec *common.Recommendation, cfg *Config) bool {
 	return filtersFromConfig(cfg).IncludesEngine(rec)
-}
-
-// DropSummary reasons for a recommendation that carries neither an account ID
-// nor an account name and is dropped by an account filter. With both filters
-// set the include label is used.
-const (
-	dropUnidentifiedInclude = "unidentified-account (--include-accounts)"
-	dropUnidentifiedExclude = "unidentified-account (--exclude-accounts)"
-)
-
-// unidentifiedAccountDropReason returns the drop reason when rec has no account
-// ID or name and the account filter alone removed it, else "".
-func unidentifiedAccountDropReason(rec *common.Recommendation, cfg *Config) string {
-	if !isUnidentifiedAccount(rec) || !passesWithoutAccountFilters(rec, cfg) {
-		return ""
-	}
-	if len(cfg.IncludeAccounts) > 0 {
-		return dropUnidentifiedInclude
-	}
-	if len(cfg.ExcludeAccounts) > 0 {
-		return dropUnidentifiedExclude
-	}
-	return ""
-}
-
-func isUnidentifiedAccount(rec *common.Recommendation) bool {
-	return rec.Account == "" && rec.AccountName == ""
-}
-
-// passesWithoutAccountFilters reports whether rec passes every dimension filter
-// except the account ones, so an unidentified-account drop is only counted for
-// a recommendation the account filter alone removed.
-func passesWithoutAccountFilters(rec *common.Recommendation, cfg *Config) bool {
-	c := *cfg
-	c.IncludeAccounts, c.ExcludeAccounts = nil, nil
-	return passesDimensionFilters(rec, &c)
 }
 
 // shouldIncludeAccount checks if an account should be included based on filters.

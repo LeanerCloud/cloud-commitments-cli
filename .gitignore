@@ -1,7 +1,5 @@
 # Output files
 *.csv
-# Purchase audit log (default --audit-log path); holds account IDs and purchase records
-cudly-audit*.jsonl
 
 # Go binaries
 rds-ri-tool
