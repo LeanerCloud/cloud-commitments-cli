@@ -537,9 +537,12 @@ func applyRegionFilters(
 func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment, drops *common.DropSummary) []common.Recommendation {
 	recommendations.ApplyCoverageMapToRecommendations(recs, coverageMap)
 	if cfg.RebuyWindowDays > 0 && len(expiringCommitments) > 0 {
-		n := recommendations.AdjustExistingCoverageForExpiringCommitments(recs, expiringCommitments, cfg.RebuyWindowDays)
+		n, missingDemand := recommendations.AdjustExistingCoverageForExpiringCommitmentsWithCoverage(recs, expiringCommitments, cfg.RebuyWindowDays, coverageMap)
 		if n > 0 {
 			AppLogger.Printf("  ⏰ Treating %d recs as partially uncovered (RIs expiring within %d days)\n", n, cfg.RebuyWindowDays)
+		}
+		if missingDemand > 0 {
+			AppLogger.Printf("  ⚠️  Skipped expiry adjustment for %d recommendations because pool demand was unavailable; coverage was left unchanged\n", missingDemand)
 		}
 	}
 	// Family-NU sizing for RDS recs: AWS rec API already bundles size-flex

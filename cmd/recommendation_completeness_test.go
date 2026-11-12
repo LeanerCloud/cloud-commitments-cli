@@ -58,6 +58,7 @@ func runCompletenessScenario(t *testing.T, service, regionMode, details string) 
 		"CUDLY_COMPLETENESS_AUDIT=" + filepath.Join(dir, "audit.jsonl"),
 		"CUDLY_COMPLETENESS_REGIONS=" + regionMode,
 		"CUDLY_COMPLETENESS_SERVICE=" + service,
+		"CUDLY_COMPLETENESS_DETAILS=" + details,
 		"AWS_ACCESS_KEY_ID=synthetic", "AWS_SECRET_ACCESS_KEY=synthetic", "AWS_REGION=us-east-1",
 		"AWS_EC2_METADATA_DISABLED=true", "AWS_MAX_ATTEMPTS=1",
 		"AWS_CONFIG_FILE=" + filepath.Join(dir, "absent-config"),
@@ -72,10 +73,13 @@ func runCompletenessScenario(t *testing.T, service, regionMode, details string) 
 	for _, failure := range []string{"Could not check", "Failed to query", "request send failed", "certificate", "TLS handshake"} {
 		require.NotContains(t, logs, failure, "unexpected ancillary error")
 	}
-	if service == "rds" {
+	switch service {
+	case "ec2":
+		assertReservationExpiryCSV(t, output, details, logs)
+	case "rds":
 		assertCompletenessDiagnostics(t, regionMode, details, stdout.String(), stderr.String())
 		assertCompletenessCSV(t, output, details, logs)
-	} else {
+	default:
 		assertSPCompleteness(t, output, service, details, logs)
 	}
 }
@@ -94,6 +98,9 @@ func runCompletenessCommandChild(t *testing.T) {
 		"--output", os.Getenv("CUDLY_COMPLETENESS_OUTPUT"), "--audit-log", os.Getenv("CUDLY_COMPLETENESS_AUDIT")}
 	if os.Getenv("CUDLY_COMPLETENESS_REGIONS") == "explicit" {
 		args = append(args, "--regions", "us-east-1")
+	}
+	if os.Getenv("CUDLY_COMPLETENESS_SERVICE") == "ec2" {
+		args = append(args, reservationExpiryArgs(os.Getenv("CUDLY_COMPLETENESS_DETAILS"))...)
 	}
 	rootCmd.SetArgs(args)
 	require.NoError(t, rootCmd.Execute())

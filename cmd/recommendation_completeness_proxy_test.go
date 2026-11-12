@@ -27,16 +27,18 @@ import (
 )
 
 type completenessProxy struct {
-	t          *testing.T
-	mu         sync.Mutex
-	handlers   sync.WaitGroup
-	regions    string
-	details    string
-	service    string
-	requests   map[string]int
-	spRequests []completenessSPRequest
-	engines    []string
-	cert       tls.Certificate
+	t              *testing.T
+	mu             sync.Mutex
+	handlers       sync.WaitGroup
+	regions        string
+	details        string
+	service        string
+	requests       map[string]int
+	spRequests     []completenessSPRequest
+	engines        []string
+	cert           tls.Certificate
+	expiryCoverage []string
+	expiryAccounts []string
 }
 
 type completenessSPRequest struct {
@@ -60,6 +62,9 @@ func newCompletenessProxy(t *testing.T, dir, regions, details, service string) (
 		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
+	if service == "ec2" {
+		template.DNSNames = append(template.DNSNames, "organizations.us-east-1.amazonaws.com")
+	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	require.NoError(t, err)
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
@@ -79,6 +84,7 @@ func (p *completenessProxy) serveConnect(w http.ResponseWriter, r *http.Request)
 	p.handlers.Add(1)
 	defer p.handlers.Done()
 	allowed := r.Host == "ce.us-east-1.amazonaws.com:443" || r.Host == "ec2.us-east-1.amazonaws.com:443" || r.Host == "rds.us-east-1.amazonaws.com:443" || r.Host == "savingsplans.amazonaws.com:443"
+	allowed = allowed || (p.service == "ec2" && r.Host == "organizations.us-east-1.amazonaws.com:443")
 	if r.Method != http.MethodConnect || !allowed {
 		p.t.Errorf("unexpected CONNECT %s %s", r.Method, r.Host)
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -132,6 +138,9 @@ func (p *completenessProxy) respond(req *http.Request) *http.Response {
 	_ = req.Body.Close()
 	if err != nil {
 		p.t.Error(err)
+	}
+	if p.service == "ec2" {
+		return p.respondReservationExpiry(req, body)
 	}
 	op := req.Header.Get("X-Amz-Target")
 	if req.Host == "savingsplans.amazonaws.com" && op == "" {
@@ -240,6 +249,10 @@ func (p *completenessProxy) assertRequests(t *testing.T) {
 	p.handlers.Wait()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.service == "ec2" {
+		p.assertReservationExpiryRequests(t)
+		return
+	}
 	if p.service != "rds" {
 		p.assertSPRequests(t)
 		return
