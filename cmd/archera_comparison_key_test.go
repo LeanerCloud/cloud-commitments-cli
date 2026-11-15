@@ -284,3 +284,82 @@ func TestArcheraOrdinaryVendorTextIsNotWithheld(t *testing.T) {
 		}
 	}
 }
+
+// archeraAlternatingSplit puts seps between the characters of k in turn.
+func archeraAlternatingSplit(k string, seps ...string) string {
+	var b strings.Builder
+	for i, r := range k {
+		if i > 0 {
+			b.WriteString(seps[(i-1)%len(seps)])
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// Separators that alternate in length or shape, with one spot over the gap bound
+// and not repeated exactly, are still the key to a reader (#2171).
+func TestArcheraKeyIrregularAlternatingSeparatorsAreWithheld(t *testing.T) {
+	t.Parallel()
+	for name, seps := range map[string][]string{
+		"dash 1 and 3":  {"-", "---"},
+		"dash 2 and 4":  {"--", "----"},
+		"0x0 and x0x0":  {"0x0", "x0x0"},
+		"dash 17 and 1": {strings.Repeat("-", archeraMaxSep+1), "-"},
+	} {
+		got := archeraSafeError(errors.New("A: "+archeraAlternatingSplit(archeraLongKey, seps...)), archeraLongKey).Error()
+		assert.Equal(t, archeraWithheld, got, name)
+	}
+}
+
+// A separator longer than archeraMaxSep is withheld, not shown in part.
+func TestArcheraKeyOverlongSeparatorIsWithheld(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{archeraMaxSep + 1, 40} {
+		echo := archeraSplitEverywhere(archeraLongKey, strings.Repeat("-", n))
+		got := archeraSafeError(errors.New("A: "+echo), archeraLongKey).Error()
+		assert.Equal(t, archeraWithheld, got, "sep %d", n)
+		assert.Empty(t, archeraReadableKeyFragment(got), "sep %d", n)
+	}
+}
+
+// Look-alike letters from other scripts are a known limit, not handled by the
+// masker; this pins that so changing it is a deliberate decision.
+func TestArcheraConfusablesAreKnownLimit(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ key, echo string }{
+		"cyrillic te": {"STUVWXYZ", "A: S\u0422UVWXYZ"},
+		"dotless i":   {"abcdefgi", "A: abcdefg\u0131"},
+	} {
+		got := archeraSafeError(errors.New(tc.echo), tc.key).Error()
+		assert.Equal(t, tc.echo, got, name)
+	}
+}
+
+// The readable skeleton drops combining marks (Mn), enclosing marks (Me),
+// Hangul fillers and U+FFFD even where they alternate with a key-alphabet
+// separator past archeraMaxSep, so no other rule sees the key through them.
+func TestArcheraKeySkeletonDropsInvisibleRunes(t *testing.T) {
+	t.Parallel()
+	for name, r := range map[string]string{"Mn": "\u0301", "Me": "\u20dd", "hangul filler": "\u3164", "replacement": "\ufffd"} {
+		sep := strings.Repeat(r+"-", archeraMaxSep/2+2)
+		for shape, echo := range map[string]string{
+			"long alternating": archeraSplitEverywhere(archeraLongKey, sep),
+			"3 and 4 runes":    archeraAlternatingSplit(archeraLongKey, strings.Repeat(r, 3), strings.Repeat(r, 4)),
+		} {
+			got := archeraSafeError(errors.New("A: "+echo), archeraLongKey).Error()
+			assert.Equal(t, archeraWithheld, got, "%s %s", name, shape)
+		}
+	}
+}
+
+// Key characters out of order are not the key: the gap rule follows the key's
+// order, so reversed or swapped text is shown.
+func TestArcheraKeyGapFollowsKeyOrder(t *testing.T) {
+	t.Parallel()
+	const key = "abcdefgh"
+	for name, echo := range map[string]string{"reversed": "hgfedcba", "swapped": "abcdfegh", "reversed spaced": "h-g-f-e-d-c-b-a"} {
+		got := archeraSafeError(errors.New("A: "+echo), key).Error()
+		assert.Equal(t, "A: "+echo, got, name)
+	}
+}

@@ -244,7 +244,8 @@ func archeraFold(s string) string { return strings.ToLower(norm.NFKD.String(s)) 
 // other characters at each spot. Both sides are folded, and msg is reduced to
 // the runes that occur in the key, so any inserted character class drops out.
 // The key's own non-graphic and space runes are ignored, as the reader does.
-// Look-alike letters from other scripts are not handled.
+// Look-alike letters from other scripts (Cyrillic Т, dotless ı) are a known
+// limit, pinned by TestArcheraConfusablesAreKnownLimit.
 func archeraKeyReadable(msg, key string) bool {
 	var ks []rune
 	alphabet := map[rune]bool{}
@@ -266,11 +267,17 @@ func archeraKeyReadable(msg, key string) bool {
 	n := min(len(ks), archeraFragmentLen)
 	for i := 0; i+n <= len(ks); i++ {
 		run := ks[i : i+n]
-		if archeraHasRepeatedSeparatorRun(ms, run) || archeraHasGappedRun(ms, run) {
+		if archeraRunReadable(ms, run) {
 			return true
 		}
 	}
 	return false
+}
+
+// archeraRunReadable reports whether ms shows run under any of the three rules.
+func archeraRunReadable(ms, run []rune) bool {
+	return archeraHasRepeatedSeparatorRun(ms, run) || archeraHasGappedRun(ms, run) ||
+		archeraHasMixedSeparatorRun(archeraCollapseRepeats(ms), archeraCollapseRepeats(run))
 }
 
 // archeraHasRepeatedSeparatorRun reports whether ms spells run with the same
@@ -291,6 +298,68 @@ func archeraHasRepeatedSeparatorRun(ms, run []rune) bool {
 		}
 	}
 	return false
+}
+
+// archeraCollapseRepeats drops a rune equal to its predecessor, so a separator
+// of any length made of one repeated rune counts as one.
+func archeraCollapseRepeats(rs []rune) []rune {
+	out := make([]rune, 0, len(rs))
+	for i, r := range rs {
+		if i == 0 || r != rs[i-1] {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// archeraHasMixedSeparatorRun reports whether ms spells run with gaps of up to
+// archeraMaxSep runes that are all drawn from the at most two distinct runes of
+// the first gap, so separators that alternate in length or shape ("-" then
+// "---", "0x0" then "x0x0") still read as the key.
+func archeraHasMixedSeparatorRun(ms, run []rune) bool {
+	if len(run) < 2 {
+		return false
+	}
+	for i, r := range ms {
+		if r != run[0] {
+			continue
+		}
+		sep := map[rune]bool{}
+		for j := i + 1; j < len(ms) && j-i-1 <= archeraMaxSep; j++ {
+			if ms[j] == run[1] && spellsWithinSeparatorSet(ms, j, run[2:], sep) {
+				return true
+			}
+			sep[ms[j]] = true
+			if len(sep) > 2 {
+				break
+			}
+		}
+	}
+	return false
+}
+
+// spellsWithinSeparatorSet reports whether rest follows ms[at], each rune after
+// a gap of at most archeraMaxSep runes all in sep.
+func spellsWithinSeparatorSet(ms []rune, at int, rest []rune, sep map[rune]bool) bool {
+	reach := map[int]bool{at: true}
+	for _, want := range rest {
+		next := map[int]bool{}
+		for p := range reach {
+			for q := p + 1; q < len(ms) && q-p-1 <= archeraMaxSep; q++ {
+				if ms[q] == want {
+					next[q] = true
+				}
+				if !sep[ms[q]] {
+					break
+				}
+			}
+		}
+		if len(next) == 0 {
+			return false
+		}
+		reach = next
+	}
+	return true
 }
 
 func spellsWithSeparator(ms, run, sep []rune) bool {
