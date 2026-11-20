@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -310,6 +312,145 @@ func TestArcheraKeyIrregularAlternatingSeparatorsAreWithheld(t *testing.T) {
 		got := archeraSafeError(errors.New("A: "+archeraAlternatingSplit(archeraLongKey, seps...)), archeraLongKey).Error()
 		assert.Equal(t, archeraWithheld, got, name)
 	}
+}
+
+// A separator of two or more runes past archeraMaxSep, or alternating among
+// three key runes, is withheld too (#2171).
+func TestArcheraKeyLongMultiRuneAndThreeRuneSeparatorsAreWithheld(t *testing.T) {
+	t.Parallel()
+	for name, seps := range map[string][]string{
+		"dash x 20 runes":  {strings.Repeat("-x", 20)},
+		"dash x 40 alt":    {strings.Repeat("-x", 20), strings.Repeat("x-", 21)},
+		"0xy and yx0":      {"0xy", "yx0"},
+		"three runes long": {strings.Repeat("0xy", 12), strings.Repeat("y0x", 9)},
+	} {
+		echo := "A: " + archeraAlternatingSplit(archeraLongKey, seps...)
+		got := archeraSafeError(errors.New(echo), archeraLongKey).Error()
+		assert.Equal(t, archeraWithheld, got, name)
+	}
+}
+
+// Alternating separators with different rune sets whose union is three runes
+// share one set, whichever gap comes first. An 8-character key gives a single
+// window, so no other window can mask a miss.
+func TestArcheraKeyAlternatingSeparatorsSharingOneSetAreWithheld(t *testing.T) {
+	t.Parallel()
+	const key = "abcdefgh"
+	for name, seps := range map[string][]string{
+		"hgh first": {"hgh", "fhf"},
+		"fhf first": {"fhf", "hgh"},
+		"long":      {strings.Repeat("hg", 12), strings.Repeat("fh", 12)},
+	} {
+		got := archeraSafeError(errors.New("A: "+archeraAlternatingSplit(key, seps...)), key).Error()
+		assert.Equal(t, archeraWithheld, got, name)
+	}
+}
+
+// Keys shorter than 14 runes, with an empty first gap and two non-empty gaps
+// that share three runes, are withheld too.
+func TestArcheraShortKeyWithEmptyFirstGapIsWithheld(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ key, echo string }{
+		"8 runes": {"abcdefgh", "A: ab" + "hgh" + "c" + "fhf" + "defgh"},
+		"9 runes": {"abcdefghi", "A: ab" + "hgh" + "c" + "fhf" + "defghi"},
+	} {
+		got := archeraSafeError(errors.New(tc.echo), tc.key).Error()
+		assert.Equal(t, archeraWithheld, got, name)
+	}
+}
+
+// archeraStutter repeats every rune of k n times.
+func archeraStutter(k string, n int) string {
+	var b strings.Builder
+	for _, r := range k {
+		b.WriteString(strings.Repeat(string(r), n))
+	}
+	return b.String()
+}
+
+// A key with every rune repeated is the key to a reader, though the best
+// spelling has no non-empty gap once repeats collapse.
+func TestArcheraStutteredKeyIsWithheld(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ key, echo string }{
+		"8 runes x4": {"abcdefgh", "A: " + archeraStutter("abcdefgh", 4)},
+		"long x4":    {archeraLongKey, "A: " + archeraStutter(archeraLongKey, 4)},
+	} {
+		got := archeraSafeError(errors.New(tc.echo), tc.key).Error()
+		assert.Equal(t, archeraWithheld, got, name)
+	}
+}
+
+// The shared-set search is bounded by archeraSearchBudget sweep steps. The run
+// is "abcdefgh" and ms never holds "h", so every sweep climbs seven levels and
+// fails at the last; ms is stuttered copies of "abcdefg" and 33 other runes,
+// repeated to the check window, so many sets and starts stay alive. An
+// unbounded search over the 34 windows of a 41-rune key would take about 4e8 steps; the budget stops it at 2e7
+// (about 0.3 s) and withholds. The ceiling is loose, the step count is the bound.
+func TestArcheraKeyManyDistinctRunesIsBounded(t *testing.T) {
+	var unit strings.Builder
+	unit.WriteString(archeraStutter("abcdefg", 3))
+	unit.WriteString("ijklmnopqrstuvwxyz0123456789-_=+.,")
+	ms := []rune("h") // the last run rune occurs only before the run starts
+	for len(ms) < archeraMaxErrorSize+archeraCheckSlack {
+		ms = append(ms, []rune(unit.String())...)
+	}
+	budget := archeraSearchBudget
+	start := time.Now()
+	got := false
+	for w := 0; w < 34 && !got; w++ { // the windows of a 41-rune key share one budget
+		got = archeraHasSharedSetRun(ms, []rune("abcdefgh"), &budget)
+	}
+	took := time.Since(start)
+	t.Logf("took %s, withheld=%v, budget left=%d", took, got, budget)
+	assert.True(t, got, "an exhausted budget withholds")
+	assert.Less(t, budget, 0)
+	assert.Less(t, took, 5*time.Second)
+}
+
+// Inputs the base rules withheld stay withheld: the shared-set rule only adds.
+func TestArcheraBaseWithheldInputsStayWithheld(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ key, echo string }{
+		"8-rune key, ahgh":    {"abcdefgh", "A: ahghbcdefgh"},
+		"8-rune key, accc":    {"abcdefgh", "A: acccbcdefgh"},
+		"two-rune gapped run": {"aaaaaaaabbbbbbbbxyz", "A: axb"},
+	} {
+		got := archeraSafeError(errors.New(tc.echo), tc.key).Error()
+		assert.Equal(t, archeraWithheld, got, name)
+	}
+}
+
+// An ordinary ~1 KB message that carries the key's characters but not the key,
+// here the long key reversed in prose, is shown, and the search does not spend
+// its budget on it.
+func TestArcheraRealisticMessageStaysWithinBudget(t *testing.T) {
+	t.Parallel()
+	rs := []rune(archeraLongKey)
+	slices.Reverse(rs)
+	var b strings.Builder
+	for b.Len() < 1000 {
+		b.WriteString("request id 4821-aa failed for ")
+		b.WriteString(string(rs))
+		b.WriteString("; ")
+	}
+	msg := b.String()
+	budget := archeraSearchBudget
+	assert.False(t, archeraKeyReadableWithin(msg, archeraLongKey, &budget))
+	t.Logf("steps used: %d of %d", archeraSearchBudget-budget, archeraSearchBudget)
+	assert.GreaterOrEqual(t, budget, 0)
+	assert.NotEqual(t, archeraWithheld, archeraSafeError(errors.New(msg), archeraLongKey).Error())
+}
+
+// A spent budget withholds instead of searching on.
+func TestArcheraSeparatorSearchBudgetFailsClosed(t *testing.T) {
+	t.Parallel()
+	ms, run := []rune("ahgbhfchdfg"), []rune("abcd")
+	_ = run
+	spent := 0
+	assert.True(t, archeraHasSharedSetRun(ms, run, &spent))
+	fresh := archeraSearchBudget
+	assert.False(t, archeraHasSharedSetRun([]rune("axbxc"), []rune("abcd"), &fresh))
 }
 
 // A separator longer than archeraMaxSep is withheld, not shown in part.
