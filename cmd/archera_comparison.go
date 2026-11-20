@@ -320,14 +320,13 @@ func archeraCollapseRepeats(rs []rune) []rune {
 	return out
 }
 
-// archeraSearchBudget caps the total sweep steps (one step is one rune of ms
-// visited) the shared-set search may spend across all windows of one message.
-// A step costs about 3 to 7 ns (slice lookups only), so 2e8 is roughly 0.6 s on
-// the error path. A realistic ~1 KB message built from a 41-rune key needs about
-// 8e7 steps over its 34 windows (TestArcheraRealisticMessageStaysWithinBudget),
-// so ordinary errors stay shown; a stuttered key keeps many sets alive and would
-// reach 4e8 steps or more, and an exhausted budget withholds (fail-closed).
-const archeraSearchBudget = 200_000_000
+// archeraSearchBudget caps the total runes the shared-set search may scan across
+// all windows of one message. Ordinary text, a 1 KB listing or a message
+// carrying a 64-character key's letters, scans about 1e5 to 1e6 (see
+// TestArcheraOrdinaryTextStaysFarBelowBudget); a long cycle over three runes
+// that keeps every state alive reaches it. A spent budget withholds: the search
+// fails closed. At roughly 100 ns a rune, 5e6 is about 0.5 s.
+const archeraSearchBudget = 5_000_000
 
 // archeraMaxSepRunes is how many distinct runes the gaps of a shared-set
 // spelling may draw from.
@@ -387,153 +386,93 @@ func spellsWithinSeparatorSet(ms []rune, at int, rest []rune, sep map[rune]bool)
 // all drawn from one shared set of at most archeraMaxSepRunes runes, at least
 // two of them non-empty, so separators that alternate in shape ("hgh" then
 // "fhf") are read as the key. It only adds to archeraHasMixedSeparatorRun.
+// Known limit: a separator alternating among four or more runes ("hgf" then
+// "ehg" in key "abcdefgh") is still shown.
 //
-// Only full-size sets (a smaller one is covered by a superset) holding a rune
-// that directly follows a run rune are tried, each once. With d distinct runes
-// in ms that is at most C(d, 3) sweeps per window, each O(len(ms)*len(run)) and
-// allocation-free, charged against budget; a spent budget reports true.
+// It walks the spellings of run level by level, keeping one state per (position,
+// union of the gap runes so far), so the cost follows the spellings that really
+// occur in ms, not the number of rune sets. Every scanned rune is charged
+// against budget; a spent budget reports true (withhold).
 func archeraHasSharedSetRun(ms, run []rune, budget *int) bool {
 	if len(run) < 3 {
 		return false
 	}
-	d, msIDs, runIDs, ok := archeraRuneIDs(ms, run)
-	if !ok {
-		return false
-	}
-	starts, seeds := archeraSharedSetStartsAndSeeds(msIDs, runIDs, d)
-	if len(starts) == 0 {
-		return false
-	}
-	pool := make([]int, d)
-	for i := range pool {
-		pool[i] = i
-	}
-	sep := make([]bool, d)
-	bufs := [2][]int8{make([]int8, len(ms)), make([]int8, len(ms))}
-	try := func() bool {
-		return archeraSharedSetSweep(msIDs, starts, runIDs[1:], sep, bufs, budget) || *budget < 0
-	}
-	size := min(archeraMaxSepRunes, d)
-	for _, g := range seeds {
-		pool = slices.DeleteFunc(slices.Clone(pool), func(v int) bool { return v == g })
-		sep[g] = true
-		ok := archeraAnySeparatorSet(pool, size-1, sep, try)
-		sep[g] = false
-		if ok {
-			return true
+	cur := map[archeraSepState]int8{}
+	for p, r := range ms {
+		if r == run[0] {
+			cur[archeraSepState{pos: p}] = 0
 		}
 	}
-	return false
-}
-
-// archeraRuneIDs numbers the distinct runes of ms from 0 and returns that
-// count with ms and run as numbers; ok is false when a run rune is not in ms.
-func archeraRuneIDs(ms, run []rune) (d int, msIDs, runIDs []int, ok bool) {
-	id := map[rune]int{}
-	msIDs = make([]int, len(ms))
-	for i, r := range ms {
-		v, seen := id[r]
-		if !seen {
-			v = len(id)
-			id[r] = v
-		}
-		msIDs[i] = v
-	}
-	runIDs = make([]int, len(run))
-	for i, r := range run {
-		v, found := id[r]
-		if !found {
-			return 0, nil, nil, false
-		}
-		runIDs[i] = v
-	}
-	return len(id), msIDs, runIDs, true
-}
-
-// archeraSharedSetStartsAndSeeds returns the positions of run[0] and the
-// distinct runes that directly follow a run rune, in first-seen order.
-func archeraSharedSetStartsAndSeeds(ms, run []int, d int) (starts, seeds []int) {
-	inRun := make([]bool, d)
-	for _, v := range run {
-		inRun[v] = true
-	}
-	seen := make([]bool, d)
-	for i, v := range ms {
-		if v == run[0] {
-			starts = append(starts, i)
-		}
-		if i > 0 && inRun[ms[i-1]] && !seen[v] {
-			seen[v] = true
-			seeds = append(seeds, v)
-		}
-	}
-	return starts, seeds
-}
-
-// archeraAnySeparatorSet calls try with sep extended by every n-choice from
-// pool and reports whether any call returned true. A pool smaller than n yields none.
-func archeraAnySeparatorSet(pool []int, n int, sep []bool, try func() bool) bool {
-	if n == 0 {
-		return try()
-	}
-	for i := 0; i+n <= len(pool); i++ {
-		sep[pool[i]] = true
-		ok := archeraAnySeparatorSet(pool[i+1:], n-1, sep, try)
-		sep[pool[i]] = false
-		if ok {
-			return true
-		}
-	}
-	return false
-}
-
-// archeraSharedSetSweep reports whether rest follows any of starts, each rune
-// after a gap of any length made only of runes in sep, with at least two gaps
-// non-empty. bufs are scratch of len(ms).
-func archeraSharedSetSweep(ms, starts, rest []int, sep []bool, bufs [2][]int8, budget *int) bool {
-	reach, next := bufs[0], bufs[1]
-	for i := range reach {
-		reach[i] = -1
-	}
-	for _, j := range starts {
-		reach[j] = 0
-	}
-	for _, want := range rest {
-		if *budget -= len(ms); *budget < 0 || !archeraSharedSetStep(ms, reach, next, want, sep) {
-			return false
-		}
-		reach, next = next, reach
-	}
-	return slices.Max(reach) >= 2
-}
-
-// archeraSharedSetStep fills next with, for each position of want, the most
-// non-empty gaps (capped at 2) on a path from reach through sep gaps, or -1,
-// and reports whether any position is reachable.
-func archeraSharedSetStep(ms []int, reach, next []int8, want int, sep []bool) bool {
-	// m: best reach[p] over p < q with ms[p+1:q] all in sep; prevM is m one step ago.
-	var m, prevM int8 = -1, -1
-	any := false
-	for q, r := range ms {
-		val := int8(-1)
-		if q > 0 {
-			val = reach[q-1]
-			if prevM >= 0 && sep[ms[q-1]] {
-				val = max(val, min(prevM+1, 2))
+	for _, want := range run[1:] {
+		next := map[archeraSepState]int8{}
+		for st, gaps := range cur {
+			if !archeraExtendSpelling(ms, st, gaps, want, next, budget) {
+				return true
 			}
 		}
-		if r != want {
-			val = -1
+		if len(next) == 0 {
+			return false
 		}
-		next[q] = val
-		any = any || val >= 0
-		prevM = m
-		m = reach[q]
-		if sep[r] {
-			m = max(m, prevM)
+		cur = next
+	}
+	for _, gaps := range cur {
+		if gaps >= 2 {
+			return true
 		}
 	}
-	return any
+	return false
+}
+
+// archeraSepState is a spelling's position in ms and the sorted union of the
+// runes of its gaps so far.
+type archeraSepState struct {
+	pos int
+	set [archeraMaxSepRunes]rune
+	n   int
+}
+
+// with returns s extended by r, or false when the union would exceed
+// archeraMaxSepRunes runes.
+func (s archeraSepState) with(r rune) (archeraSepState, bool) {
+	for i := 0; i < s.n; i++ {
+		if s.set[i] == r {
+			return s, true
+		}
+	}
+	if s.n == archeraMaxSepRunes {
+		return s, false
+	}
+	s.set[s.n] = r
+	s.n++
+	slices.Sort(s.set[:s.n])
+	return s, true
+}
+
+// archeraExtendSpelling adds to next every state reached from st by a gap of
+// the shared set's runes and then want, recording the most non-empty gaps
+// (capped at 2). It reports false when budget runs out.
+func archeraExtendSpelling(ms []rune, st archeraSepState, gaps int8, want rune, next map[archeraSepState]int8, budget *int) bool {
+	set := st
+	for q := st.pos + 1; q < len(ms); q++ {
+		if *budget--; *budget < 0 {
+			return false
+		}
+		if ms[q] == want {
+			ns, g := set, gaps
+			ns.pos = q
+			if q > st.pos+1 {
+				g = min(g+1, 2)
+			}
+			if old, ok := next[ns]; !ok || g > old {
+				next[ns] = g
+			}
+		}
+		var ok bool
+		if set, ok = set.with(ms[q]); !ok {
+			break
+		}
+	}
+	return true
 }
 
 func spellsWithSeparator(ms, run, sep []rune) bool {

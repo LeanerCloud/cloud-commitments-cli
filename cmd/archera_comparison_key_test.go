@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -381,31 +380,22 @@ func TestArcheraStutteredKeyIsWithheld(t *testing.T) {
 	}
 }
 
-// The shared-set search is bounded by archeraSearchBudget sweep steps. The run
-// is "abcdefgh" and ms never holds "h", so every sweep climbs seven levels and
-// fails at the last; ms is stuttered copies of "abcdefg" and 33 other runes,
-// repeated to the check window, so many sets and starts stay alive. An
-// unbounded search over the 34 windows of a 41-rune key would take about 4e8 steps; the budget stops it at 2e7
-// (about 0.3 s) and withholds. The ceiling is loose, the step count is the bound.
+// The shared-set search is bounded by archeraSearchBudget scanned runes. The run
+// is "abcdefgh"; ms holds "h" only before the run and then a long cycle over
+// three runes, so from every "a" a gap of the shared set reaches many "b"s, "c"s
+// and so on and every state stays alive. Across the 34 windows of a 41-rune key
+// the budget runs out and the message is withheld. The assertion is the budget
+// counter, not elapsed time.
 func TestArcheraKeyManyDistinctRunesIsBounded(t *testing.T) {
-	var unit strings.Builder
-	unit.WriteString(archeraStutter("abcdefg", 3))
-	unit.WriteString("ijklmnopqrstuvwxyz0123456789-_=+.,")
-	ms := []rune("h") // the last run rune occurs only before the run starts
-	for len(ms) < archeraMaxErrorSize+archeraCheckSlack {
-		ms = append(ms, []rune(unit.String())...)
-	}
+	ms := []rune("h" + strings.Repeat("abc", 350) + "defg")
 	budget := archeraSearchBudget
-	start := time.Now()
-	got := false
-	for w := 0; w < 34 && !got; w++ { // the windows of a 41-rune key share one budget
+	got, windows := false, 0
+	for ; windows < 34 && !got; windows++ { // the windows of a 41-rune key share one budget
 		got = archeraHasSharedSetRun(ms, []rune("abcdefgh"), &budget)
 	}
-	took := time.Since(start)
-	t.Logf("took %s, withheld=%v, budget left=%d", took, got, budget)
+	t.Logf("withheld=%v after %d windows, budget left=%d", got, windows, budget)
 	assert.True(t, got, "an exhausted budget withholds")
 	assert.Less(t, budget, 0)
-	assert.Less(t, took, 5*time.Second)
 }
 
 // Inputs the base rules withheld stay withheld: the shared-set rule only adds.
@@ -421,32 +411,44 @@ func TestArcheraBaseWithheldInputsStayWithheld(t *testing.T) {
 	}
 }
 
-// An ordinary ~1 KB message that carries the key's characters but not the key,
-// here the long key reversed in prose, is shown, and the search does not spend
-// its budget on it.
-func TestArcheraRealisticMessageStaysWithinBudget(t *testing.T) {
+// Ordinary text must be shown and cost far less than the budget: a ~1 KB
+// message that carries the long key's characters but not the key, a 64-character
+// alphanumeric key against ordinary text, and a ~1 KB listing JSON of IDs and dates.
+func TestArcheraOrdinaryTextStaysFarBelowBudget(t *testing.T) {
 	t.Parallel()
 	rs := []rune(archeraLongKey)
 	slices.Reverse(rs)
-	var b strings.Builder
-	for b.Len() < 1000 {
-		b.WriteString("request id 4821-aa failed for ")
-		b.WriteString(string(rs))
-		b.WriteString("; ")
+	var reversed strings.Builder
+	for reversed.Len() < 1000 {
+		reversed.WriteString("request id 4821-aa failed for " + string(rs) + "; ")
 	}
-	msg := b.String()
-	budget := archeraSearchBudget
-	assert.False(t, archeraKeyReadableWithin(msg, archeraLongKey, &budget))
-	t.Logf("steps used: %d of %d", archeraSearchBudget-budget, archeraSearchBudget)
-	assert.GreaterOrEqual(t, budget, 0)
-	assert.NotEqual(t, archeraWithheld, archeraSafeError(errors.New(msg), archeraLongKey).Error())
+	alnumKey := "k3Zq9TxB7mWc2LpRv8NdHs5YfJa4GuEe6QoI1tXz0CyVbMnKgAwDrSlPhUjFi7O2"
+	prose := strings.Repeat("The organization was not found; check the org id and the plan id for typos. ", 14)
+	var listing strings.Builder
+	listing.WriteString(`{"line_items":[`)
+	for i := 0; listing.Len() < 1000; i++ {
+		fmt.Fprintf(&listing, `{"id":"%08x-5c1e-4b7a-9d2f-%012x","start":"2026-%02d-%02d","end":"2027-%02d-%02d"},`, 0x3a9f1c00+i*977, 0x7b2e4d9a1c05+i*131071, i%12+1, i%28+1, i%12+1, i%28+1)
+	}
+	listing.WriteString(`],"total":9}`)
+	for name, tc := range map[string]struct{ msg, key string }{
+		"long key reversed in prose": {reversed.String(), archeraLongKey},
+		"64-char key, prose":         {prose, alnumKey},
+		"64-char key, listing JSON":  {listing.String(), alnumKey},
+		"long key, listing JSON":     {listing.String(), archeraLongKey},
+	} {
+		budget := archeraSearchBudget
+		assert.False(t, archeraKeyReadableWithin(tc.msg, tc.key, &budget), name)
+		used := archeraSearchBudget - budget
+		t.Logf("%s: %d runes scanned of %d", name, used, archeraSearchBudget)
+		assert.Less(t, used, archeraSearchBudget/10, name)
+		assert.NotEqual(t, archeraWithheld, archeraSafeError(errors.New(tc.msg), tc.key).Error(), name)
+	}
 }
 
 // A spent budget withholds instead of searching on.
 func TestArcheraSeparatorSearchBudgetFailsClosed(t *testing.T) {
 	t.Parallel()
 	ms, run := []rune("ahgbhfchdfg"), []rune("abcd")
-	_ = run
 	spent := 0
 	assert.True(t, archeraHasSharedSetRun(ms, run, &spent))
 	fresh := archeraSearchBudget
