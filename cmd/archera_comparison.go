@@ -454,7 +454,8 @@ func (s archeraSepState) with(r rune) (archeraSepState, bool) {
 func archeraExtendSpelling(ms []rune, st archeraSepState, gaps int8, want rune, next map[archeraSepState]int8, budget *int) bool {
 	set := st
 	for q := st.pos + 1; q < len(ms); q++ {
-		if *budget--; *budget < 0 {
+		*budget--
+		if *budget < 0 {
 			return false
 		}
 		if ms[q] == want {
