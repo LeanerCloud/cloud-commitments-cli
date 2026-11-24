@@ -282,6 +282,34 @@ func TestArcheraQuoteRenderRefusesOutputThatShowsTheKey(t *testing.T) {
 	assert.NotEmpty(t, body)
 }
 
+// The key can be readable only across the encoded JSON punctuation, across
+// separators the encoder keeps or across spacing variants, so the guard checks
+// the encoded bytes and the skeleton of each text, not just the decoded strings.
+func TestArcheraQuoteRenderGuardSeesAcrossFieldsAndSpacing(t *testing.T) {
+	cases := []struct {
+		name, key, message, format string
+	}{
+		{"encoded json punctuation", `"status": "unavailable"`, "", "json"},
+		{"no-break spaces", "ab cd ef gh", "ab\u00a0cd\u00a0ef\u00a0gh", "json"},
+		{"no-break spaces table", "ab cd ef gh", "ab\u00a0cd\u00a0ef\u00a0gh", "table"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := archeraQuoteRender(&archeraQuoteOutput{Status: "unavailable", Message: tc.message}, tc.format, tc.key)
+			require.Error(t, err)
+		})
+	}
+	// A key that reads only across two table fields is refused in the table and
+	// harmless in JSON, where the fields are separate strings.
+	out := archeraQuoteOutput{Status: "quote", Quote: &insurance.RecommendationComparisonDTO{
+		Current: &insurance.RecommendationOfferDTO{Provider: "aws", CommitmentType: "savings_plan"},
+	}}
+	_, err := archeraQuoteRender(&out, "table", "aws savings_plan")
+	require.Error(t, err)
+	_, err = archeraQuoteRender(&out, "json", "aws savings_plan")
+	require.NoError(t, err)
+}
+
 // A key echoed by the vendor in a candidate offer id is masked in every vendor
 // string before rendering, so the command still succeeds and prints [redacted].
 func TestArcheraQuoteCandidateOfferIDNeverCarriesTheKey(t *testing.T) {
@@ -307,6 +335,23 @@ func TestArcheraQuoteCandidateOfferIDNeverCarriesTheKey(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// The offers hang off pointers and the contract term is a *string: both are
+// walked, so a key equal to the vendor's term is masked and the command succeeds.
+func TestArcheraQuoteKeyInPointerHeldStringsIsMasked(t *testing.T) {
+	const key = "one_year_gris"
+	for _, format := range []string{"json", "table"} {
+		t.Run(format, func(t *testing.T) {
+			setupArchera(t, quoteHandler(t, quoteDefaults(t)))
+			env := fullEnv()
+			env[archeraEnvAPIKey] = key
+			out, errOut, err := runArcheraCommand(t, "archera-recommendation-quote", env, append(quoteArgs(), "--format", format)...)
+			require.NoError(t, err)
+			assert.Contains(t, out, "[redacted]")
+			assertQuoteHasNoKey(t, out+errOut, key)
+		})
 	}
 }
 
