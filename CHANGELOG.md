@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `archera-comparison` command: a read-only, default-off comparison of an
   Archera commitment plan (table or JSON). See `docs/cli/archera-comparison.md`
   (#2156).
+- `archera-recommendation-quote` command: a read-only, default-off Archera quote
+  for one recommendation, shown only on an exact match (table or JSON). See
+  `docs/cli/archera-recommendation-quote.md`.
 - `--ri-account-scope` flag (`linked` default, `payer`) for Reserved Instance
   recommendations, mirroring `--sp-account-scope` (#2181).
 
