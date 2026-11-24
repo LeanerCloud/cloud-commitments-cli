@@ -1,0 +1,14 @@
+Archera recommendation quote (read-only)
+Recommendation: 9aadf00d-ffff-4aba-8ada-abcdefabcdef
+Status: quote
+One Archera line item matches this recommendation exactly.
+Economic status: unavailable_source_precision; amount provenance: stored_decimal_only; comparable delta: unknown
+Current: offer daadf00d-ffff-4aba-8ada-abcdefabcdef, aws savings_plan, term one_year_gris, payment no_upfront, hourly commitment 1.25, upfront 307
+  monthly (730-hour rate): commitment cost 301, cloud provider cost 302, premium 303, gross savings 304, net savings 305, covered on-demand 306
+Alternative (vendor_alternative): offer faadf00d-ffff-4aba-8ada-abcdefabcdef, aws savings_plan, term one_year_gris, payment all_upfront, hourly commitment 1.25, upfront 407
+  monthly (730-hour rate): commitment cost 401, cloud provider cost 402, premium 403, gross savings 404, net savings 405, covered on-demand 406
+Fetched at: <fetched>
+Currency: currency not provided by Archera
+Read-only. A quote exists only when exactly one Archera line item matches the recommendation on every identity field; otherwise no figure is shown. Figures are exact vendor decimals, not a bindable quote or a purchase; no currency is supplied.
+This is entirely optional. CUDly's purchase and management features work fully without Archera.
+For full disclosure, Archera sponsors CUDly's Open Source development from a fraction of their insurance premiums.
