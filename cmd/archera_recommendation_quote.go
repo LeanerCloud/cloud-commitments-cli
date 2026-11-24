@@ -285,7 +285,7 @@ func archeraQuoteTable(out *archeraQuoteOutput) []byte {
 	p("%s", out.Note)
 	p("%s", out.NonGatingDisclosure)
 	p("%s", out.SponsorshipDisclosure)
-	return b.Bytes()
+	return bytes.TrimRight(b.Bytes(), "\n")
 }
 
 func archeraQuoteOfferLines(p func(string, ...any), label string, o *insurance.RecommendationOfferDTO) {
