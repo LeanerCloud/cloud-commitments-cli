@@ -7,6 +7,7 @@ This section documents the full CLI surface of the `cudly` binary. The Makefile 
 - **configure-gcp** - bootstrap GCP Service Account credentials
 - **archera-comparison** - read-only vendor comparison with optional filters
 - **archera-line-items** - [discover vendor line-item UUIDs](archera-line-items.md)
+- **archera-recommendation-quote** - [read-only quote for one recommendation](archera-recommendation-quote.md)
 
 ## Topic pages
 

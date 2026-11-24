@@ -34,7 +34,7 @@ type archeraFlagState struct {
 // SetArgs, so args are reset to nil, the untouched default.
 func snapshotArcheraCommandState(t *testing.T) {
 	t.Helper()
-	cmds := []*cobra.Command{rootCmd, archeraComparisonCmd, archeraLineItemsCmd, configureGCPCmd}
+	cmds := []*cobra.Command{rootCmd, archeraComparisonCmd, archeraLineItemsCmd, archeraRecommendationQuoteCmd, configureGCPCmd}
 	var flags []archeraFlagState
 	for _, c := range cmds {
 		c.InitDefaultHelpFlag()
