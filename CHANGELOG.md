@@ -13,6 +13,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `--ri-account-scope` flag (`linked` default, `payer`) for Reserved Instance
   recommendations, mirroring `--sp-account-scope` (#2181).
 
+### Changed (cloud-commitments-go bump)
+
+- Bumped `cloud-commitments-go` (pkg and the AWS, Azure and GCP providers) to
+  e0d8a7e. Behavior you can see:
+  - The rebuy expiry adjustment now fails closed: an expiring commitment with
+    an unknown service or EC2 size fails the run instead of being skipped.
+  - Savings Plans purchases first confirm a stored offering id with a
+    read-only `DescribeSavingsPlansOfferings` call and refuse a mismatch.
+  - ElastiCache coverage and expiry pools are keyed by cache engine, so the
+    Cost Explorer coverage request gains a `CACHE_ENGINE` group.
+  - MemoryDB calls use the rpc-v2-cbor protocol through its newer SDK.
+  - The duplicate-purchase check starts every term and payment variant from
+    the full held quantity, counts RDS size-flexible reservations in units and
+    EC2 size-flexible ones in normalized units; counts only go down or stay.
+  - A fractional Cost Explorer quantity now rounds down instead of half up and
+    its upfront, savings and on-demand figures scale with the bought count; a
+    row that rounds to 0 carries no savings percentage and is dropped by
+    `--min-savings-pct`. Example for quantity 2.5: count 3 became 2, upfront
+    2500 became 2000.
+  - Purchases fail closed when several EC2 reservations carry the same
+    idempotency token, when a Redshift node belongs to another purchase
+    lineage, or when a count does not fit int32.
+
 ### Fixed
 
 - Bump Go to 1.26.10 to pick up the fix for GO-2026-6809 (crypto/x509), which `govulncheck` now reports against 1.26.9.
