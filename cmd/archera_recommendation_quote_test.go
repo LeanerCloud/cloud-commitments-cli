@@ -114,3 +114,178 @@ func TestArcheraQuoteFiguresAreVerbatimDecimalStrings(t *testing.T) {
 		assert.Contains(t, out, want)
 	}
 }
+
+func TestArcheraQuoteNoQuoteStatuses(t *testing.T) {
+	cases := []struct {
+		name       string
+		args       []string
+		items      func(string) string
+		compare    func(string) string
+		wantStatus string
+		wantReason string
+		wantText   string
+		wantCalls  int
+	}{
+		{name: "region mismatch is unavailable", args: quoteArgs("region", "eu-west-1"), wantStatus: "unavailable", wantReason: "identity_unproven", wantText: "No exact Archera line item", wantCalls: 1},
+		{name: "source account mismatch", args: quoteArgs("source-account", "Other-account-b"), wantStatus: "unavailable", wantReason: "identity_unproven", wantCalls: 1},
+		{name: "offering mismatch", args: quoteArgs("offering-id", "offering-b"), wantStatus: "unavailable", wantReason: "identity_unproven", wantCalls: 1},
+		{name: "family mismatch", args: quoteArgs("instance-family", "c5"), wantStatus: "unavailable", wantReason: "identity_unproven", wantCalls: 1},
+		{name: "payment mismatch", args: quoteArgs("payment", "all_upfront"), wantStatus: "unavailable", wantReason: "identity_unproven", wantCalls: 1},
+		{name: "term mismatch", args: quoteArgs("term", "3yr"), wantStatus: "unavailable", wantReason: "identity_unproven", wantCalls: 1},
+		{name: "inexact commitment never prints a figure", args: quoteArgs("hourly-commitment", "1.26"), wantStatus: "unavailable", wantReason: "identity_unproven", wantCalls: 1},
+		{name: "comparison amount differs", args: quoteArgs(), compare: func(s string) string {
+			return strings.ReplaceAll(s, `"selected_amount":1.25`, `"selected_amount":1.3`)
+		}, wantStatus: "unavailable", wantReason: "comparison_basis_unproven", wantCalls: 2},
+		{name: "two matching line items are ambiguous", args: quoteArgs(), items: func(s string) string {
+			second := strings.Replace(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(s), "["), "]"), quoteTestItem, "eaadf00d-ffff-4aba-8ada-abcdefabcdef", 1)
+			return strings.TrimSuffix(strings.TrimSpace(s), "]") + "," + second + "]"
+		}, wantStatus: "ambiguous", wantReason: "ambiguous_line_items", wantText: "More than one Archera line item", wantCalls: 1},
+		{name: "other provider is ineligible without a vendor call", args: quoteArgs("provider", "azure"), wantStatus: "ineligible", wantReason: "identity_unproven", wantText: "Archera was not called", wantCalls: 0},
+		{name: "other plan type is ineligible", args: quoteArgs("plan-type", "Compute"), wantStatus: "ineligible", wantReason: "identity_unproven", wantCalls: 0},
+		{name: "other service is ineligible", args: quoteArgs("service", "savings-plans-compute"), wantStatus: "ineligible", wantReason: "identity_unproven", wantCalls: 0},
+	}
+	for _, tc := range cases {
+		for _, format := range []string{"json", "table"} {
+			t.Run(tc.name+"/"+format, func(t *testing.T) {
+				o := quoteDefaults(t)
+				if tc.items != nil {
+					o.items = tc.items(o.items)
+				}
+				if tc.compare != nil {
+					o.compare = tc.compare(o.compare)
+				}
+				rec := setupArchera(t, quoteHandler(t, o))
+				out, _, err := runQuote(t, append(tc.args, "--format", format)...)
+				require.NoError(t, err)
+				assert.Len(t, rec.requests, tc.wantCalls)
+				assert.Contains(t, out, "No Archera quote")
+				assert.Contains(t, out, tc.wantStatus)
+				assert.Contains(t, out, tc.wantReason)
+				assert.Contains(t, out, tc.wantText)
+				for _, figure := range []string{"301", "305", "307", "401", "1.25"} {
+					assert.NotContains(t, out, figure, "an unproven quote must show no figure")
+				}
+				if format == "json" {
+					assert.Contains(t, out, `"quote": null`)
+				}
+			})
+		}
+	}
+}
+
+func TestArcheraQuoteVendorErrorsPrintFixedTextOnly(t *testing.T) {
+	cases := []struct {
+		path   string
+		status int
+		want   string
+	}{
+		{"/line-items", 500, "archera recommendation quote failed: vendor_unavailable at line_items (HTTP 500)"},
+		{"/comparison", 429, "archera recommendation quote failed: vendor_rejected at comparison (HTTP 429) (retry after 7s; not retried automatically)"},
+		{"/line-items", 401, "archera recommendation quote failed: vendor_rejected at line_items (HTTP 401)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path+"/"+tc.want[:0]+http.StatusText(tc.status), func(t *testing.T) {
+			o := quoteDefaults(t)
+			o.failPath, o.failStatus = tc.path, tc.status
+			setupArchera(t, quoteHandler(t, o))
+			out, errOut, err := runQuote(t, quoteArgs()...)
+			require.Error(t, err)
+			assert.Equal(t, tc.want, err.Error())
+			all := out + errOut + err.Error()
+			assert.NotContains(t, all, quoteVendor)
+			assert.NotContains(t, all, archeraTestKey)
+			assert.Empty(t, out)
+		})
+	}
+}
+
+func TestArcheraQuoteInvalidInputMakesNoRequest(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"non-uuid recommendation", quoteArgs("recommendation-id", "not-a-uuid"), "--recommendation-id must be a canonical UUID"},
+		{"braced uuid", quoteArgs("recommendation-id", "{"+quoteTestRec+"}"), "--recommendation-id must be a canonical UUID"},
+		{"urn uuid", quoteArgs("recommendation-id", "urn:uuid:"+quoteTestRec), "--recommendation-id must be a canonical UUID"},
+		{"missing recommendation", quoteArgs("recommendation-id", "\x00"), "--recommendation-id must be a canonical UUID"},
+		{"quoted number", quoteArgs("hourly-commitment", `"1.25"`), "--hourly-commitment must be a plain positive decimal string"},
+		{"exponent", quoteArgs("hourly-commitment", "1e3"), "--hourly-commitment must be a plain positive decimal string"},
+		{"negative", quoteArgs("hourly-commitment", "-1"), "--hourly-commitment must be a plain positive decimal string"},
+		{"zero", quoteArgs("hourly-commitment", "0.000"), "--hourly-commitment must be a plain positive decimal string"},
+		{"trailing dot", quoteArgs("hourly-commitment", "1."), "--hourly-commitment must be a plain positive decimal string"},
+		{"leading dot", quoteArgs("hourly-commitment", ".5"), "--hourly-commitment must be a plain positive decimal string"},
+		{"leading zero", quoteArgs("hourly-commitment", "01.5"), "--hourly-commitment must be a plain positive decimal string"},
+		{"spaced", quoteArgs("hourly-commitment", " 1.25"), "--hourly-commitment must be a plain positive decimal string"},
+		{"too long", quoteArgs("hourly-commitment", "1."+strings.Repeat("1", 60)), "--hourly-commitment must be a plain positive decimal string"},
+		{"missing commitment", quoteArgs("hourly-commitment", "\x00"), "--hourly-commitment must be a plain positive decimal string"},
+		{"bad term", quoteArgs("term", "2yr"), "--term must be 1yr or 3yr"},
+		{"bad payment", quoteArgs("payment", "No Upfront"), "--payment must be no_upfront"},
+		{"control char region", quoteArgs("region", "us-east-1\x1b[31m"), "--region is required and must be printable text"},
+		{"blank account", quoteArgs("source-account", ""), "--source-account is required"},
+		{"missing offering", quoteArgs("offering-id", "\x00"), "--offering-id is required"},
+		{"missing family", quoteArgs("instance-family", "\x00"), "--instance-family is required"},
+		{"missing provider", quoteArgs("provider", "\x00"), "--provider is required"},
+		{"missing service", quoteArgs("service", "\x00"), "--service is required"},
+		{"missing plan type", quoteArgs("plan-type", "\x00"), "--plan-type is required"},
+		{"bad format", append(quoteArgs(), "--format", "xml"), "--format must be table or json"},
+		{"bad plan id", append(quoteArgs(), "--plan-id", "plan"), "--plan-id must be a canonical UUID"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := setupArchera(t, func(http.ResponseWriter, *http.Request) { t.Error("unexpected Archera request") })
+			out, errOut, err := runQuote(t, tc.args...)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			assert.Empty(t, rec.requests)
+			assert.Empty(t, out)
+			assert.NotContains(t, out+errOut+err.Error(), archeraTestKey)
+			assert.NotContains(t, err.Error(), "\x1b")
+		})
+	}
+}
+
+func TestArcheraQuoteIncompleteConfigMakesNoRequest(t *testing.T) {
+	rec := setupArchera(t, func(http.ResponseWriter, *http.Request) { t.Error("unexpected request") })
+	_, _, err := runArcheraCommand(t, "archera-recommendation-quote", map[string]string{archeraEnvOrgID: archeraTestOrg, archeraEnvPlanID: archeraTestPlan}, quoteArgs()...)
+	require.Error(t, err)
+	assert.Equal(t, archeraEnvAPIKey+" is not set (read from the environment only)", err.Error())
+	assert.Empty(t, rec.requests)
+}
+
+func TestArcheraQuoteRenderRefusesOutputThatShowsTheKey(t *testing.T) {
+	out := archeraQuoteOutput{Status: "unavailable", Message: "vendor said " + archeraTestKey}
+	for _, format := range []string{"json", "table"} {
+		body, err := archeraQuoteRender(&out, format, archeraTestKey)
+		require.Error(t, err)
+		assert.Nil(t, body)
+		assert.NotContains(t, err.Error(), archeraTestKey)
+	}
+	body, err := archeraQuoteRender(&archeraQuoteOutput{Status: "unavailable"}, "json", archeraTestKey)
+	require.NoError(t, err)
+	assert.NotEmpty(t, body)
+}
+
+func TestArcheraQuoteVendorStringsNeverCarryTheKey(t *testing.T) {
+	o := quoteDefaults(t)
+	o.compare = strings.ReplaceAll(o.compare, `"opaque"`, `"x"`)
+	o.compare = strings.Replace(o.compare, `"commitment_type": "savings_plan"`, `"commitment_type": "`+archeraTestKey+`"`, 1)
+	setupArchera(t, quoteHandler(t, o))
+	out, errOut, err := runQuote(t, quoteArgs()...)
+	assert.NotContains(t, out+errOut, archeraTestKey)
+	if err != nil {
+		assert.NotContains(t, err.Error(), archeraTestKey)
+	}
+}
+
+func TestArcheraQuoteUnknownFigureIsUnknownNeverZero(t *testing.T) {
+	o := quoteDefaults(t)
+	o.compare = strings.Replace(o.compare, `"archera_premium":303`, `"archera_premium":null`, 1)
+	for format, want := range map[string]string{"json": `"monthly_730h_archera_premium": null`, "table": "premium unknown, gross savings 304"} {
+		setupArchera(t, quoteHandler(t, o))
+		out, _, err := runQuote(t, append(quoteArgs(), "--format", format)...)
+		require.NoError(t, err)
+		assert.Contains(t, out, want)
+		assert.NotContains(t, out, `"monthly_730h_archera_premium": "0`)
+	}
+}
