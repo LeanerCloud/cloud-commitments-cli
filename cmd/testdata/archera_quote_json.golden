@@ -1,0 +1,73 @@
+{
+  "quote": {
+    "currency": null,
+    "current": {
+      "monthly": {
+        "monthly_730h_commitment_cost_total": "301",
+        "monthly_730h_cloud_provider_cost": "302",
+        "monthly_730h_archera_premium": "303",
+        "monthly_730h_gross_savings": "304",
+        "monthly_730h_net_savings": "305",
+        "monthly_730h_covered_on_demand_cost": "306"
+      },
+      "hourly_selected_commitment": "1.25",
+      "native_duration_seconds": "31536000",
+      "native_plan_type": "EC2Instance",
+      "native_instance_family": "m5",
+      "effective_contract_term": "one_year_gris",
+      "payment_option": "no_upfront",
+      "upfront_one_time_cost": "307",
+      "offer_id": "daadf00d-ffff-4aba-8ada-abcdefabcdef",
+      "provider": "aws",
+      "commitment_type": "savings_plan",
+      "lease_attached": false
+    },
+    "comparable_delta": null,
+    "amount_provenance": "stored_decimal_only",
+    "economic_status": "unavailable_source_precision",
+    "fetched_at": "<fetched>",
+    "recommendation_id": "9aadf00d-ffff-4aba-8ada-abcdefabcdef",
+    "currency_note": "currency not provided by Archera",
+    "reason": "",
+    "status": "resource_associated",
+    "non_gating_disclosure": "This is entirely optional. CUDly's purchase and management features work fully without Archera.",
+    "sponsorship_disclosure": "For full disclosure, Archera sponsors CUDly's Open Source development from a fraction of their insurance premiums.",
+    "candidates": [
+      {
+        "figures": {
+          "monthly": {
+            "monthly_730h_commitment_cost_total": "401",
+            "monthly_730h_cloud_provider_cost": "402",
+            "monthly_730h_archera_premium": "403",
+            "monthly_730h_gross_savings": "404",
+            "monthly_730h_net_savings": "405",
+            "monthly_730h_covered_on_demand_cost": "406"
+          },
+          "hourly_selected_commitment": "1.25",
+          "native_duration_seconds": null,
+          "native_plan_type": null,
+          "native_instance_family": null,
+          "effective_contract_term": "one_year_gris",
+          "payment_option": "all_upfront",
+          "upfront_one_time_cost": "407",
+          "offer_id": "faadf00d-ffff-4aba-8ada-abcdefabcdef",
+          "provider": "aws",
+          "commitment_type": "savings_plan",
+          "lease_attached": false
+        },
+        "offer_id": "faadf00d-ffff-4aba-8ada-abcdefabcdef",
+        "status": "vendor_alternative",
+        "reason": "",
+        "native_identity_status": "unavailable"
+      }
+    ],
+    "premium_included": true
+  },
+  "status": "quote",
+  "reason": "",
+  "recommendation_id": "9aadf00d-ffff-4aba-8ada-abcdefabcdef",
+  "message": "One Archera line item matches this recommendation exactly.",
+  "note": "Read-only. A quote exists only when exactly one Archera line item matches the recommendation on every identity field; otherwise no figure is shown. Figures are exact vendor decimals, not a bindable quote or a purchase; no currency is supplied.",
+  "non_gating_disclosure": "This is entirely optional. CUDly's purchase and management features work fully without Archera.",
+  "sponsorship_disclosure": "For full disclosure, Archera sponsors CUDly's Open Source development from a fraction of their insurance premiums."
+}
