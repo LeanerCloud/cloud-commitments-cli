@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/LeanerCloud/cloud-commitments-go/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -174,8 +175,8 @@ func TestLoadRecommendationsFromCSV_TermAndPaymentAccepted(t *testing.T) {
 						"rds,us-east-1,db.t3.micro,2,"+term+","+payment+"\n"))
 				require.NoError(t, err)
 				require.Len(t, recs, 1)
-				assert.Equal(t, term, recs[0].Term)
-				assert.Equal(t, payment, recs[0].PaymentOption)
+				assert.Equal(t, common.Term(term), recs[0].Term)
+				assert.Equal(t, common.PaymentOption(payment), recs[0].PaymentOption)
 			})
 		}
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/smithy-go/encoding/cbor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +37,9 @@ type awsFixtureStub struct {
 type awsFixture struct {
 	body   string
 	status int
+	// cbor sends body, written as JSON, in smithy rpc-v2-cbor, the wire
+	// protocol of the current MemoryDB SDK.
+	cbor bool
 }
 
 // awsFixtures hold the default per-operation responses: empty existing
@@ -97,12 +102,61 @@ func (s *awsFixtureStub) RoundTrip(r *http.Request) (*http.Response, error) {
 	if strings.HasPrefix(fx.body, "<") {
 		contentType = "text/xml"
 	}
+	header := http.Header{"Content-Type": []string{contentType}}
+	payload := fx.body
+	if fx.cbor {
+		header = http.Header{"Content-Type": []string{"application/cbor"}, "Smithy-Protocol": []string{"rpc-v2-cbor"}}
+		payload = string(jsonToCBOR(s.t, fx.body))
+	}
 	return &http.Response{
 		StatusCode: fx.status,
-		Header:     http.Header{"Content-Type": []string{contentType}},
-		Body:       io.NopCloser(strings.NewReader(fx.body)),
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(payload)),
 		Request:    r,
 	}, nil
+}
+
+// jsonToCBOR encodes a JSON document for the rpc-v2-cbor SDKs. Integral numbers
+// become CBOR integers, and every StartTime is an epoch-seconds timestamp tag.
+func jsonToCBOR(t *testing.T, doc string) []byte {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(doc))
+	dec.UseNumber()
+	var v any
+	require.NoError(t, dec.Decode(&v))
+	return cbor.Encode(cborValue(t, "", v))
+}
+
+func cborValue(t *testing.T, key string, v any) cbor.Value {
+	t.Helper()
+	switch x := v.(type) {
+	case map[string]any:
+		m := cbor.Map{}
+		for k, e := range x {
+			m[k] = cborValue(t, k, e)
+		}
+		return m
+	case []any:
+		l := cbor.List{}
+		for _, e := range x {
+			l = append(l, cborValue(t, key, e))
+		}
+		return l
+	case string:
+		return cbor.String(x)
+	case bool:
+		return cbor.Bool(x)
+	case json.Number:
+		n, err := x.Int64()
+		require.NoError(t, err, "fixture numbers must be integral")
+		require.GreaterOrEqual(t, n, int64(0))
+		if key == "StartTime" {
+			return &cbor.Tag{ID: 1, Value: cbor.Uint(n)}
+		}
+		return cbor.Uint(n)
+	}
+	t.Fatalf("unsupported fixture value %T", v)
+	return nil
 }
 
 // newAWSFixtureConfig returns an aws.Config whose HTTP client is the

@@ -223,8 +223,8 @@ ec2,us-west-2,t3.medium,10,123456789012,Development,1yr,all-upfront,2000.75`,
 				assert.Equal(t, 5, recs[0].Count)
 				assert.Equal(t, "123456789012", recs[0].Account)
 				assert.Equal(t, "Production", recs[0].AccountName)
-				assert.Equal(t, "3yr", recs[0].Term)
-				assert.Equal(t, "partial-upfront", recs[0].PaymentOption)
+				assert.Equal(t, common.Term3Year, recs[0].Term)
+				assert.Equal(t, common.PaymentPartialUpfront, recs[0].PaymentOption)
 				assert.InDelta(t, 1500.50, recs[0].EstimatedSavings, 0.01)
 
 				// Validate second recommendation

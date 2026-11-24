@@ -129,7 +129,10 @@ func fetchAndFilterRegionRecs(
 		return nil, inventoryErr
 	}
 
-	recs = applyCoverageAndOverrides(recs, cfg, coverageMap, expiringCommitments, drops)
+	recs, adjustErr := applyCoverageAndOverrides(recs, cfg, coverageMap, expiringCommitments, drops)
+	if adjustErr != nil {
+		return nil, adjustErr
+	}
 
 	// Deduplication: skip recs matching recently-purchased commitments.
 	// --max-instances is NOT applied here; it is enforced once run-wide by the

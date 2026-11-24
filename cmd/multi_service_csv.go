@@ -203,12 +203,12 @@ func parseCSVRecord(record []string, colIdx map[string]int, need csvThresholdNee
 	if err != nil {
 		return rec, err
 	}
-	rec.Term = term
+	rec.Term = common.Term(term)
 	payment, err := parseCSVEnum(record, colIdx, "PaymentOption", validCSVPaymentOptions)
 	if err != nil {
 		return rec, err
 	}
-	rec.PaymentOption = payment
+	rec.PaymentOption = common.PaymentOption(payment)
 
 	err = parseCSVCount(record, colIdx, &rec.Count)
 	if err != nil {
@@ -393,8 +393,8 @@ func writeMultiServiceCSV(w io.Writer, results []common.PurchaseResult) error {
 			formatIntOrBlank(rec.RecommendedCount),
 			rec.Account,
 			rec.AccountName,
-			rec.Term,
-			rec.PaymentOption,
+			string(rec.Term),
+			string(rec.PaymentOption),
 			formatCurrencyOrBlank(rec.CommitmentCost),
 			formatRecurringMonthlyOrBlank(rec.RecurringMonthlyCost),
 			fmt.Sprintf("%.2f", rec.EstimatedSavings),

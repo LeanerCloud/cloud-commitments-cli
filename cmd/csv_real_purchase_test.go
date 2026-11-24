@@ -341,7 +341,7 @@ func memdbCSVWithEngine(engine string) string {
 	return memdbCSVHeader + "memorydb,eu-west-1,db.t4g.small," + engine + ",,3,1yr,all-upfront\n"
 }
 
-// memdbFixtures answers MemoryDB (awsJson1.1) with no existing node, one
+// memdbFixtures answers MemoryDB (rpc-v2-cbor) with no existing node, one
 // offering and a purchase; existing, when set, is the node a replay finds.
 func memdbFixtures(existing bool) map[string]awsFixture {
 	nodes := `[]`
@@ -350,10 +350,10 @@ func memdbFixtures(existing bool) map[string]awsFixture {
 			memdbRespID, time.Now().Unix())
 	}
 	return map[string]awsFixture{
-		"memory-db DescribeReservedNodes": {body: `{"ReservedNodes":` + nodes + `}`},
+		"memory-db DescribeReservedNodes": {body: `{"ReservedNodes":` + nodes + `}`, cbor: true},
 		"memory-db DescribeReservedNodesOfferings": {body: `{"ReservedNodesOfferings":[{"ReservedNodesOfferingId":"memdb-offering-1",` +
-			`"NodeType":"db.t4g.small","Duration":31536000,"OfferingType":"All Upfront"}]}`},
-		"memory-db " + memdbPurchase: {body: `{"ReservedNode":{"ReservationId":"` + memdbRespID + `","NodeCount":3}}`},
+			`"NodeType":"db.t4g.small","Duration":31536000,"OfferingType":"All Upfront"}]}`, cbor: true},
+		"memory-db " + memdbPurchase: {body: `{"ReservedNode":{"ReservationId":"` + memdbRespID + `","NodeCount":3}}`, cbor: true},
 	}
 }
 

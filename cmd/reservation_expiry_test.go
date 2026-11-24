@@ -37,9 +37,9 @@ func TestReservationExpirySizing(t *testing.T) {
 			recs := reservationExpiryRecommendations(tc.averages)
 			cfg := Config{TargetCoverage: tc.target, RebuyWindowDays: 30, IncludeExtendedSupport: true, ExcludeAccounts: tc.exclude}
 			filtered := applyRegionFilters(recs, engineVersionData{}, "us-east-1", cfg, nil)
-			got := applyCoverageAndOverrides(filtered, cfg, recommendations.PoolCoverageMap{
+			got := mustApplyCoverageAndOverrides(t, filtered, cfg, recommendations.PoolCoverageMap{
 				"us-east-1:m5.large": {Pct: 60, AvgInstancesPerHour: tc.demand},
-			}, reservationExpiryCommitments(tc.expiry, tc.endDays), nil)
+			}, reservationExpiryCommitments(tc.expiry, tc.endDays))
 			require.Len(t, got, len(tc.wantCounts))
 			for i := range got {
 				assertReservationExpirySizedRow(t, got[i], tc.wantCounts[i], tc.wantAverages[i], tc.existing)
@@ -75,7 +75,7 @@ func TestReservationExpiryCreditsReplacementsInsideLookback(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := Config{TargetCoverage: 80, RebuyWindowDays: 30, CoverageLookbackDays: tc.lookbackDays}
 			commitments := append(reservationExpiryCommitments(18, 15), replacement(tc.startDaysAgo))
-			got := applyCoverageAndOverrides(reservationExpiryRecommendations([]float64{30, 30, 30}), cfg, coverage, commitments, nil)
+			got := mustApplyCoverageAndOverrides(t, reservationExpiryRecommendations([]float64{30, 30, 30}), cfg, coverage, commitments)
 			require.Len(t, got, 3)
 			for _, rec := range got {
 				assert.Equal(t, tc.wantCount, rec.Count)
@@ -103,9 +103,9 @@ func TestReservationExpiryMissingDemand(t *testing.T) {
 			AppLogger.SetOutput(&output)
 			t.Cleanup(func() { AppLogger.SetOutput(previous) })
 			cfg := Config{TargetCoverage: 80, RebuyWindowDays: 30}
-			baseline := applyCoverageAndOverrides(reservationExpiryRecommendations([]float64{10, 10, 10}), cfg, tc.coverage, nil, nil)
+			baseline := mustApplyCoverageAndOverrides(t, reservationExpiryRecommendations([]float64{10, 10, 10}), cfg, tc.coverage, nil)
 			output.Reset()
-			got := applyCoverageAndOverrides(reservationExpiryRecommendations([]float64{10, 10, 10}), cfg, tc.coverage, reservationExpiryCommitments(18, 15), nil)
+			got := mustApplyCoverageAndOverrides(t, reservationExpiryRecommendations([]float64{10, 10, 10}), cfg, tc.coverage, reservationExpiryCommitments(18, 15))
 			require.Len(t, got, len(baseline))
 			for i := range got {
 				assert.Equal(t, baseline[i].Count, got[i].Count)
@@ -122,9 +122,9 @@ func TestReservationExpiryMissingDemand(t *testing.T) {
 
 func TestReservationExpiryZeroDemandRow(t *testing.T) {
 	recs := reservationExpiryRecommendations([]float64{30, 0, 60})
-	got := applyCoverageAndOverrides(recs, Config{TargetCoverage: 80, RebuyWindowDays: 30}, recommendations.PoolCoverageMap{
+	got := mustApplyCoverageAndOverrides(t, recs, Config{TargetCoverage: 80, RebuyWindowDays: 30}, recommendations.PoolCoverageMap{
 		"us-east-1:m5.large": {Pct: 60, AvgInstancesPerHour: 90},
-	}, reservationExpiryCommitments(18, 15), nil)
+	}, reservationExpiryCommitments(18, 15))
 	require.Len(t, got, 3)
 	assertReservationExpirySizedRow(t, got[0], 12, 30, 40)
 	assertReservationExpirySizedRow(t, got[2], 24, 60, 40)
@@ -168,4 +168,22 @@ func assertReservationExpirySizedRow(t *testing.T, got common.Recommendation, co
 	assert.InDelta(t, float64(count)*100, got.EstimatedSavings, 1e-10)
 	require.NotNil(t, got.RecurringMonthlyCost)
 	assert.InDelta(t, float64(count)*10, *got.RecurringMonthlyCost, 1e-10)
+}
+
+func mustApplyCoverageAndOverrides(t *testing.T, recs []common.Recommendation, cfg Config, coverage recommendations.PoolCoverageMap, commitments []common.Commitment) []common.Recommendation {
+	t.Helper()
+	got, err := applyCoverageAndOverrides(recs, cfg, coverage, commitments, nil)
+	require.NoError(t, err)
+	return got
+}
+
+// An expiring commitment of a service the pool code does not know is refused
+// loudly instead of being skipped, so the run never sizes against a partial view.
+func TestApplyCoverageAndOverridesRefusesUnknownExpiringService(t *testing.T) {
+	recs := reservationExpiryRecommendations([]float64{30})
+	commitments := reservationExpiryCommitments(18, 15)
+	commitments[0].Service = common.ServiceType("no-such-service")
+	got, err := applyCoverageAndOverrides(recs, Config{RebuyWindowDays: 30}, recommendations.PoolCoverageMap{}, commitments, nil)
+	require.Error(t, err)
+	assert.Nil(t, got)
 }
