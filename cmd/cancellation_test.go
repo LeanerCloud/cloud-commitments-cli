@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -37,7 +39,7 @@ func (h *hookTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	h.paths = append(h.paths, r.URL.Path)
 	h.mu.Unlock()
 	h.handleMu.Lock()
-	status, body := h.handle(r)
+	status, body := h.respond(r)
 	h.handleMu.Unlock()
 	return &http.Response{
 		StatusCode: status,
@@ -45,6 +47,25 @@ func (h *hookTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    r,
 	}, nil
+}
+
+// respond answers the purchase client's stored-offering confirmation read by
+// echoing the requested offering, so a test only scripts the calls it asserts on.
+func (h *hookTransport) respond(r *http.Request) (int, string) {
+	if !strings.HasSuffix(r.URL.Path, "/DescribeSavingsPlansOfferings") {
+		return h.handle(r)
+	}
+	var in struct {
+		OfferingIDs    []string `json:"offeringIds"`
+		PlanTypes      []string `json:"planTypes"`
+		Durations      []int64  `json:"durations"`
+		PaymentOptions []string `json:"paymentOptions"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || len(in.OfferingIDs) != 1 || len(in.PlanTypes) != 1 || len(in.Durations) != 1 || len(in.PaymentOptions) != 1 {
+		return http.StatusBadRequest, `{"__type":"ValidationException","message":"unexpected offerings query"}`
+	}
+	return http.StatusOK, fmt.Sprintf(`{"searchResults":[{"offeringId":%q,"planType":%q,"durationSeconds":%d,"paymentOption":%q}]}`,
+		in.OfferingIDs[0], in.PlanTypes[0], in.Durations[0], in.PaymentOptions[0])
 }
 
 func (h *hookTransport) count(suffix string) int {

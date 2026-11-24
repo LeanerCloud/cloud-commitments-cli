@@ -153,12 +153,15 @@ func applyRegionFilters(
 //
 // drops accumulates per-reason drop counts for the end-of-run summary.
 // Pass nil to skip tracking.
-func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment, drops *common.DropSummary) []common.Recommendation {
+func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverageMap recommendations.PoolCoverageMap, expiringCommitments []common.Commitment, drops *common.DropSummary) ([]common.Recommendation, error) {
 	recommendations.ApplyCoverageMapToRecommendations(recs, coverageMap)
 	if cfg.RebuyWindowDays > 0 && len(expiringCommitments) > 0 {
-		n, missingDemand := recommendations.AdjustExistingCoverageForExpiringCommitmentsWithCoverageOptions(
+		n, missingDemand, err := recommendations.AdjustExistingCoverageForExpiringCommitmentsWithCoverageOptions(
 			recs, expiringCommitments, coverageMap,
 			recommendations.PoolExpiryOptions{WindowDays: cfg.RebuyWindowDays, CoverageLookbackDays: coverageLookbackDays(cfg)})
+		if err != nil {
+			return nil, fmt.Errorf("adjust coverage for expiring commitments: %w", err)
+		}
 		if n > 0 {
 			AppLogger.Printf("  ⏰ Treating %d recs as partially uncovered (RIs expiring within %d days)\n", n, cfg.RebuyWindowDays)
 		}
@@ -200,7 +203,7 @@ func applyCoverageAndOverrides(recs []common.Recommendation, cfg Config, coverag
 		filteredRecs = ApplyCountOverride(filteredRecs, cfg.OverrideCount)
 	}
 
-	return filteredRecs
+	return filteredRecs, nil
 }
 
 // logFamilyExpiry reports how rebuy-window expiry was folded into the RDS

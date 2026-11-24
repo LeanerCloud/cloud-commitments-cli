@@ -458,7 +458,7 @@ func TestApplyCoverageAndOverrides_OverrideCount(t *testing.T) {
 		{ResourceType: "cache.t3.micro", Count: 10, Region: "us-east-1", EstimatedSavings: 100},
 		{ResourceType: "cache.t3.small", Count: 5, Region: "us-east-1", EstimatedSavings: 200},
 	}
-	got := applyCoverageAndOverrides(recs, Config{Coverage: 100, OverrideCount: 3}, nil, nil, nil)
+	got := mustApplyCoverageAndOverrides(t, recs, Config{Coverage: 100, OverrideCount: 3}, nil, nil)
 	assert.Len(t, got, 2)
 	for _, rec := range got {
 		assert.Equal(t, 3, rec.Count)

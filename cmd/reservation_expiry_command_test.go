@@ -308,6 +308,10 @@ func (p *completenessProxy) reservationExpiryCoverage(body []byte) string {
 	} else {
 		require.Len(p.t, filters, 2)
 	}
+	if service == "Amazon ElastiCache" {
+		// ElastiCache expiry and coverage pools are keyed by engine.
+		groups = append(groups, map[string]string{"Type": "DIMENSION", "Key": "CACHE_ENGINE"})
+	}
 	require.Equal(p.t, groups, request.GroupBy)
 	p.expiryCoverage = append(p.expiryCoverage, key)
 	if service != "Amazon Elastic Compute Cloud - Compute" {
