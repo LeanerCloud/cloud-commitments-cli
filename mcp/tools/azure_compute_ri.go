@@ -130,6 +130,10 @@ func azureCredentialScope(explicit string, envVars ...string) string {
 	return strings.ToLower(CredentialScope(explicit, envVars...))
 }
 
+func azureRequestCredentialScope(explicit string, dryRun bool, envVars ...string) string {
+	return strings.ToLower(requestCredentialScope(explicit, dryRun, envVars...))
+}
+
 func (t *azureComputeRIPurchaseTool) handle(ctx context.Context, _ *mcp.CallToolRequest, args azureComputeRIPurchaseArgs) (*mcp.CallToolResult, PurchaseResponse, error) {
 	rec, region, dryRun, confirm, err := azureComputeRecommendationFromArgs(args)
 	if err != nil {
@@ -143,7 +147,7 @@ func (t *azureComputeRIPurchaseTool) handle(ctx context.Context, _ *mcp.CallTool
 		Confirm:         confirm,
 		ResolveClient:   t.resolveClient(args, region),
 		Nonce:           args.IdempotencyNonce,
-		CredentialScope: azureCredentialScope(args.AzureSubscriptionID, "AZURE_SUBSCRIPTION_ID"),
+		CredentialScope: azureRequestCredentialScope(args.AzureSubscriptionID, dryRun, "AZURE_SUBSCRIPTION_ID"),
 	})
 	if err != nil {
 		return nil, PurchaseResponse{}, err

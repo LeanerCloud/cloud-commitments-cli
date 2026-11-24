@@ -818,6 +818,18 @@ func TestCredentialScopeResolution(t *testing.T) {
 	})
 }
 
+func TestRequestCredentialScopeRespectsPurchaseMode(t *testing.T) {
+	const envVar = "CUDLY_TEST_PURCHASE_SCOPE"
+	t.Setenv(envVar, "ambient-scope")
+
+	assert.Empty(t, requestCredentialScope("", true, envVar),
+		"a preview without an explicit scope must not record an ambient provider fallback")
+	assert.Equal(t, "explicit-scope", requestCredentialScope(" explicit-scope ", true, envVar))
+	assert.Equal(t, "ambient-scope", requestCredentialScope("", false, envVar),
+		"a real purchase must keep the same ambient fallback used by provider resolution and idempotency")
+	assert.Equal(t, "explicit-scope", requestCredentialScope(" explicit-scope ", false, envVar))
+}
+
 // TestExecutePurchaseAuditLogging pins the MCP server's stderr diagnostic
 // trail for a real purchase. The durable JSONL audit log is covered
 // separately in audit_test.go.

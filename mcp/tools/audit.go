@@ -60,8 +60,8 @@ func auditStatusFor(result common.PurchaseResult) string {
 // string -- the explicit operator opt-out. An unset variable selects the
 // default path,
 // $XDG_STATE_HOME/cudly/mcp-audit.jsonl (falling back to
-// ~/.local/state/cudly/mcp-audit.jsonl when XDG_STATE_HOME is unset or
-// empty).
+// ~/.local/state/cudly/mcp-audit.jsonl when XDG_STATE_HOME is unset,
+// empty, or relative).
 //
 // os.LookupEnv, not os.Getenv, is required here: it is the only way to
 // distinguish "the operator set this to empty or whitespace-only on purpose"
@@ -79,7 +79,7 @@ func AuditLogPath() (path string, enabled bool, err error) {
 	}
 
 	stateDir := os.Getenv("XDG_STATE_HOME")
-	if stateDir == "" {
+	if stateDir == "" || !filepath.IsAbs(stateDir) {
 		home, homeErr := os.UserHomeDir()
 		if homeErr != nil {
 			return "", false, fmt.Errorf("resolve default audit log path: %w", homeErr)
